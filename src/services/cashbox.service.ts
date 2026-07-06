@@ -1,0 +1,63 @@
+import axios from "axios";
+import { getBaseURL } from "../config/portalBaseURL";
+
+export interface CashBoxOB {
+    OB_Amount: number | string;
+}
+
+export interface CashBoxTransaction {
+    invoice_no: string;
+    Ledger_Date: string;
+    Month_No: number;
+    Invoice_Month: string;
+    Invoice_Year: number;
+    Month_Year: string;
+    Credit_Ac_Id: string;
+    Debit_Ac_Id: string;
+    Cr_Amount: number;
+    Dr_Amount: number;
+    Trans_Id: string;
+    voucher_name: string;
+    Particulars: string;
+    Narration: string;
+    Created_Time: string;
+    Line_Naration: string;
+    ord: number;
+}
+
+export interface CashBoxMasterAccount {
+    Acc_Id: string;
+    Account_name: string;
+    Group_Name: string;
+    Group_Id: string;
+    Retailer_Name?: string;
+    Retailer_Id?: string;
+}
+
+export interface CashBoxReportResponse {
+    OB: CashBoxOB[];
+    Data1: CashBoxTransaction[];
+    Cash: CashBoxMasterAccount[];
+    Bank: CashBoxMasterAccount[];
+    LedgerGrp: CashBoxMasterAccount[];
+    DEX: CashBoxMasterAccount[];
+    IDEX: CashBoxMasterAccount[];
+}
+
+export const cashboxService = {
+    getCashBoxReport: async (params?: {
+        Fromdate?: string;
+        Todate?: string;
+    }): Promise<CashBoxReportResponse> => {
+        const res = await axios.get<{
+            success: boolean;
+            data: CashBoxReportResponse;
+        }>(
+            // `http://192.168.1.5:9001/api/reports/externalAPI/cashbox`,
+            `${getBaseURL()}api/reports/externalAPI/cashbox`,
+            { params }
+        );
+        return res.data.data;
+    }
+};
+

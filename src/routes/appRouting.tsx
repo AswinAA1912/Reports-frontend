@@ -1,0 +1,514 @@
+import React, { useEffect } from "react";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useAuth } from "../auth/authContext";
+import { RequireAuth } from "../auth/requireAuth";
+import AppLayout from "../Layout/appLayout";
+import Login from "../auth/login";
+import GlobalLoader from "../Components/loadingScreen";
+import Dashboard from "./dashboard";
+import SalesInvoiceReportPage from "../reports/Sales/salesinvoicereport";
+import OnlineSalesReportPage from "../reports/Sales/OnlineSalesReport";
+import UnitEconomicsReportPage from "../reports/Sales/unitEconomicsReport";
+import UnitEconomicsAdmin from "../reports/Sales/unitEconomicsAdmin";
+import StockInHandReport from "../reports/Stock/stockinhandReport";
+import ItemWiseTransaction from "../reports/Stock/ItemTransactionList";
+import GodownItemWiseTransaction from "../reports/Stock/GodownItemTransactionList";
+import OnlineSalesReportLOL from "../reports/Sales/onlineSalesReportLOL";
+import SalesReport from "../reports/Sales/SalesAnalyticsReport";
+import LedgerWiseItemDetails from "../reports/Stock/LedgerWiseItemDetails";
+import SalesAnalyticsReportPage from "../reports/GraphicalAnalyticsReport";
+import OnlinePurchaseReportPage from "../reports/Purchase/onlinePurchaseReport";
+import SalesOrderReport from "../reports/Sales/SaleOrderReport";
+import PurchaseOrder from "../reports/Purchase/PurchaseOrderReport";
+import ReportSettings from "../settings/ReportSettings";
+import ReportList from "../settings/ReportList";
+import StockValueReport from "../reports/Stock/stockValueReport";
+import StockValueRateMasterReport from "../reports/Stock/StockValueRateMaster";
+import StaffBasedReport from "../reports/StaffBased/staffBasedReport";
+import LOSStaffBasedReport from "../reports/StaffBased/LOSstaffBasedReport";
+import ExpensesReport from "../reports/Expenses/ExpensesReport";
+import CostingReport from "../reports/Expenses/CostingReport";
+import OutstandingReport from "../reports/Expenses/outstandingReport";
+import PendingOutstandingReport from "../reports/Expenses/PendingOutstandingReport";
+import TransactionDetailsReport from "../reports/Expenses/TransactionDetailsReport";
+import StaffBasedGroupingReport from "../reports/StaffBased/staffBasedGroupingReport";
+import StaffBasedCountReport from "../reports/StaffBased/staffBasedCountReport";
+import DayAbstractReport from "../reports/Abstract/DayAbstractReport";
+import StockAbstractReport from "../reports/Abstract/StockAbstractReport";
+import CashBoxReport from "../reports/Abstract/CashBoxReport";
+import PendingSaleOrder from "../reports/Sales/PendingSaleOrderReport";
+import InStockReport from "../reports/Stock/InStockReport";
+
+interface AppRoutingProps {
+  setActiveCategory: (category: string) => void;
+  globalLoading: boolean;
+  loadingOn: () => void;
+  loadingOff: () => void;
+  activeCategory: string;
+}
+
+/* ---------------- URL Sync Handler ---------------- */
+const URLSyncHandler: React.FC<{ setActiveCategory: (cat: string) => void }> = ({
+  setActiveCategory,
+}) => {
+  const location = useLocation();
+
+  useEffect(() => {
+    const routeToCategory: Record<string, string> = {
+      "/dashboard": "Dashboard",
+      // "/salesinvoice": "Sales Invoice Report",
+      "/salesreport": "Online Sales Report",
+      "/uniteconomics": "Unit Economics Report",
+      "/": "Login",
+    };
+
+    const matched = Object.keys(routeToCategory).find((key) =>
+      location.pathname.startsWith(key)
+    );
+
+    if (matched) setActiveCategory(routeToCategory[matched]);
+  }, [location.pathname, setActiveCategory]);
+
+  return null;
+};
+
+/* ---------------- App Routing ---------------- */
+const AppRouting: React.FC<AppRoutingProps> = ({
+  setActiveCategory,
+  globalLoading,
+}) => {
+  const { token, isInitializing } = useAuth();
+
+  if (isInitializing) return <GlobalLoader loading />;
+
+  return (
+    <>
+      {globalLoading && <GlobalLoader loading />}
+      <URLSyncHandler setActiveCategory={setActiveCategory} />
+
+      <Routes>
+        {/* PUBLIC */}
+        <Route
+          path="/login"
+          element={token ? <Navigate to="/dashboard" replace /> : <Login />}
+        />
+
+        {/* DASHBOARD */}
+        <Route
+          path="/dashboard"
+          element={
+            <RequireAuth>
+              <AppLayout>
+                <Dashboard />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        {/* SALES INVOICE */}
+        <Route
+          path="/salesinvoice"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <SalesInvoiceReportPage />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        {/* ONLINE SALES REPORT */}
+        <Route
+          path="/salesreport"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <OnlineSalesReportPage />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/uniteconomics"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <UnitEconomicsReportPage />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/stockinhand"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <StockInHandReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/stockinhand/item-transaction"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <ItemWiseTransaction />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/stockinhand/godown-item-transaction"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <GodownItemWiseTransaction />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/salesreportLOL"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <OnlineSalesReportLOL />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/salesreportlr"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <SalesReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/reports/ledger-item"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <LedgerWiseItemDetails />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/graphanalysis"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <SalesAnalyticsReportPage />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/purchasereport"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <OnlinePurchaseReportPage />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/saleorder"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <SalesOrderReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/pendingsaleorder"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <PendingSaleOrder />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/purchaseorder"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <PurchaseOrder />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/templateList"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <ReportList />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/settings"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <ReportSettings />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/stockValue"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <StockValueReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/rateMaster"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <StockValueRateMasterReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/staffBasedLOS"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <LOSStaffBasedReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/staffBased"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <StaffBasedReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/expense"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <ExpensesReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/costing"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <CostingReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/outStanding"
+          element={
+            <RequireAuth>
+              <AppLayout>
+                <OutstandingReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/transaction-details/:accId/:partyName"
+          element={
+            <RequireAuth>
+              <AppLayout>
+                <TransactionDetailsReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/pending-outstanding/:accId"
+          element={
+            <RequireAuth>
+              <AppLayout>
+                <PendingOutstandingReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/staffBasedGrouping"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <StaffBasedGroupingReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/staffBasedCount"
+          element={
+            <RequireAuth>
+              <AppLayout>
+                <StaffBasedCountReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/dayAbstract"
+          element={
+            <RequireAuth>
+              <AppLayout>
+                <DayAbstractReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/stockAbstract"
+          element={
+            <RequireAuth>
+              <AppLayout>
+                <StockAbstractReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/cashbox"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <CashBoxReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/instock"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <InStockReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/uniteconomicsAdmin"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <UnitEconomicsAdmin />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        {/* FALLBACK */}
+        <Route
+          path="*"
+          element={<Navigate to={token ? "/dashboard" : "/login"} replace />}
+        />
+      </Routes>
+    </>
+  );
+};
+
+export default AppRouting;

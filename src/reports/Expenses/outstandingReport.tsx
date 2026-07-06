@@ -990,12 +990,18 @@ const OutstandingReport: React.FC = () => {
 
             exportColumns.forEach(
                 col => {
+                    let val = row[col.key] ?? "";
+                    if (col.key === "Bal_Amount") {
+                        const suffix = String(row.OB_Amount || "").toUpperCase().includes("DR")
+                            ? " DR"
+                            : String(row.OB_Amount || "").toUpperCase().includes("CR")
+                                ? " CR"
+                                : "";
+                        val = `${val}${suffix}`;
+                    }
                     obj[
                         col.label
-                    ] =
-                        row[
-                        col.key
-                        ] ?? "";
+                    ] = val;
                 }
             );
 
@@ -1830,22 +1836,30 @@ const OutstandingReport: React.FC = () => {
                                                             <TableCell
                                                                 sx={{
                                                                     color:
-                                                                        c.key === "OB_Amount"
-                                                                            ? String(row[c.key] || "").toUpperCase().includes("DR")
+                                                                        c.key === "Bal_Amount"
+                                                                            ? String(row.OB_Amount || "").toUpperCase().includes("DR")
                                                                                 ? "red"
-                                                                                : String(row[c.key] || "").toUpperCase().includes("CR")
+                                                                                : String(row.OB_Amount || "").toUpperCase().includes("CR")
                                                                                     ? "green"
                                                                                     : "inherit"
                                                                             : "inherit",
                                                                     fontWeight:
-                                                                        c.key === "OB_Amount" &&
-                                                                        (String(row[c.key] || "").toUpperCase().includes("DR") ||
-                                                                         String(row[c.key] || "").toUpperCase().includes("CR"))
+                                                                        c.key === "Bal_Amount" &&
+                                                                        (String(row.OB_Amount || "").toUpperCase().includes("DR") ||
+                                                                         String(row.OB_Amount || "").toUpperCase().includes("CR"))
                                                                             ? 600
                                                                             : "inherit",
                                                                 }}
                                                             >
-                                                                {row[c.key]}
+                                                                {c.key === "Bal_Amount"
+                                                                    ? `${row[c.key]}${
+                                                                          String(row.OB_Amount || "").toUpperCase().includes("DR")
+                                                                              ? " DR"
+                                                                              : String(row.OB_Amount || "").toUpperCase().includes("CR")
+                                                                                  ? " CR"
+                                                                                  : ""
+                                                                      }`
+                                                                    : row[c.key]}
                                                             </TableCell>
 
                                                             {/* Add icons after Retailer Name */}

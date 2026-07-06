@@ -206,12 +206,12 @@ const InStockReport: React.FC = () => {
     const loadGodownList = async () => {
         try {
             setLoading(true);
-            const res = await StockAbstractReportService.getStockAbstractReport({
+            const res = await StockAbstractReportService.getGodownSummaryInstock({
                 Predate: dayjs(fromDate).subtract(1, "day").format("YYYY-MM-DD"),
                 Fromdate: dayjs(fromDate).format("YYYY-MM-DD"),
                 Todate: dayjs(toDate).format("YYYY-MM-DD"),
             });
-            setGodownListData(res.Data4 || []);
+            setGodownListData(res || []);
         } catch (err) {
             console.error("Failed to load godown list:", err);
             toast.error("Failed to load godown list");
@@ -324,17 +324,19 @@ const InStockReport: React.FC = () => {
     const grandTotals = useMemo(() => {
         let opening = 0;
         let stockIn = 0;
+        let process = 0;
         let stockOut = 0;
         let closing = 0;
 
         godownListData.forEach(g => {
             opening += Number(g.OB_Qty || 0);
             stockIn += Number(g.IN_Qty || 0);
+            process += Number(g.Process_IN_OUT_Qty || 0);
             stockOut += Number(g.Out_Qty || 0);
             closing += Number(g.CL_QTY || 0);
         });
 
-        return { opening, stockIn, stockOut, closing };
+        return { opening, stockIn, process, stockOut, closing };
     }, [godownListData]);
 
     // List of unique brands for filtering in detailed view
@@ -493,17 +495,18 @@ const InStockReport: React.FC = () => {
             } else {
                 excelData.push([`GODOWNS OVERALL SUMMARY`]);
                 excelData.push([]);
-                excelData.push(["S.No", "Godown Name", "OB", "Stock In", "Stock Out", "Closing"]);
+                excelData.push(["S.No", "Godown Name", "OB", "Stock In", "Process", "Stock Out", "Closing"]);
 
                 let sno = 1;
                 Object.entries(groupedGodowns).forEach(([parentName, items]) => {
                     const groupOB = items.reduce((sum, r) => sum + Number(r.OB_Qty || 0), 0);
                     const groupIn = items.reduce((sum, r) => sum + Number(r.IN_Qty || 0), 0);
+                    const groupProcess = items.reduce((sum, r) => sum + Number(r.Process_IN_OUT_Qty || 0), 0);
                     const groupOut = items.reduce((sum, r) => sum + Number(r.Out_Qty || 0), 0);
                     const groupCL = items.reduce((sum, r) => sum + Number(r.CL_QTY || 0), 0);
 
                     // Add group row
-                    excelData.push(["", parentName, groupOB, groupIn, groupOut, groupCL]);
+                    excelData.push(["", parentName, groupOB, groupIn, groupProcess, groupOut, groupCL]);
 
                     items.forEach((row) => {
                         excelData.push([
@@ -511,6 +514,7 @@ const InStockReport: React.FC = () => {
                             row.godown_name,
                             Number(row.OB_Qty || 0),
                             Number(row.IN_Qty || 0),
+                            Number(row.Process_IN_OUT_Qty || 0),
                             Number(row.Out_Qty || 0),
                             Number(row.CL_QTY || 0)
                         ]);
@@ -523,6 +527,7 @@ const InStockReport: React.FC = () => {
                     "",
                     grandTotals.opening,
                     grandTotals.stockIn,
+                    grandTotals.process,
                     grandTotals.stockOut,
                     grandTotals.closing
                 ]);
@@ -600,17 +605,18 @@ const InStockReport: React.FC = () => {
                     });
                 }
             } else {
-                headers = [["S.No", "Godown Name", "OB", "Stock In", "Stock Out", "Closing"]];
+                headers = [["S.No", "Godown Name", "OB", "Stock In", "Process", "Stock Out", "Closing"]];
 
                 let sno = 1;
                 Object.entries(groupedGodowns).forEach(([parentName, items]) => {
                     const groupOB = items.reduce((sum, r) => sum + Number(r.OB_Qty || 0), 0);
                     const groupIn = items.reduce((sum, r) => sum + Number(r.IN_Qty || 0), 0);
+                    const groupProcess = items.reduce((sum, r) => sum + Number(r.Process_IN_OUT_Qty || 0), 0);
                     const groupOut = items.reduce((sum, r) => sum + Number(r.Out_Qty || 0), 0);
                     const groupCL = items.reduce((sum, r) => sum + Number(r.CL_QTY || 0), 0);
 
                     // Add group row
-                    body.push(["", parentName, groupOB, groupIn, groupOut, groupCL]);
+                    body.push(["", parentName, groupOB, groupIn, groupProcess, groupOut, groupCL]);
 
                     items.forEach((row) => {
                         body.push([
@@ -618,6 +624,7 @@ const InStockReport: React.FC = () => {
                             row.godown_name,
                             Number(row.OB_Qty || 0),
                             Number(row.IN_Qty || 0),
+                            Number(row.Process_IN_OUT_Qty || 0),
                             Number(row.Out_Qty || 0),
                             Number(row.CL_QTY || 0)
                         ]);
@@ -630,6 +637,7 @@ const InStockReport: React.FC = () => {
                     "GRAND TOTAL",
                     grandTotals.opening,
                     grandTotals.stockIn,
+                    grandTotals.process,
                     grandTotals.stockOut,
                     grandTotals.closing
                 ]);
@@ -712,7 +720,7 @@ const InStockReport: React.FC = () => {
                         sx={{
                             borderRadius: 2,
                             border: "1px solid #cbd5e1",
-                            maxHeight: "calc(100vh - 200px)",
+                            maxHeight: "400px",
                             overflowY: "auto",
                             overflowX: "hidden"
                         }}
@@ -736,11 +744,32 @@ const InStockReport: React.FC = () => {
                             <TableHead>
                                 <TableRow>
                                     <TableCell align="center" sx={{ width: "8%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>S.NO</TableCell>
-                                    <TableCell sx={{ width: "30%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>GODOWN NAME</TableCell>
-                                    <TableCell align="right" sx={{ width: "15%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OB</TableCell>
-                                    <TableCell align="right" sx={{ width: "15%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>STOCK IN</TableCell>
-                                    <TableCell align="right" sx={{ width: "15%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>STOCK OUT</TableCell>
-                                    <TableCell align="right" sx={{ width: "17%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5 }}>CLOSING</TableCell>
+                                    <TableCell sx={{ width: "27%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>GODOWN NAME</TableCell>
+                                    <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OB</TableCell>
+                                    <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>STOCK IN</TableCell>
+                                    <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PROCESS</TableCell>
+                                    <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>STOCK OUT</TableCell>
+                                    <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5 }}>CLOSING</TableCell>
+                                </TableRow>
+                                <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
+                                    <TableCell colSpan={2} align="center" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
+                                        GRAND TOTAL
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                        {grandTotals.opening.toLocaleString()}
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                        {grandTotals.stockIn.toLocaleString()}
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                        {grandTotals.process.toLocaleString()}
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                        {grandTotals.stockOut.toLocaleString()}
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#15803d" }}>
+                                        {grandTotals.closing.toLocaleString()}
+                                    </TableCell>
                                 </TableRow>
                             </TableHead>
                             <TableBody>
@@ -749,6 +778,7 @@ const InStockReport: React.FC = () => {
                                     return Object.entries(groupedGodowns).map(([parentName, items]) => {
                                         const groupOB = items.reduce((sum, r) => sum + Number(r.OB_Qty || 0), 0);
                                         const groupIn = items.reduce((sum, r) => sum + Number(r.IN_Qty || 0), 0);
+                                        const groupProcess = items.reduce((sum, r) => sum + Number(r.Process_IN_OUT_Qty || 0), 0);
                                         const groupOut = items.reduce((sum, r) => sum + Number(r.Out_Qty || 0), 0);
                                         const groupCL = items.reduce((sum, r) => sum + Number(r.CL_QTY || 0), 0);
 
@@ -765,6 +795,9 @@ const InStockReport: React.FC = () => {
                                                     </TableCell>
                                                     <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A", borderRight: "1px solid #cbd5e1", pr: 2 }}>
                                                         {groupIn.toLocaleString()}
+                                                    </TableCell>
+                                                    <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A", borderRight: "1px solid #cbd5e1", pr: 2 }}>
+                                                        {groupProcess.toLocaleString()}
                                                     </TableCell>
                                                     <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A", borderRight: "1px solid #cbd5e1", pr: 2 }}>
                                                         {groupOut.toLocaleString()}
@@ -798,6 +831,9 @@ const InStockReport: React.FC = () => {
                                                         <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#2563eb" }}>
                                                             {Number(item.IN_Qty || 0).toLocaleString()}
                                                         </TableCell>
+                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
+                                                            {Number(item.Process_IN_OUT_Qty || 0).toLocaleString()}
+                                                        </TableCell>
                                                         <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#ef4444" }}>
                                                             {Number(item.Out_Qty || 0).toLocaleString()}
                                                         </TableCell>
@@ -810,69 +846,32 @@ const InStockReport: React.FC = () => {
                                         );
                                     });
                                 })()}
-                                <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
-                                    <TableCell colSpan={2} align="center" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800 }}>
-                                        GRAND TOTAL
-                                    </TableCell>
-                                    <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                        {grandTotals.opening.toLocaleString()}
-                                    </TableCell>
-                                    <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                        {grandTotals.stockIn.toLocaleString()}
-                                    </TableCell>
-                                    <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                        {grandTotals.stockOut.toLocaleString()}
-                                    </TableCell>
-                                    <TableCell align="right" sx={{ fontWeight: 800, pr: 2, color: "#15803d" }}>
-                                        {grandTotals.closing.toLocaleString()}
-                                    </TableCell>
-                                </TableRow>
                             </TableBody>
                         </Table>
                     </TableContainer>
                 </>
             ) : (
                 <>
-                    {/* Navigation Back Button and Subtitle */}
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2, mt: 2 }}>
-                        <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => setSelectedGodown(null)}
-                            sx={{
-                                textTransform: "none",
-                                fontWeight: 600,
-                                color: "#1E3A8A",
-                                borderColor: "#cbd5e1",
-                                "&:hover": { bgcolor: "#f1f5f9", borderColor: "#1e40af" }
-                            }}
-                        >
-                            ← Back to Godown Summary
-                        </Button>
-                        <Typography variant="subtitle1" fontWeight={700} color="#475569">
-                            / {selectedGodown.godown_name}
-                        </Typography>
-                    </Box>
-
-                    {/* Filters and Brand Chips */}
-                    <Box sx={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 2, mb: 2 }}>
-                        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-                            {brands.map((b) => (
-                                <Chip
-                                    key={b}
-                                    label={b}
-                                    clickable
-                                    color={selectedBrand === b ? "primary" : "default"}
-                                    onClick={() => setSelectedBrand(b)}
-                                    sx={{
-                                        fontWeight: 600,
-                                        px: 1,
-                                        bgcolor: selectedBrand === b ? "#1E3A8A" : "#fff",
-                                        border: "1px solid #e2e8f0",
-                                        "&:hover": { bgcolor: selectedBrand === b ? "#1e40af" : "#f1f5f9" }
-                                    }}
-                                />
-                            ))}
+                    {/* Navigation Back Button, Subtitle, and Search */}
+                    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2, mt: 2, flexWrap: "wrap", gap: 2 }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => setSelectedGodown(null)}
+                                sx={{
+                                    textTransform: "none",
+                                    fontWeight: 600,
+                                    color: "#1E3A8A",
+                                    borderColor: "#cbd5e1",
+                                    "&:hover": { bgcolor: "#f1f5f9", borderColor: "#1e40af" }
+                                }}
+                            >
+                                ← Back to Godown Summary
+                            </Button>
+                            <Typography variant="subtitle1" fontWeight={700} color="#475569">
+                                / {selectedGodown.godown_name}
+                            </Typography>
                         </Box>
                         <TextField
                             size="small"
@@ -890,6 +889,26 @@ const InStockReport: React.FC = () => {
                         />
                     </Box>
 
+                    {/* Filters and Brand Chips */}
+                    <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", mb: 2 }}>
+                        {brands.map((b) => (
+                            <Chip
+                                key={b}
+                                label={b}
+                                clickable
+                                color={selectedBrand === b ? "primary" : "default"}
+                                onClick={() => setSelectedBrand(b)}
+                                sx={{
+                                    fontWeight: 600,
+                                    px: 1,
+                                    bgcolor: selectedBrand === b ? "#1E3A8A" : "#fff",
+                                    border: "1px solid #e2e8f0",
+                                    "&:hover": { bgcolor: selectedBrand === b ? "#1e40af" : "#f1f5f9" }
+                                }}
+                            />
+                        ))}
+                    </Box>
+
                     {/* Detailed Stock Table Container */}
                     <TableContainer
                         component={Paper}
@@ -897,7 +916,7 @@ const InStockReport: React.FC = () => {
                         sx={{
                             borderRadius: 2,
                             border: "1px solid #cbd5e1",
-                            maxHeight: "calc(100vh - 230px)",
+                            maxHeight: "410px",
                             overflowY: "auto",
                             overflowX: "hidden"
                         }}
@@ -1121,6 +1140,104 @@ const InStockReport: React.FC = () => {
                                         </TableCell>
                                     )}
                                 </TableRow>
+                                {paginatedData.length > 0 && (
+                                    <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
+                                        <TableCell colSpan={1 + enabledConfigColumns.length} align="center" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
+                                            GRAND TOTAL
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                            {detailedTotals.opening.toLocaleString()}
+                                        </TableCell>
+
+                                        {/* Normal Mode: Stock In */}
+                                        {!inwardMode && !outwardMode && !processMode && (
+                                            <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                {detailedTotals.totalInward.toLocaleString()}
+                                            </TableCell>
+                                        )}
+
+                                        {/* Inward Mode: Trip 1, Trip 2, Trip 3, Returns, Total Inward */}
+                                        {inwardMode && (
+                                            <>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    {detailedTotals.trip1.toLocaleString()}
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    {detailedTotals.trip2.toLocaleString()}
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    {detailedTotals.trip3.toLocaleString()}
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    -
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af" }}>
+                                                    {detailedTotals.totalInward.toLocaleString()}
+                                                </TableCell>
+                                            </>
+                                        )}
+
+                                        {/* Normal Mode: Process */}
+                                        {!inwardMode && !outwardMode && !processMode && (
+                                            <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                -
+                                            </TableCell>
+                                        )}
+
+                                        {/* Process Mode: Process 1, Process 2, Process 3, Total Process */}
+                                        {processMode && (
+                                            <>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    -
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    -
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    -
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af" }}>
+                                                    -
+                                                </TableCell>
+                                            </>
+                                        )}
+
+                                        {/* Normal Mode: Stock Outwards */}
+                                        {!inwardMode && !outwardMode && !processMode && (
+                                            <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                {detailedTotals.totalOutward.toLocaleString()}
+                                            </TableCell>
+                                        )}
+
+                                        {/* Outward Mode: Others 1, 2, 3, Delivery, and Total Outward */}
+                                        {outwardMode && (
+                                            <>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    {detailedTotals.others1.toLocaleString()}
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    {detailedTotals.others2.toLocaleString()}
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    {detailedTotals.others3.toLocaleString()}
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                    {detailedTotals.delivery.toLocaleString()}
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#b91c1c" }}>
+                                                    {detailedTotals.totalOutward.toLocaleString()}
+                                                </TableCell>
+                                            </>
+                                        )}
+
+                                        {/* Normal Mode: Closing */}
+                                        {!inwardMode && !outwardMode && !processMode && (
+                                            <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#15803d" }}>
+                                                {detailedTotals.closing.toLocaleString()}
+                                            </TableCell>
+                                        )}
+                                    </TableRow>
+                                )}
                             </TableHead>
                             <TableBody>
                                 {paginatedData.length === 0 ? (
@@ -1305,105 +1422,6 @@ const InStockReport: React.FC = () => {
                                             </React.Fragment>
                                         );
                                     })
-                                )}
-                                {/* Grand Total Row */}
-                                {paginatedData.length > 0 && (
-                                    <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
-                                        <TableCell colSpan={1 + enabledConfigColumns.length} align="center" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800 }}>
-                                            GRAND TOTAL
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                            {detailedTotals.opening.toLocaleString()}
-                                        </TableCell>
-
-                                        {/* Normal Mode: Stock In */}
-                                        {!inwardMode && !outwardMode && !processMode && (
-                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                {detailedTotals.totalInward.toLocaleString()}
-                                            </TableCell>
-                                        )}
-
-                                        {/* Inward Mode: Trip 1, Trip 2, Trip 3, Returns, Total Inward */}
-                                        {inwardMode && (
-                                            <>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.trip1.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.trip2.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.trip3.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    -
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ fontWeight: 800, pr: 2, color: "#1e40af" }}>
-                                                    {detailedTotals.totalInward.toLocaleString()}
-                                                </TableCell>
-                                            </>
-                                        )}
-
-                                        {/* Normal Mode: Process */}
-                                        {!inwardMode && !outwardMode && !processMode && (
-                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                -
-                                            </TableCell>
-                                        )}
-
-                                        {/* Process Mode: Process 1, Process 2, Process 3, Total Process */}
-                                        {processMode && (
-                                            <>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    -
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    -
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    -
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ fontWeight: 800, pr: 2, color: "#1e40af" }}>
-                                                    -
-                                                </TableCell>
-                                            </>
-                                        )}
-
-                                        {/* Normal Mode: Stock Outwards */}
-                                        {!inwardMode && !outwardMode && !processMode && (
-                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                {detailedTotals.totalOutward.toLocaleString()}
-                                            </TableCell>
-                                        )}
-
-                                        {/* Outward Mode: Others 1, 2, 3, Delivery, and Total Outward */}
-                                        {outwardMode && (
-                                            <>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.others1.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.others2.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.others3.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.delivery.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ fontWeight: 800, pr: 2, color: "#b91c1c" }}>
-                                                    {detailedTotals.totalOutward.toLocaleString()}
-                                                </TableCell>
-                                            </>
-                                        )}
-
-                                        {/* Normal Mode: Closing */}
-                                        {!inwardMode && !outwardMode && !processMode && (
-                                            <TableCell align="right" sx={{ fontWeight: 800, pr: 2, color: "#15803d" }}>
-                                                {detailedTotals.closing.toLocaleString()}
-                                            </TableCell>
-                                        )}
-                                    </TableRow>
                                 )}
                             </TableBody>
                         </Table>

@@ -42,6 +42,12 @@ export interface StockAbstractData4 {
     ACt_Out_Qty: number;
     OB_Qty: number;
     ACt_OB_Qty: number;
+    SOU_In_Qty?: number;
+    SOU_ACt_In_Qty?: number;
+    SOU_Out_Qty?: number;
+    SOU_ACt_Out_Qty?: number;
+    Process_IN_OUT_Qty?: number;
+    Process_Act_IN_OUT_Qty?: number;
     CL_QTY: number;
     CL_ACt_QTY: number;
 }
@@ -188,5 +194,35 @@ export const StockAbstractReportService = {
                 data["Data9"] ||
                 [],
         };
+    },
+    getGodownSummaryInstock: async (params?: {
+        Predate?: string;
+        Fromdate?: string;
+        Todate?: string;
+    }): Promise<StockAbstractData4[]> => {
+        const finalParams = { ...params };
+        if (!finalParams.Predate && finalParams.Fromdate) {
+            const d = new Date(finalParams.Fromdate);
+            d.setDate(d.getDate() - 1);
+            finalParams.Predate = d.toISOString().split("T")[0];
+        }
+        const res = await axios.get<{
+            success: boolean;
+            data: any;
+        }>(
+            `${getBaseURL()}api/reports/externalAPI/godownSummaryInstock`,
+            {
+                params: finalParams,
+            }
+        );
+
+        const data = res.data.data;
+        if (Array.isArray(data)) {
+            return data;
+        }
+        if (data && typeof data === "object") {
+            return data.Data4 || data.data || [];
+        }
+        return [];
     },
 };

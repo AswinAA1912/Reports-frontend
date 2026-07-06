@@ -95,8 +95,8 @@ export const godownwisestockreportservice = {
         groupFilter3?: string;
     }) =>
         axios.get<{ success: boolean; data: stockWiseReport[] }>(
-            `http://192.168.1.5:9001/api/reports/storageStock/godownWiseMobile`,
-            // `${getBaseURL()}api/reports/storageStock/godownWiseMobile`,
+            // `http://192.168.1.5:9001/api/reports/storageStock/godownWiseMobile`,
+            `${getBaseURL()}api/reports/storageStock/godownWiseMobile`,
             { params }
         ),
 };

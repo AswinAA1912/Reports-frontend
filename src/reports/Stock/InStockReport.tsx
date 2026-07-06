@@ -735,7 +735,7 @@ const InStockReport: React.FC = () => {
                                     whiteSpace: "normal",
                                     wordBreak: "break-word",
                                     lineHeight: 1.2,
-                                    fontSize: "0.85rem",
+                                    fontSize: "0.8rem",
                                     px: 1.5,
                                     py: 1.5
                                 }

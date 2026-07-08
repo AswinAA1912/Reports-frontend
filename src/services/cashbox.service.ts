@@ -34,6 +34,19 @@ export interface CashBoxMasterAccount {
     Retailer_Id?: string;
 }
 
+export interface CashBoxJnl {
+    invoice_no: string;
+    Debit_Names: string;
+    Credit_Names: string;
+}
+
+export interface CashBoxRecPay {
+    invoice_no: string;
+    bill_name: string;
+    Amount: number;
+    INV_Date?: string;
+}
+
 export interface CashBoxReportResponse {
     OB: CashBoxOB[];
     Data1: CashBoxTransaction[];
@@ -42,6 +55,8 @@ export interface CashBoxReportResponse {
     LedgerGrp: CashBoxMasterAccount[];
     DEX: CashBoxMasterAccount[];
     IDEX: CashBoxMasterAccount[];
+    RecPay?: CashBoxRecPay[];
+    Jnl?: CashBoxJnl[];
 }
 
 export const cashboxService = {

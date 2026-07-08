@@ -121,6 +121,16 @@ const OnlineSalesReportPage: React.FC = () => {
   const [reportName, setReportName] = useState("");
   const [parentReportName, setParentReportName] = useState("");
   const [templateLoading, setTemplateLoading] = useState(false);
+  const [tempFromDate, setTempFromDate] = useState(columnFilters?.Ledger_Date?.from || today);
+  const [tempToDate, setTempToDate] = useState(columnFilters?.Ledger_Date?.to || today);
+  const [dataLoading, setDataLoading] = useState(false);
+
+  useEffect(() => {
+    if (drawerOpen) {
+      setTempFromDate(columnFilters?.Ledger_Date?.from || today);
+      setTempToDate(columnFilters?.Ledger_Date?.to || today);
+    }
+  }, [drawerOpen, columnFilters, today]);
   const spConfig = {
     abstractSP: "Reporting_Online_Sales_VW",
     expandedSP: "Reporting_Online_Sales_Item_VW"
@@ -338,6 +348,8 @@ const OnlineSalesReportPage: React.FC = () => {
     const fromDate = columnFilters?.Ledger_Date?.from || dayjs().format("YYYY-MM-DD");
     const toDate = columnFilters?.Ledger_Date?.to || dayjs().format("YYYY-MM-DD");
 
+    setDataLoading(true);
+
     if (toggleMode === "Abstract") {
       OnlineSalesReportService.getReports({ Fromdate: fromDate, Todate: toDate })
         .then((res) => {
@@ -351,7 +363,12 @@ const OnlineSalesReportPage: React.FC = () => {
           }
 
           setAbstractColumns(prev => mergeColumns(cols, prev));
-        });
+        })
+        .catch((err) => {
+          console.error(err);
+          toast.error("Failed to load data ❌");
+        })
+        .finally(() => setDataLoading(false));
     } else {
       OnlineSalesReportItemService.getReportsitem({ Fromdate: fromDate, Todate: toDate })
         .then((res) => {
@@ -365,7 +382,12 @@ const OnlineSalesReportPage: React.FC = () => {
           }
 
           setExpandedColumns(prev => mergeColumns(cols, prev));
-        });
+        })
+        .catch((err) => {
+          console.error(err);
+          toast.error("Failed to load data ❌");
+        })
+        .finally(() => setDataLoading(false));
     }
   }, [toggleMode, columnFilters["Ledger_Date"], templateConfig]);
 
@@ -810,6 +832,7 @@ const OnlineSalesReportPage: React.FC = () => {
       await SettingsService.updateReport({
         reportId: selectedTemplateId,
         typeId: 1,
+        reportName: reportName.trim(),
         columns: abstractColumns.map((c) => ({
           key: c.key,
           label: c.label,
@@ -822,6 +845,7 @@ const OnlineSalesReportPage: React.FC = () => {
       await SettingsService.updateReport({
         reportId: selectedTemplateId,
         typeId: 2,
+        reportName: reportName.trim(),
         columns: expandedColumns.map((c) => ({
           key: c.key,
           label: c.label,
@@ -906,30 +930,22 @@ const OnlineSalesReportPage: React.FC = () => {
         open={drawerOpen}
         onToggle={() => setDrawerOpen(p => !p)}
         onClose={() => setDrawerOpen(false)}
-        fromDate={columnFilters["Ledger_Date"]?.from || ""}
-        toDate={columnFilters["Ledger_Date"]?.to || ""}
-        onFromDateChange={(v) =>
+        fromDate={tempFromDate}
+        toDate={tempToDate}
+        onFromDateChange={(v) => setTempFromDate(v)}
+        onToDateChange={(v) => setTempToDate(v)}
+        onApply={() => {
           setColumnFilters((prev) => ({
             ...prev,
             Ledger_Date: {
-              ...prev["Ledger_Date"],
-              from: v,
+              from: tempFromDate,
+              to: tempToDate,
             },
-          }))
-        }
-
-        onToDateChange={(v) =>
-          setColumnFilters((prev) => ({
-            ...prev,
-            Ledger_Date: {
-              ...prev["Ledger_Date"],
-              to: v,
-            },
-          }))
-        }
-        onApply={() => setDrawerOpen(false)}
+          }));
+          setDrawerOpen(false);
+        }}
       />
-      {templateLoading && (
+      {(templateLoading || dataLoading) && (
         <Box
           sx={{
             position: "fixed",

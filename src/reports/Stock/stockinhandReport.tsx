@@ -61,6 +61,25 @@ const StockInHandReport: React.FC = () => {
     const [selectedFilters, setSelectedFilters] = useState<Record<string, any>>({});
     const [loading, setLoading] = useState(false);
 
+    const [qtyMode, setQtyMode] = useState<"qty" | "actQty">("qty");
+
+    const qtyKeys = useMemo(() => {
+        if (qtyMode === "actQty") {
+            return {
+                opening: "OB_Act_Qty" as keyof stockWiseReport,
+                in: "Pur_Act_Qty" as keyof stockWiseReport,
+                out: "Sal_Act_Qty" as keyof stockWiseReport,
+                closing: "Bal_Act_Qty" as keyof stockWiseReport,
+            };
+        }
+        return {
+            opening: "OB_Bal_Qty" as keyof stockWiseReport,
+            in: "Pur_Qty" as keyof stockWiseReport,
+            out: "Sal_Qty" as keyof stockWiseReport,
+            closing: "Bal_Qty" as keyof stockWiseReport,
+        };
+    }, [qtyMode]);
+
 
     /* ===== LEVEL 2 META (FROM CONFIG) ===== */
 
@@ -317,7 +336,7 @@ const StockInHandReport: React.FC = () => {
         if (!saved) return;
         const state = JSON.parse(saved);
 
-        setRawData(state.rawData || []); 41
+        setRawData(state.rawData || []); 
         setExpanded(state.expanded || {});
         setPage(state.page || 1);
         setSelectedFilters(state.selectedFilters || {});
@@ -325,6 +344,7 @@ const StockInHandReport: React.FC = () => {
         setToggleMode(state.toggleMode || "Abstract");
         setFromDate(state.fromDate || today);
         setToDate(state.toDate || today);
+        setQtyMode(state.qtyMode || "qty");
 
         sessionStorage.removeItem("stockInHandState");
 
@@ -383,10 +403,10 @@ const StockInHandReport: React.FC = () => {
 
         // ✅ ✅ ADD THIS BLOCK (IMPORTANT)
         filtered = filtered.filter((r) => {
-            const ob = Number(r.OB_Bal_Qty) || 0;
-            const input = Number(r.Pur_Qty) || 0;
-            const out = Number(r.Sal_Qty) || 0;
-            const cls = Number(r.Bal_Qty) || 0;
+            const ob = Number(r[qtyKeys.opening]) || 0;
+            const input = Number(r[qtyKeys.in]) || 0;
+            const out = Number(r[qtyKeys.out]) || 0;
+            const cls = Number(r[qtyKeys.closing]) || 0;
 
             const hasValue = ob !== 0 || input !== 0 || out !== 0 || cls !== 0;
             const isZero = ob === 0 && input === 0 && out === 0 && cls === 0;
@@ -404,7 +424,8 @@ const StockInHandReport: React.FC = () => {
         level2TypeOrder,
         level2Meta,
         selectedLevel2ByType,
-        stockFilter
+        stockFilter,
+        qtyKeys
     ]);
 
     const handleTransactionClick = (
@@ -427,7 +448,8 @@ const StockInHandReport: React.FC = () => {
                 selectedLevel2ByType,
                 toggleMode,
                 fromDate,
-                toDate
+                toDate,
+                qtyMode
             })
         );
 
@@ -516,7 +538,7 @@ const StockInHandReport: React.FC = () => {
             const v = r[columnName];
             if (!v) return;
 
-            const qty = Number(r.Bal_Qty || 0);
+            const qty = Number(r[qtyKeys.closing] || 0);
             map.set(String(v), (map.get(String(v)) || 0) + qty);
         });
 
@@ -629,10 +651,10 @@ const StockInHandReport: React.FC = () => {
                     result.push({
                         ...keys,
                         Item: r.stock_item_name,
-                        Opening: r.OB_Bal_Qty,
-                        In: r.Pur_Qty,
-                        Out: r.Sal_Qty,
-                        Closing: r.Bal_Qty,
+                        Opening: r[qtyKeys.opening],
+                        In: r[qtyKeys.in],
+                        Out: r[qtyKeys.out],
+                        Closing: r[qtyKeys.closing],
                     });
                 });
             }
@@ -704,10 +726,10 @@ const StockInHandReport: React.FC = () => {
         const pageRows = paginated(rows);
 
         // ✅ TOTALS (full filtered rows, NOT paginated)
-        const totalOpening = sum(rows, "OB_Bal_Qty");
-        const totalIn = sum(rows, "Pur_Qty");
-        const totalOut = sum(rows, "Sal_Qty");
-        const totalClosing = sum(rows, "Bal_Qty");
+        const totalOpening = sum(rows, qtyKeys.opening);
+        const totalIn = sum(rows, qtyKeys.in);
+        const totalOut = sum(rows, qtyKeys.out);
+        const totalClosing = sum(rows, qtyKeys.closing);
 
         return (
             <Table size="small">
@@ -736,19 +758,19 @@ const StockInHandReport: React.FC = () => {
                         <TableCell colSpan={2}>TOTAL</TableCell>
 
                         <TableCell align="right">
-                            {formatTotalQtyWithBag(totalOpening, rows, "OB_Bal_Qty")}
+                            {formatTotalQtyWithBag(totalOpening, rows, qtyKeys.opening)}
                         </TableCell>
 
                         <TableCell align="right">
-                            {formatTotalQtyWithBag(totalIn, rows, "Pur_Qty")}
+                            {formatTotalQtyWithBag(totalIn, rows, qtyKeys.in)}
                         </TableCell>
 
                         <TableCell align="right">
-                            {formatTotalQtyWithBag(totalOut, rows, "Sal_Qty")}
+                            {formatTotalQtyWithBag(totalOut, rows, qtyKeys.out)}
                         </TableCell>
 
                         <TableCell align="right">
-                            {formatTotalQtyWithBag(totalClosing, rows, "Bal_Qty")}
+                            {formatTotalQtyWithBag(totalClosing, rows, qtyKeys.closing)}
                         </TableCell>
                     </TableRow>
 
@@ -760,32 +782,32 @@ const StockInHandReport: React.FC = () => {
                             </TableCell>
                             <TableCell
                                 sx={{
-                                    cursor: "pointer",
-                                    color: "#1D4ED8",
-                                    fontWeight: 600,
-                                    "&:hover": { textDecoration: "none" }
+                                     cursor: "pointer",
+                                     color: "#1D4ED8",
+                                     fontWeight: 600,
+                                     "&:hover": { textDecoration: "none" }
                                 }}
                                 onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleTransactionClick(
-                                        r,
-                                        isExpanded ? "EXPANDED" : "ABSTRACT"
-                                    );
+                                     e.stopPropagation();
+                                     handleTransactionClick(
+                                         r,
+                                         isExpanded ? "EXPANDED" : "ABSTRACT"
+                                     );
                                 }}
                             >
                                 {r.stock_item_name}
                             </TableCell>
                             <TableCell align="right">
-                                {formatQtyWithBag(r.OB_Bal_Qty, r)}
+                                {formatQtyWithBag(r[qtyKeys.opening] ?? 0, r)}
                             </TableCell>
                             <TableCell align="right">
-                                {formatQtyWithBag(r.Pur_Qty, r)}
+                                {formatQtyWithBag(r[qtyKeys.in] ?? 0, r)}
                             </TableCell>
                             <TableCell align="right">
-                                {formatQtyWithBag(r.Sal_Qty, r)}
+                                {formatQtyWithBag(r[qtyKeys.out] ?? 0, r)}
                             </TableCell>
                             <TableCell align="right">
-                                {formatQtyWithBag(r.Bal_Qty, r)}
+                                {formatQtyWithBag(r[qtyKeys.closing] ?? 0, r)}
                             </TableCell>
                         </TableRow>
                     ))}
@@ -820,9 +842,9 @@ const StockInHandReport: React.FC = () => {
                         <TableCell align="right">{g.rows.length}</TableCell>
                         <TableCell align="right">
                             {formatTotalQtyWithBag(
-                                sum(g.rows, "Bal_Qty"),
+                                sum(g.rows, qtyKeys.closing),
                                 g.rows,
-                                "Bal_Qty"
+                                qtyKeys.closing
                             )}
                         </TableCell>
                     </TableRow>
@@ -874,6 +896,9 @@ const StockInHandReport: React.FC = () => {
                 }}
                 stockFilter={stockFilter}
                 onStockFilterChange={setStockFilter}
+                showQtyModeFilter
+                qtyModeValue={qtyMode}
+                onQtyModeChange={setQtyMode}
                 onApply={async () => {
                     await loadData();
                     setDrawerOpen(false);

@@ -36,6 +36,7 @@ export interface SaveReportPayload {
 type UpdateReportPayload = {
     reportId: number;
     typeId: number;
+    reportName?: string;
 
     columns?: any[];
 

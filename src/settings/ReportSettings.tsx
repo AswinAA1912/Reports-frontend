@@ -239,6 +239,7 @@ const ReportSettings: React.FC = () => {
                     const res = await SettingsService.updateReport({
                         reportId: Number(reportId),
                         typeId: Number(typeId),
+                        reportName: reportName.trim(),
                         columns
                     });
 

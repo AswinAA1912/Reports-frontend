@@ -1501,6 +1501,7 @@ const LOSStaffBasedReport: React.FC = () => {
                 await SettingsService.updateReport({
                     reportId: selectedTemplateId,
                     typeId: 1,
+                    reportName: reportName.trim(),
                     columns: payloadColumns,
                 });
 

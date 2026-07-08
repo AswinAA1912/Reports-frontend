@@ -1005,12 +1005,14 @@ const SalesReport: React.FC = () => {
                 await SettingsService.updateReport({
                     reportId: selectedTemplateId,
                     typeId: 1,
+                    reportName: reportName.trim(),
                     columns: abstractPayload
                 });
 
                 await SettingsService.updateReport({
                     reportId: selectedTemplateId,
                     typeId: 2,
+                    reportName: reportName.trim(),
                     columns: expandedPayload
                 });
 

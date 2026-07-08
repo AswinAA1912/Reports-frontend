@@ -63,6 +63,16 @@ interface ReportFilterDrawerProps {
     showRateTypeFilter?: boolean;
     rateTypeValue?: "cogs" | "min";
     onRateTypeChange?: (value: "cogs" | "min") => void;
+
+    // UNIT FILTER
+    showUnitFilter?: boolean;
+    unitValue?: "kgs_ton" | "bags";
+    onUnitChange?: (value: "kgs_ton" | "bags") => void;
+
+    // QTY MODE FILTER (Qty vs Act Qty)
+    showQtyModeFilter?: boolean;
+    qtyModeValue?: "qty" | "actQty";
+    onQtyModeChange?: (value: "qty" | "actQty") => void;
 }
 
 const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
@@ -100,9 +110,19 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
     staffBasedDisplayMode,
     onStaffBasedDisplayModeChange,
 
-    showRateTypeFilter,
+        showRateTypeFilter,
     rateTypeValue,
     onRateTypeChange,
+
+    // UNIT FILTER
+    showUnitFilter,
+    unitValue,
+    onUnitChange,
+
+    // QTY MODE FILTER
+    showQtyModeFilter,
+    qtyModeValue,
+    onQtyModeChange,
 }) => {
     return (
         <>
@@ -335,7 +355,7 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                         </FormControl>
                     )}
 
-                    {showRateTypeFilter && onRateTypeChange && (
+                                        {showRateTypeFilter && onRateTypeChange && (
                         <FormControl sx={{ mb: 2, display: "block" }}>
                             <FormLabel sx={{ fontWeight: 600, color: "#1E3A8A", fontSize: "0.875rem", display: "block", mb: 0.5 }}>
                                 Rate Type
@@ -355,6 +375,56 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                                     value="min"
                                     control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
                                     label={<Typography sx={{ fontSize: "0.825rem" }}>Min Rate</Typography>}
+                                />
+                            </RadioGroup>
+                        </FormControl>
+                    )}
+
+                    {showUnitFilter && onUnitChange && (
+                        <FormControl sx={{ mb: 2, display: "block" }}>
+                            <FormLabel sx={{ fontWeight: 600, color: "#1E3A8A", fontSize: "0.875rem", display: "block", mb: 0.5 }}>
+                                Quantity Unit
+                            </FormLabel>
+                            <RadioGroup
+                                value={unitValue || "kgs_ton"}
+                                onChange={(e) =>
+                                    onUnitChange(e.target.value as "kgs_ton" | "bags")
+                                }
+                            >
+                                <FormControlLabel
+                                    value="kgs_ton"
+                                    control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                                    label={<Typography sx={{ fontSize: "0.825rem" }}>Qty in Kgs/Ton</Typography>}
+                                />
+                                <FormControlLabel
+                                    value="bags"
+                                    control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                                    label={<Typography sx={{ fontSize: "0.825rem" }}>Qty in Bags</Typography>}
+                                />
+                            </RadioGroup>
+                        </FormControl>
+                    )}
+
+                    {showQtyModeFilter && onQtyModeChange && (
+                        <FormControl sx={{ mb: 2, display: "block" }}>
+                            <FormLabel sx={{ fontWeight: 600, color: "#1E3A8A", fontSize: "0.875rem", display: "block", mb: 0.5 }}>
+                                Quantity Mode
+                            </FormLabel>
+                            <RadioGroup
+                                value={qtyModeValue || "qty"}
+                                onChange={(e) =>
+                                    onQtyModeChange(e.target.value as "qty" | "actQty")
+                                }
+                            >
+                                <FormControlLabel
+                                    value="qty"
+                                    control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                                    label={<Typography sx={{ fontSize: "0.825rem" }}>Qty</Typography>}
+                                />
+                                <FormControlLabel
+                                    value="actQty"
+                                    control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                                    label={<Typography sx={{ fontSize: "0.825rem" }}>Act Qty</Typography>}
                                 />
                             </RadioGroup>
                         </FormControl>

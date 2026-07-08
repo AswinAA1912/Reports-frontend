@@ -1299,6 +1299,8 @@ const OutstandingReport: React.FC = () => {
                             reportId:
                                 selectedTemplateId,
                             typeId: 1,
+                            reportName:
+                                reportName.trim(),
                             columns:
                                 payload,
                         }
@@ -1845,20 +1847,19 @@ const OutstandingReport: React.FC = () => {
                                                                             : "inherit",
                                                                     fontWeight:
                                                                         c.key === "Bal_Amount" &&
-                                                                        (String(row.OB_Amount || "").toUpperCase().includes("DR") ||
-                                                                         String(row.OB_Amount || "").toUpperCase().includes("CR"))
+                                                                            (String(row.OB_Amount || "").toUpperCase().includes("DR") ||
+                                                                                String(row.OB_Amount || "").toUpperCase().includes("CR"))
                                                                             ? 600
                                                                             : "inherit",
                                                                 }}
                                                             >
                                                                 {c.key === "Bal_Amount"
-                                                                    ? `${row[c.key]}${
-                                                                          String(row.OB_Amount || "").toUpperCase().includes("DR")
-                                                                              ? " DR"
-                                                                              : String(row.OB_Amount || "").toUpperCase().includes("CR")
-                                                                                  ? " CR"
-                                                                                  : ""
-                                                                      }`
+                                                                    ? `${row[c.key]}${String(row.OB_Amount || "").toUpperCase().includes("DR")
+                                                                        ? " DR"
+                                                                        : String(row.OB_Amount || "").toUpperCase().includes("CR")
+                                                                            ? " CR"
+                                                                            : ""
+                                                                    }`
                                                                     : row[c.key]}
                                                             </TableCell>
 

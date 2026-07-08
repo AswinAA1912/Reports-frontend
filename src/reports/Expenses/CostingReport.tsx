@@ -722,6 +722,8 @@ const CostingReport: React.FC = () => {
 
                     typeId: 1,
 
+                    reportName: reportName.trim(),
+
                     columns: payload,
                 });
 

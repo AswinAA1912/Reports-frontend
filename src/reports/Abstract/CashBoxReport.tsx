@@ -817,6 +817,16 @@ const CashBoxReport: React.FC = () => {
 
     // Helper to get opposing ledger name for a transaction
     const getOpposingLedgerNameForExport = useCallback((tx: CashBoxTransaction, accId: string, side: "debit" | "credit") => {
+        // Match in Jnl dataset if present
+        if (tx.invoice_no && reportData?.Jnl) {
+            const jnlItem = reportData.Jnl.find(
+                (j) => j.invoice_no && String(j.invoice_no).trim() === String(tx.invoice_no).trim()
+            );
+            if (jnlItem) {
+                return side === "debit" ? jnlItem.Debit_Names : jnlItem.Credit_Names;
+            }
+        }
+
         const accIdTrim = String(accId).trim();
         const isCash = allCashAccIdsSet.has(accIdTrim);
 
@@ -946,6 +956,38 @@ const CashBoxReport: React.FC = () => {
                                 ""
                             ]);
                         }
+
+                        // RecPay details below transaction
+                        const recPaysL = txL && txL.invoice_no && reportData?.RecPay
+                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
+                            : [];
+                        const recPaysR = txR && txR.invoice_no && reportData?.RecPay
+                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
+                            : [];
+
+                        const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
+                        for (let k = 0; k < maxRecPayRows; k++) {
+                            const rpL = recPaysL[k];
+                            const rpR = recPaysR[k];
+
+                            let rCol0 = "";
+                            let rCol1: any = "";
+                            if (rpL) {
+                                const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
+                                rCol0 = `        ${rpL.bill_name}${dateStr}`;
+                                rCol1 = rpL.Amount;
+                            }
+
+                            let rCol2 = "";
+                            let rCol3: any = "";
+                            if (rpR) {
+                                const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
+                                rCol2 = `        ${rpR.bill_name}${dateStr}`;
+                                rCol3 = rpR.Amount;
+                            }
+
+                            excelData.push([rCol0, rCol1, rCol2, rCol3]);
+                        }
                     }
                 }
             }
@@ -1054,6 +1096,38 @@ const CashBoxReport: React.FC = () => {
                                 ""
                             ]);
                         }
+
+                        // RecPay details below transaction for PDF
+                        const recPaysL = txL && txL.invoice_no && reportData?.RecPay
+                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
+                            : [];
+                        const recPaysR = txR && txR.invoice_no && reportData?.RecPay
+                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
+                            : [];
+
+                        const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
+                        for (let k = 0; k < maxRecPayRows; k++) {
+                            const rpL = recPaysL[k];
+                            const rpR = recPaysR[k];
+
+                            let rCol0 = "";
+                            let rCol1 = "";
+                            if (rpL) {
+                                const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
+                                rCol0 = `        ${rpL.bill_name}${dateStr}`;
+                                rCol1 = formatNum(rpL.Amount);
+                            }
+
+                            let rCol2 = "";
+                            let rCol3 = "";
+                            if (rpR) {
+                                const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
+                                rCol2 = `        ${rpR.bill_name}${dateStr}`;
+                                rCol3 = formatNum(rpR.Amount);
+                            }
+
+                            pdfBody.push([rCol0, rCol1, rCol2, rCol3]);
+                        }
                     }
                 }
             }
@@ -1084,6 +1158,9 @@ const CashBoxReport: React.FC = () => {
 
                     const isNarration = (valL && valL.includes("* ")) || (valR && valR.includes("* "));
 
+                    const isRecPay = (valL && valL.startsWith("        ") && !valL.includes("* ")) ||
+                        (valR && valR.startsWith("        ") && !valR.includes("* "));
+
                     if (isOpeningOrClosing) {
                         data.cell.styles.fillColor = [238, 238, 238]; // EEEEEE
                         data.cell.styles.fontStyle = "bold";
@@ -1098,6 +1175,9 @@ const CashBoxReport: React.FC = () => {
                     } else if (isNarration) {
                         data.cell.styles.textColor = [79, 70, 229]; // Indigo: #4f46e5
                         data.cell.styles.fontStyle = "italic";
+                        data.cell.styles.fontSize = 7;
+                    } else if (isRecPay) {
+                        data.cell.styles.textColor = [100, 116, 139]; // Slate: #64748B
                         data.cell.styles.fontSize = 7;
                     } else if (isNestedTx) {
                         data.cell.styles.textColor = [85, 85, 85];

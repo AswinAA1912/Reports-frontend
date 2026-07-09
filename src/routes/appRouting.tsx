@@ -38,6 +38,7 @@ import StockAbstractReport from "../reports/Abstract/StockAbstractReport";
 import CashBoxReport from "../reports/Abstract/CashBoxReport";
 import PendingSaleOrder from "../reports/Sales/PendingSaleOrderReport";
 import InStockReport from "../reports/Stock/InStockReport";
+import RetailerLocations from "./RetailerLocations";
 
 interface AppRoutingProps {
   setActiveCategory: (category: string) => void;
@@ -497,6 +498,15 @@ const AppRouting: React.FC<AppRoutingProps> = ({
               <AppLayout fullWidth>
                 <UnitEconomicsAdmin />
               </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/retailer-locations"
+          element={
+            <RequireAuth>
+              <RetailerLocations />
             </RequireAuth>
           }
         />

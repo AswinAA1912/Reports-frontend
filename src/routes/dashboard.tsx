@@ -34,7 +34,7 @@ const Dashboard: React.FC = () => {
   const companyId = user?.companyId ?? undefined;
 
   const { data: menuList = [], isLoading } = useQuery({
-    queryKey: ["dashboard-menus", companyId], 
+    queryKey: ["dashboard-menus", companyId],
     queryFn: async () => {
       const res = await MenuService.getMenus();
 

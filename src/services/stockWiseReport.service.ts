@@ -100,6 +100,14 @@ export const godownwisestockreportservice = {
         ),
 };
 
+export const stockInOutProcessService = {
+    getStockInOutProcess: (params: { Todate: string; Fromdate?: string }) =>
+        axios.get<{ success: boolean; data: any[] }>(
+            `${getBaseURL()}api/reports/externalAPI/stockinoutprocess`,
+            { params }
+        ),
+};
+
 /* ---------------- TRANSACTION APIs ---------------- */
 
 export const itemTransactionService = {

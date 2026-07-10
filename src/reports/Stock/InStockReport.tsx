@@ -41,7 +41,8 @@ import {
 } from "../../services/dayStockAbstract.service";
 import {
     godownwisestockreportservice,
-    stockWiseReport
+    stockWiseReport,
+    stockInOutProcessService
 } from "../../services/stockWiseReport.service";
 
 export interface ColumnConfig {
@@ -157,24 +158,31 @@ const InStockReport: React.FC = () => {
         sessionStorage.setItem("inStockQtyMode", qtyMode);
     }, [qtyMode]);
 
+    const formatQtyVal = (val: any): string => {
+        if (val === null || val === undefined || val === "" || Number(val) === 0) return "-";
+        const num = Number(val);
+        if (isNaN(num)) return String(val);
+        return Number(num.toFixed(2)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    };
+
     const qtyKeys = useMemo(() => {
         if (qtyMode === "qty") {
             return {
                 opening: "OB_Bal_Qty" as keyof stockWiseReport,
-                in: "IN_Qty" as keyof stockWiseReport,
+                in: "Pur_Qty" as keyof stockWiseReport,
                 procIn: "Proc_IN_Qty" as keyof stockWiseReport,
                 procOut: "Proc_OUT_Qty" as keyof stockWiseReport,
-                out: "OUT_Qty" as keyof stockWiseReport,
+                out: "Sal_Qty" as keyof stockWiseReport,
                 closing: "Bal_Qty" as keyof stockWiseReport
             };
         } else {
             return {
                 opening: "OB_Act_Qty" as keyof stockWiseReport,
-                in: "IN_Act_Qty" as keyof stockWiseReport,
+                in: "Pur_Act_Qty" as keyof stockWiseReport,
                 procIn: "Proc_IN_Act_Qty" as keyof stockWiseReport,
                 procOut: "Proc_OUT_Act_Qty" as keyof stockWiseReport,
-                out: "OUT_Act_Qty" as keyof stockWiseReport,
-                closing: "Act_Bal_Qty" as keyof stockWiseReport
+                out: "Sal_Act_Qty" as keyof stockWiseReport,
+                closing: "Bal_Act_Qty" as keyof stockWiseReport
             };
         }
     }, [qtyMode]);
@@ -195,6 +203,7 @@ const InStockReport: React.FC = () => {
     // API Data state
     const [godownListData, setGodownListData] = useState<StockAbstractData4[]>([]);
     const [detailedStockData, setDetailedStockData] = useState<stockWiseReport[]>([]);
+    const [processApiData, setProcessApiData] = useState<any[]>([]);
 
     const handleSetInwardMode = (val: boolean) => {
         setInwardMode(val);
@@ -262,6 +271,17 @@ const InStockReport: React.FC = () => {
             const apiRows = res.data?.data || [];
             setDetailedStockData(apiRows);
 
+            try {
+                const processRes = await stockInOutProcessService.getStockInOutProcess({
+                    Todate: dayjs(toDate).format("YYYY-MM-DD"),
+                    Fromdate: dayjs(fromDate).format("YYYY-MM-DD"),
+                });
+                setProcessApiData(processRes.data?.data || []);
+            } catch (err) {
+                console.error("Failed to load stock in out process details:", err);
+                setProcessApiData([]);
+            }
+
             if (apiRows.length) {
                 const FIXED_KEYS = [
                     "OB_Bal_Qty",
@@ -327,6 +347,7 @@ const InStockReport: React.FC = () => {
             loadDetailedStock(selectedGodown.godown_id);
         } else {
             setDetailedStockData([]);
+            setProcessApiData([]);
         }
     }, [selectedGodown, fromDate, toDate]);
 
@@ -383,6 +404,89 @@ const InStockReport: React.FC = () => {
         return { opening, stockIn, process, stockOut, closing };
     }, [godownListData, qtyMode]);
 
+    // Map stockinoutprocess API data by item_id and godown_name
+    const mappedProcessData = useMemo(() => {
+        const map: Record<string, any[]> = {};
+        processApiData.forEach((record) => {
+            const key = `${record.item_id}_${String(record.godown_name || "").toLowerCase().trim()}`;
+            if (!map[key]) {
+                map[key] = [];
+            }
+            map[key].push(record);
+        });
+        return map;
+    }, [processApiData]);
+
+    // Helper to get mapped details for a product
+    const getProductDetails = useMemo(() => {
+        return (item: stockWiseReport) => {
+            const godownName = String(item.Godown_Name || selectedGodown?.godown_name || "").toLowerCase().trim();
+            const key = `${item.Product_Id}_${godownName}`;
+            const records = mappedProcessData[key] || [];
+
+            const isTrip = (r: any) => {
+                return (
+                    r.trip_voucher_number !== null ||
+                    r.trip_id !== null ||
+                    (r.Trip_No !== null && r.Trip_No !== undefined && String(r.Trip_No).trim() !== "") ||
+                    (r.trip_no !== null && r.trip_no !== undefined && String(r.trip_no).trim() !== "")
+                );
+            };
+
+            const trips = records.filter(
+                (r) =>
+                    r.stock_direction?.toUpperCase() === "IN" &&
+                    isTrip(r)
+            );
+
+            const returns = records.filter(
+                (r) =>
+                    r.stock_direction?.toUpperCase() === "IN" &&
+                    !isTrip(r)
+            );
+            const returnQty = returns.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+            const stockInQty = records
+                .filter((r) => r.stock_direction?.toUpperCase() === "IN")
+                .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+            const procInQty = records
+                .filter((r) => r.stock_direction?.toUpperCase() === "PROCESS IN")
+                .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+            const procOutQty = records
+                .filter((r) => r.stock_direction?.toUpperCase() === "PROCESS OUT")
+                .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+            const outwardQty = records
+                .filter((r) => r.stock_direction?.toUpperCase() === "OUT")
+                .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+            const outTrips = records.filter(
+                (r) =>
+                    r.stock_direction?.toUpperCase() === "OUT" &&
+                    isTrip(r)
+            );
+            const deliveries = records.filter(
+                (r) =>
+                    r.stock_direction?.toUpperCase() === "OUT" &&
+                    !isTrip(r)
+            );
+            const deliveryQty = deliveries.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+            return {
+                trips,
+                returnQty,
+                stockInQty,
+                procInQty,
+                procOutQty,
+                outwardQty,
+                outTrips,
+                deliveryQty
+            };
+        };
+    }, [mappedProcessData, selectedGodown]);
+
     // List of unique brands for filtering in detailed view
     const brands = useMemo(() => {
         const set = new Set<string>();
@@ -424,13 +528,10 @@ const InStockReport: React.FC = () => {
         let stockIn = 0;
         let procIn = 0;
         let procOut = 0;
-        let trip1 = 0;
-        let trip2 = 0;
-        let trip3 = 0;
-        let others1 = 0;
-        let others2 = 0;
-        let others3 = 0;
-        let delivery = 0;
+        let tripQtyTotal = 0;
+        let returnQtyTotal = 0;
+        let outTripQtyTotal = 0;
+        let deliveryQtyTotal = 0;
         let stockOutTotal = 0;
         let closing = 0;
 
@@ -439,33 +540,91 @@ const InStockReport: React.FC = () => {
             const inQty = getStockInTotal(item);
             const outQty = getStockOutTotal(item);
             const clQty = getClosingStock(item);
-            const pIn = getProcIn(item);
-            const pOut = getProcOut(item);
 
             opening += op;
-            stockIn += inQty;
             closing += clQty;
-            procIn += pIn;
-            procOut += pOut;
 
-            // Inward splits (Trips)
-            const t1 = Math.round(inQty * 0.5);
-            const t2 = Math.round(inQty * 0.3);
-            const t3 = Math.max(0, inQty - t1 - t2);
-            trip1 += t1;
-            trip2 += t2;
-            trip3 += t3;
+            const godownName = String(item.Godown_Name || selectedGodown?.godown_name || "").toLowerCase().trim();
+            const key = `${item.Product_Id}_${godownName}`;
+            const records = mappedProcessData[key] || [];
 
-            // Outward splits
-            const o1 = Math.round(outQty * 0.6);
-            const o2 = Math.round(outQty * 0.2);
-            const o3 = Math.round(outQty * 0.1);
-            const del = Math.max(0, outQty - o1 - o2 - o3);
-            others1 += o1;
-            others2 += o2;
-            others3 += o3;
-            delivery += del;
-            stockOutTotal += outQty;
+            if (processApiData.length > 0) {
+                const isTrip = (r: any) => {
+                    return (
+                        r.trip_voucher_number !== null ||
+                        r.trip_id !== null ||
+                        (r.Trip_No !== null && r.Trip_No !== undefined && String(r.Trip_No).trim() !== "") ||
+                        (r.trip_no !== null && r.trip_no !== undefined && String(r.trip_no).trim() !== "")
+                    );
+                };
+                const trips = records.filter(
+                    (r) =>
+                        r.stock_direction?.toUpperCase() === "IN" &&
+                        isTrip(r)
+                );
+                const returns = records.filter(
+                    (r) =>
+                        r.stock_direction?.toUpperCase() === "IN" &&
+                        !isTrip(r)
+                );
+                const itemTripQty = trips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+                const itemReturnQty = returns.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+                const itemStockIn = records
+                    .filter((r) => r.stock_direction?.toUpperCase() === "IN")
+                    .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+                const itemProcIn = records
+                    .filter((r) => r.stock_direction?.toUpperCase() === "PROCESS IN")
+                    .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+                const itemProcOut = records
+                    .filter((r) => r.stock_direction?.toUpperCase() === "PROCESS OUT")
+                    .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+                const outTrips = records.filter(
+                    (r) =>
+                        r.stock_direction?.toUpperCase() === "OUT" &&
+                        isTrip(r)
+                );
+                const deliveries = records.filter(
+                    (r) =>
+                        r.stock_direction?.toUpperCase() === "OUT" &&
+                        !isTrip(r)
+                );
+                const itemOutTripQty = outTrips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+                const itemDeliveryQty = deliveries.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+                const itemStockOut = records
+                    .filter((r) => r.stock_direction?.toUpperCase() === "OUT")
+                    .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+                tripQtyTotal += itemTripQty;
+                returnQtyTotal += itemReturnQty;
+                outTripQtyTotal += itemOutTripQty;
+                deliveryQtyTotal += itemDeliveryQty;
+                procIn += itemProcIn;
+                procOut += itemProcOut;
+                stockIn += itemStockIn;
+                stockOutTotal += itemStockOut;
+            } else {
+                const pIn = getProcIn(item);
+                const pOut = getProcOut(item);
+                procIn += pIn;
+                procOut += pOut;
+                stockIn += inQty;
+                stockOutTotal += outQty;
+
+                const t1 = Math.round(inQty * 0.5);
+                const t2 = Math.round(inQty * 0.3);
+                const t3 = Math.max(0, inQty - t1 - t2);
+                tripQtyTotal += t1 + t2 + t3;
+
+                const o1 = Math.round(outQty * 0.6);
+                const o2 = Math.round(outQty * 0.2);
+                const o3 = Math.round(outQty * 0.1);
+                const del = Math.max(0, outQty - o1 - o2 - o3);
+                outTripQtyTotal += o1 + o2 + o3;
+                deliveryQtyTotal += del;
+            }
         });
 
         return {
@@ -473,77 +632,74 @@ const InStockReport: React.FC = () => {
             stockIn,
             procIn,
             procOut,
-            trip1,
-            trip2,
-            trip3,
-            others1,
-            others2,
-            others3,
-            delivery,
+            tripQtyTotal,
+            returnQtyTotal,
+            outTripQtyTotal,
+            deliveryQtyTotal,
             stockOutTotal,
             closing,
             totalInward: stockIn,
             totalOutward: stockOutTotal,
-            totalProcess: procIn + procOut
+            totalProcess: procIn - procOut
         };
-    }, [filteredData, qtyKeys]);
+    }, [filteredData, qtyKeys, mappedProcessData, processApiData, selectedGodown]);
 
     // Excel Export
     const handleExportExcel = () => {
         try {
             const excelData: any[][] = [];
+            const fmt = (val: any) => {
+                if (val === null || val === undefined || val === "" || val === "-") return "-";
+                const num = Number(val);
+                return isNaN(num) ? val : Number(num.toFixed(2));
+            };
             if (selectedGodown) {
                 excelData.push([`STOCK REPORT - ${selectedGodown.godown_name.toUpperCase()}`]);
                 excelData.push([]);
                 const configLabels = enabledConfigColumns.map(c => c.label);
 
                 if (inwardMode) {
-                    excelData.push(["S.No", ...configLabels, "Opening Stock", "Trip 1", "Trip 2", "Trip 3", "Return", "Total Inward"]);
+                    excelData.push(["S.No", ...configLabels, "Trip Details", "Return", "Total Stock In"]);
                     filteredData.forEach((item, idx) => {
-                        const inQty = getStockInTotal(item);
-                        const t1 = Math.round(inQty * 0.5);
-                        const t2 = Math.round(inQty * 0.3);
-                        const t3 = Math.max(0, inQty - t1 - t2);
-
+                        const { trips, returnQty, stockInQty } = getProductDetails(item);
+                        const tripDetailsStr = trips.map(t => `${Number(Number(t.quantity || 0).toFixed(2))} (Trip No: ${t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || 'N/A'})`).join("\n");
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(getOpeningStock(item), t1, t2, t3, 0, inQty);
-
+                        row.push(tripDetailsStr || "-", fmt(returnQty), fmt(stockInQty));
                         excelData.push(row);
                     });
                 } else if (outwardMode) {
-                    excelData.push(["S.No", ...configLabels, "Opening Stock", "Others 1", "Others 2", "Others 3", "Delivery", "Total Outward"]);
+                    excelData.push(["S.No", ...configLabels, "Out Details", "Delivery", "Total Outward"]);
                     filteredData.forEach((item, idx) => {
-                        const outQty = getStockOutTotal(item);
-                        const o1 = Math.round(outQty * 0.6);
-                        const o2 = Math.round(outQty * 0.2);
-                        const o3 = Math.round(outQty * 0.1);
-                        const del = Math.max(0, outQty - o1 - o2 - o3);
-
+                        const { outTrips, deliveryQty, outwardQty } = getProductDetails(item);
+                        const outDetailsStr = outTrips.map(t => `${Number(Number(t.quantity || 0).toFixed(2))} (Trip No: ${t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || 'N/A'})`).join("\n");
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(getOpeningStock(item), o1, o2, o3, del, outQty);
-
+                        row.push(outDetailsStr || "-", fmt(deliveryQty), fmt(outwardQty));
                         excelData.push(row);
                     });
                 } else if (processMode) {
-                    excelData.push(["S.No", ...configLabels, "Opening Stock", "Process In", "Process Out", "Total Process"]);
+                    excelData.push(["S.No", ...configLabels, "Process In", "Process Out", "Total Process"]);
                     filteredData.forEach((item, idx) => {
+                        const { procInQty, procOutQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        const pIn = getProcIn(item);
-                        const pOut = getProcOut(item);
-                        row.push(getOpeningStock(item), pIn, pOut, pIn + pOut);
-
+                        row.push(fmt(procInQty), fmt(procOutQty), fmt(procInQty - procOutQty));
                         excelData.push(row);
                     });
                 } else {
                     excelData.push(["S.No", ...configLabels, "Opening Stock", "Stock In", "Process", "Stock Outwards", "Closing Stock"]);
                     filteredData.forEach((item, idx) => {
+                        const { stockInQty, procInQty, procOutQty, outwardQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(getOpeningStock(item), getStockInTotal(item), getProcIn(item) + getProcOut(item), getStockOutTotal(item), getClosingStock(item));
-
+                        row.push(
+                            fmt(getOpeningStock(item)),
+                            fmt((processApiData.length > 0 ? stockInQty : getStockInTotal(item))),
+                            fmt((processApiData.length > 0 ? (procInQty - procOutQty) : (getProcIn(item) - getProcOut(item)))),
+                            fmt((processApiData.length > 0 ? outwardQty : getStockOutTotal(item))),
+                            fmt(getClosingStock(item))
+                        );
                         excelData.push(row);
                     });
                 }
@@ -561,17 +717,17 @@ const InStockReport: React.FC = () => {
                     const groupCL = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.CL_ACt_QTY : r.CL_QTY) || 0), 0);
 
                     // Add group row
-                    excelData.push(["", parentName, groupOB, groupIn, groupProcess, groupOut, groupCL]);
+                    excelData.push(["", parentName, fmt(groupOB), fmt(groupIn), fmt(groupProcess), fmt(groupOut), fmt(groupCL)]);
 
                     items.forEach((row) => {
                         excelData.push([
                             sno++,
                             row.godown_name,
-                            Number((qtyMode === "actQty" ? row.ACt_OB_Qty : row.OB_Qty) || 0),
-                            Number((qtyMode === "actQty" ? row.ACt_In_Qty : row.IN_Qty) || 0),
-                            Number((qtyMode === "actQty" ? row.Process_Act_IN_OUT_Qty : row.Process_IN_OUT_Qty) || 0),
-                            Number((qtyMode === "actQty" ? row.ACt_Out_Qty : row.Out_Qty) || 0),
-                            Number((qtyMode === "actQty" ? row.CL_ACt_QTY : row.CL_QTY) || 0)
+                            fmt(Number((qtyMode === "actQty" ? row.ACt_OB_Qty : row.OB_Qty) || 0)),
+                            fmt(Number((qtyMode === "actQty" ? row.ACt_In_Qty : row.IN_Qty) || 0)),
+                            fmt(Number((qtyMode === "actQty" ? row.Process_Act_IN_OUT_Qty : row.Process_IN_OUT_Qty) || 0)),
+                            fmt(Number((qtyMode === "actQty" ? row.ACt_Out_Qty : row.Out_Qty) || 0)),
+                            fmt(Number((qtyMode === "actQty" ? row.CL_ACt_QTY : row.CL_QTY) || 0))
                         ]);
                     });
                 });
@@ -580,14 +736,13 @@ const InStockReport: React.FC = () => {
                 excelData.push([
                     "Total",
                     "",
-                    grandTotals.opening,
-                    grandTotals.stockIn,
-                    grandTotals.process,
-                    grandTotals.stockOut,
-                    grandTotals.closing
+                    fmt(grandTotals.opening),
+                    fmt(grandTotals.stockIn),
+                    fmt(grandTotals.process),
+                    fmt(grandTotals.stockOut),
+                    fmt(grandTotals.closing)
                 ]);
             }
-
             const ws = XLSX.utils.aoa_to_sheet(excelData);
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "Stock Report");
@@ -612,44 +767,44 @@ const InStockReport: React.FC = () => {
             const body: any[][] = [];
             let headers: string[][] = [];
 
+            const fmtStr = (val: any) => {
+                if (val === null || val === undefined || val === "" || val === "-") return "-";
+                const num = Number(val);
+                if (isNaN(num)) return String(val);
+                if (num === 0) return "-";
+                return Number(num.toFixed(2)).toLocaleString();
+            };
+
             if (selectedGodown) {
                 const configLabels = enabledConfigColumns.map(c => c.label);
 
                 if (inwardMode) {
-                    headers = [["S.No", ...configLabels, "Opening", "Trip 1", "Trip 2", "Trip 3", "Return", "Total Inward"]];
+                    headers = [["S.No", ...configLabels, "Trip Details", "Return", "Total Stock In"]];
                     filteredData.forEach((item, idx) => {
-                        const inQty = getStockInTotal(item);
-                        const t1 = Math.round(inQty * 0.5);
-                        const t2 = Math.round(inQty * 0.3);
-                        const t3 = Math.max(0, inQty - t1 - t2);
-
+                        const { trips, returnQty, stockInQty } = getProductDetails(item);
+                        const tripDetailsStr = trips.map(t => `${fmtStr(t.quantity)} (Trip No: ${t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || 'N/A'})`).join("\n");
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(getOpeningStock(item), t1, t2, t3, 0, inQty);
+                        row.push(tripDetailsStr || "-", fmtStr(returnQty), fmtStr(stockInQty));
                         body.push(row);
                     });
                 } else if (outwardMode) {
-                    headers = [["S.No", ...configLabels, "Opening", "Others 1", "Others 2", "Others 3", "Delivery", "Total Outward"]];
+                    headers = [["S.No", ...configLabels, "Out Details", "Delivery", "Total Outward"]];
                     filteredData.forEach((item, idx) => {
-                        const outQty = getStockOutTotal(item);
-                        const o1 = Math.round(outQty * 0.6);
-                        const o2 = Math.round(outQty * 0.2);
-                        const o3 = Math.round(outQty * 0.1);
-                        const del = Math.max(0, outQty - o1 - o2 - o3);
-
+                        const { outTrips, deliveryQty, outwardQty } = getProductDetails(item);
+                        const outDetailsStr = outTrips.map(t => `${fmtStr(t.quantity)} (Trip No: ${t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || 'N/A'})`).join("\n");
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(getOpeningStock(item), o1, o2, o3, del, outQty);
+                        row.push(outDetailsStr || "-", fmtStr(deliveryQty), fmtStr(outwardQty));
                         body.push(row);
                     });
                 } else if (processMode) {
-                    headers = [["S.No", ...configLabels, "Opening", "Process In", "Process Out", "Total Process"]];
+                    headers = [["S.No", ...configLabels, "Process In", "Process Out", "Total Process"]];
                     filteredData.forEach((item, idx) => {
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        const pIn = getProcIn(item);
-                        const pOut = getProcOut(item);
-                        row.push(getOpeningStock(item), pIn, pOut, pIn + pOut);
+                        const { procInQty, procOutQty } = getProductDetails(item);
+                        row.push(fmtStr(procInQty), fmtStr(procOutQty), fmtStr(procInQty - procOutQty));
                         body.push(row);
                     });
                 } else {
@@ -657,7 +812,14 @@ const InStockReport: React.FC = () => {
                     filteredData.forEach((item, idx) => {
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(getOpeningStock(item), getStockInTotal(item), getProcIn(item) + getProcOut(item), getStockOutTotal(item), getClosingStock(item));
+                        const { stockInQty, procInQty, procOutQty, outwardQty } = getProductDetails(item);
+                        row.push(
+                            fmtStr(getOpeningStock(item)),
+                            fmtStr((processApiData.length > 0 ? stockInQty : getStockInTotal(item))),
+                            fmtStr((processApiData.length > 0 ? (procInQty - procOutQty) : (getProcIn(item) - getProcOut(item)))),
+                            fmtStr((processApiData.length > 0 ? outwardQty : getStockOutTotal(item))),
+                            fmtStr(getClosingStock(item))
+                        );
                         body.push(row);
                     });
                 }
@@ -673,17 +835,17 @@ const InStockReport: React.FC = () => {
                     const groupCL = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.CL_ACt_QTY : r.CL_QTY) || 0), 0);
 
                     // Add group row
-                    body.push(["", parentName, groupOB, groupIn, groupProcess, groupOut, groupCL]);
+                    body.push(["", parentName, fmtStr(groupOB), fmtStr(groupIn), fmtStr(groupProcess), fmtStr(groupOut), fmtStr(groupCL)]);
 
                     items.forEach((row) => {
                         body.push([
                             sno++,
                             row.godown_name,
-                            Number((qtyMode === "actQty" ? row.ACt_OB_Qty : row.OB_Qty) || 0),
-                            Number((qtyMode === "actQty" ? row.ACt_In_Qty : row.IN_Qty) || 0),
-                            Number((qtyMode === "actQty" ? row.Process_Act_IN_OUT_Qty : row.Process_IN_OUT_Qty) || 0),
-                            Number((qtyMode === "actQty" ? row.ACt_Out_Qty : row.Out_Qty) || 0),
-                            Number((qtyMode === "actQty" ? row.CL_ACt_QTY : row.CL_QTY) || 0)
+                            fmtStr(Number((qtyMode === "actQty" ? row.ACt_OB_Qty : row.OB_Qty) || 0)),
+                            fmtStr(Number((qtyMode === "actQty" ? row.ACt_In_Qty : row.IN_Qty) || 0)),
+                            fmtStr(Number((qtyMode === "actQty" ? row.Process_Act_IN_OUT_Qty : row.Process_IN_OUT_Qty) || 0)),
+                            fmtStr(Number((qtyMode === "actQty" ? row.ACt_Out_Qty : row.Out_Qty) || 0)),
+                            fmtStr(Number((qtyMode === "actQty" ? row.CL_ACt_QTY : row.CL_QTY) || 0))
                         ]);
                     });
                 });
@@ -691,22 +853,22 @@ const InStockReport: React.FC = () => {
                 // Add grand total row
                 body.push([
                     "",
-                    "GRAND TOTAL",
-                    grandTotals.opening,
-                    grandTotals.stockIn,
-                    grandTotals.process,
-                    grandTotals.stockOut,
-                    grandTotals.closing
+                    "Total",
+                    fmtStr(grandTotals.opening),
+                    fmtStr(grandTotals.stockIn),
+                    fmtStr(grandTotals.process),
+                    fmtStr(grandTotals.stockOut),
+                    fmtStr(grandTotals.closing)
                 ]);
             }
 
-            autoTable(doc, {
-                startY: 20,
+                        autoTable(doc, {
                 head: headers,
                 body: body,
-                styles: { fontSize: 8, cellPadding: 1.5 },
-                headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
-                theme: "grid"
+                startY: 18,
+                theme: "grid",
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [30, 58, 138] },
             });
 
             const filename = `Stock_Report_${selectedGodown ? selectedGodown.godown_name.replace(/\s+/g, '_') : 'Overall'}_${dayjs().format("YYYYMMDD_HHmmss")}.pdf`;
@@ -724,9 +886,9 @@ const InStockReport: React.FC = () => {
 
     const getTotalColumns = () => {
         const L = enabledConfigColumns.length;
-        if (inwardMode) return L + 7;
-        if (outwardMode) return L + 7;
-        if (processMode) return L + 5;
+        if (inwardMode) return L + 4;
+        if (outwardMode) return L + 4;
+        if (processMode) return L + 4;
         return L + 6;
     };
 
@@ -1019,7 +1181,9 @@ const InStockReport: React.FC = () => {
                                             {col.label.toUpperCase()}
                                         </TableCell>
                                     ))}
-                                    <TableCell align="right" sx={{ width: (inwardMode || outwardMode || processMode) ? "10%" : "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OPENING STOCK</TableCell>
+                                    {!inwardMode && !outwardMode && !processMode && (
+                                        <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OPENING STOCK</TableCell>
+                                    )}
 
                                     {/* Stock In Header - Clicking toggles inwardMode. Shown only in Normal Mode */}
                                     {!inwardMode && !outwardMode && !processMode && (
@@ -1050,12 +1214,10 @@ const InStockReport: React.FC = () => {
                                         </TableCell>
                                     )}
 
-                                    {/* Show RETURN, TRIP 1, TRIP 2, TRIP 3, and TOTAL INWARD columns when inwardMode is active */}
+                                    {/* Show TRIP DETAILS, RETURN, and TOTAL STOCK IN columns when inwardMode is active */}
                                     {inwardMode && (
                                         <>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>TRIP 1</TableCell>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>TRIP 2</TableCell>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>TRIP 3</TableCell>
+                                            <TableCell align="left" sx={{ width: "20%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>TRIP DETAILS</TableCell>
                                             <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>RETURN</TableCell>
                                             <TableCell
                                                 align="right"
@@ -1075,7 +1237,7 @@ const InStockReport: React.FC = () => {
                                                 }}
                                             >
                                                 <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
-                                                    TOTAL INWARD <KeyboardArrowUpIcon fontSize="small" />
+                                                    TOTAL STOCK IN <KeyboardArrowUpIcon fontSize="small" />
                                                 </Box>
                                             </TableCell>
                                         </>
@@ -1169,9 +1331,7 @@ const InStockReport: React.FC = () => {
                                     {/* Show splits for Stock Outwards when outwardMode is active */}
                                     {outwardMode && (
                                         <>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OTHERS 1</TableCell>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OTHERS 2</TableCell>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OTHERS 3</TableCell>
+                                            <TableCell align="left" sx={{ width: "20%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OUT DETAILS</TableCell>
                                             <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>DELIVERY</TableCell>
                                             <TableCell
                                                 align="right"
@@ -1209,34 +1369,30 @@ const InStockReport: React.FC = () => {
                                         <TableCell colSpan={1 + enabledConfigColumns.length} align="center" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
                                             GRAND TOTAL
                                         </TableCell>
-                                        <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                            {detailedTotals.opening.toLocaleString()}
-                                        </TableCell>
+                                        {!inwardMode && !outwardMode && !processMode && (
+                                            <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                {formatQtyVal(detailedTotals.opening)}
+                                            </TableCell>
+                                        )}
 
                                         {/* Normal Mode: Stock In */}
                                         {!inwardMode && !outwardMode && !processMode && (
                                             <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                {detailedTotals.totalInward.toLocaleString()}
+                                                {formatQtyVal(detailedTotals.totalInward)}
                                             </TableCell>
                                         )}
 
-                                        {/* Inward Mode: Trip 1, Trip 2, Trip 3, Returns, Total Inward */}
+                                        {/* Inward Mode: Trip Details & Returns & Total Stock In */}
                                         {inwardMode && (
                                             <>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.trip1.toLocaleString()}
+                                                <TableCell align="left" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pl: 1 }}>
+                                                    {formatQtyVal(detailedTotals.tripQtyTotal)}
                                                 </TableCell>
                                                 <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.trip2.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.trip3.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                    -
+                                                    {formatQtyVal(detailedTotals.returnQtyTotal)}
                                                 </TableCell>
                                                 <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af" }}>
-                                                    {detailedTotals.totalInward.toLocaleString()}
+                                                    {formatQtyVal(detailedTotals.totalInward)}
                                                 </TableCell>
                                             </>
                                         )}
@@ -1244,7 +1400,7 @@ const InStockReport: React.FC = () => {
                                         {/* Normal Mode: Process */}
                                         {!inwardMode && !outwardMode && !processMode && (
                                             <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                {detailedTotals.totalProcess.toLocaleString()}
+                                                {formatQtyVal(detailedTotals.totalProcess)}
                                             </TableCell>
                                         )}
 
@@ -1252,13 +1408,13 @@ const InStockReport: React.FC = () => {
                                         {processMode && (
                                             <>
                                                 <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.procIn.toLocaleString()}
+                                                    {formatQtyVal(detailedTotals.procIn)}
                                                 </TableCell>
                                                 <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.procOut.toLocaleString()}
+                                                    {formatQtyVal(detailedTotals.procOut)}
                                                 </TableCell>
                                                 <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af" }}>
-                                                    {detailedTotals.totalProcess.toLocaleString()}
+                                                    {formatQtyVal(detailedTotals.totalProcess)}
                                                 </TableCell>
                                             </>
                                         )}
@@ -1266,27 +1422,21 @@ const InStockReport: React.FC = () => {
                                         {/* Normal Mode: Stock Outwards */}
                                         {!inwardMode && !outwardMode && !processMode && (
                                             <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                {detailedTotals.totalOutward.toLocaleString()}
+                                                {formatQtyVal(detailedTotals.totalOutward)}
                                             </TableCell>
                                         )}
 
-                                        {/* Outward Mode: Others 1, 2, 3, Delivery, and Total Outward */}
+                                        {/* Outward Mode: Out Details & Delivery & Total Outward */}
                                         {outwardMode && (
                                             <>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.others1.toLocaleString()}
+                                                <TableCell align="left" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pl: 1 }}>
+                                                    {formatQtyVal(detailedTotals.outTripQtyTotal)}
                                                 </TableCell>
                                                 <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.others2.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.others3.toLocaleString()}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
-                                                    {detailedTotals.delivery.toLocaleString()}
+                                                    {formatQtyVal(detailedTotals.deliveryQtyTotal)}
                                                 </TableCell>
                                                 <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#b91c1c" }}>
-                                                    {detailedTotals.totalOutward.toLocaleString()}
+                                                    {formatQtyVal(detailedTotals.totalOutward)}
                                                 </TableCell>
                                             </>
                                         )}
@@ -1294,7 +1444,7 @@ const InStockReport: React.FC = () => {
                                         {/* Normal Mode: Closing */}
                                         {!inwardMode && !outwardMode && !processMode && (
                                             <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#15803d" }}>
-                                                {detailedTotals.closing.toLocaleString()}
+                                                {formatQtyVal(detailedTotals.closing)}
                                             </TableCell>
                                         )}
                                     </TableRow>
@@ -1319,15 +1469,7 @@ const InStockReport: React.FC = () => {
                                         const stockOut = getStockOutTotal(item);
                                         const closing = getClosingStock(item);
 
-                                        // splits
-                                        const trip1 = Math.round(stockIn * 0.5);
-                                        const trip2 = Math.round(stockIn * 0.3);
-                                        const trip3 = Math.max(0, stockIn - trip1 - trip2);
-
-                                        const others1 = Math.round(stockOut * 0.6);
-                                        const others2 = Math.round(stockOut * 0.2);
-                                        const others3 = Math.round(stockOut * 0.1);
-                                        const delivery = Math.max(0, stockOut - others1 - others2 - others3);
+                                        const { trips, returnQty, stockInQty, procInQty, procOutQty, outwardQty, outTrips, deliveryQty } = getProductDetails(item);
 
                                         return (
                                             <React.Fragment key={idx}>
@@ -1372,34 +1514,38 @@ const InStockReport: React.FC = () => {
                                                             </TableCell>
                                                         );
                                                     })}
-                                                    <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                        {openingStock || "-"}
-                                                    </TableCell>
-
-                                                    {/* Inward Mode or Normal Mode: Render Stock In */}
                                                     {!inwardMode && !outwardMode && !processMode && (
-                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: stockIn > 0 ? "#2563eb" : "#475569" }}>
-                                                            {stockIn || "-"}
+                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
+                                                            {formatQtyVal(openingStock)}
                                                         </TableCell>
                                                     )}
 
-                                                    {/* Inward Mode: Render TRIP 1, TRIP 2, TRIP 3, RETURN, and TOTAL INWARD */}
+                                                    {/* Inward Mode or Normal Mode: Render Stock In */}
+                                                    {!inwardMode && !outwardMode && !processMode && (
+                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: (processApiData.length > 0 ? stockInQty : stockIn) > 0 ? "#2563eb" : "#475569" }}>
+                                                            {formatQtyVal(processApiData.length > 0 ? stockInQty : stockIn)}
+                                                        </TableCell>
+                                                    )}
+
+                                                    {/* Inward Mode: Render TRIP DETAILS and RETURN */}
                                                     {inwardMode && (
                                                         <>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                                {trip1 || "-"}
+                                                            <TableCell align="left" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, color: "#475569" }}>
+                                                                {trips.length > 0 ? (
+                                                                    <Box display="flex" flexDirection="column" gap={0.5}>
+                                                                        {trips.map((t, tIdx) => (
+                                                                            <Box key={tIdx} sx={{ fontSize: "0.8rem", whiteSpace: "nowrap" }}>
+                                                                                {formatQtyVal(t.quantity)} (Trip No: {t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || "N/A"})
+                                                                            </Box>
+                                                                        ))}
+                                                                    </Box>
+                                                                ) : "-"}
                                                             </TableCell>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                                {trip2 || "-"}
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                                {trip3 || "-"}
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                                -
+                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: returnQty > 0 ? "#475569" : "#475569" }}>
+                                                                {formatQtyVal(returnQty)}
                                                             </TableCell>
                                                             <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af" }}>
-                                                                {stockIn || "-"}
+                                                                {formatQtyVal(stockInQty)}
                                                             </TableCell>
                                                         </>
                                                     )}
@@ -1407,7 +1553,7 @@ const InStockReport: React.FC = () => {
                                                     {/* Normal Mode: Render Process */}
                                                     {!inwardMode && !outwardMode && !processMode && (
                                                         <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                            {(getProcIn(item) + getProcOut(item)) || "-"}
+                                                            {formatQtyVal(processApiData.length > 0 ? (procInQty - procOutQty) : (getProcIn(item) - getProcOut(item)))}
                                                         </TableCell>
                                                     )}
 
@@ -1415,13 +1561,13 @@ const InStockReport: React.FC = () => {
                                                     {processMode && (
                                                         <>
                                                             <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                                {getProcIn(item) || "-"}
+                                                                {formatQtyVal(procInQty)}
                                                             </TableCell>
                                                             <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                                {getProcOut(item) || "-"}
+                                                                {formatQtyVal(procOutQty)}
                                                             </TableCell>
                                                             <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af" }}>
-                                                                {(getProcIn(item) + getProcOut(item)) || "-"}
+                                                                {formatQtyVal(procInQty - procOutQty)}
                                                             </TableCell>
                                                         </>
                                                     )}
@@ -1434,30 +1580,32 @@ const InStockReport: React.FC = () => {
                                                                 borderRight: "1px solid #e2e8f0",
                                                                 fontWeight: 600,
                                                                 pr: 2,
-                                                                color: stockOut > 0 ? "#ef4444" : "#475569"
+                                                                color: (processApiData.length > 0 ? outwardQty : stockOut) > 0 ? "#ef4444" : "#475569"
                                                             }}
                                                         >
-                                                            {stockOut || "-"}
+                                                            {formatQtyVal(processApiData.length > 0 ? outwardQty : stockOut)}
                                                         </TableCell>
                                                     )}
 
-                                                    {/* Outward Mode: Render OTHERS 1, OTHERS 2, OTHERS 3, DELIVERY, and TOTAL OUTWARD */}
+                                                    {/* Outward Mode: Render OUT DETAILS, DELIVERY, and TOTAL OUTWARD */}
                                                     {outwardMode && (
                                                         <>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                                {others1 || "-"}
+                                                            <TableCell align="left" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, color: "#475569" }}>
+                                                                {outTrips.length > 0 ? (
+                                                                    <Box display="flex" flexDirection="column" gap={0.5}>
+                                                                        {outTrips.map((t, tIdx) => (
+                                                                            <Box key={tIdx} sx={{ fontSize: "0.8rem", whiteSpace: "nowrap" }}>
+                                                                                {formatQtyVal(t.quantity)} (Trip No: {t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || "N/A"})
+                                                                            </Box>
+                                                                        ))}
+                                                                    </Box>
+                                                                ) : "-"}
                                                             </TableCell>
                                                             <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                                {others2 || "-"}
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                                {others3 || "-"}
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                                {delivery || "-"}
+                                                                {formatQtyVal(deliveryQty)}
                                                             </TableCell>
                                                             <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#fef2f2", color: "#b91c1c" }}>
-                                                                {stockOut || "-"}
+                                                                {formatQtyVal(outwardQty)}
                                                             </TableCell>
                                                         </>
                                                     )}
@@ -1473,7 +1621,7 @@ const InStockReport: React.FC = () => {
                                                                 color: closing > 0 ? "#15803d" : "#475569"
                                                             }}
                                                         >
-                                                            {closing}
+                                                            {formatQtyVal(closing)}
                                                         </TableCell>
                                                     )}
                                                 </TableRow>

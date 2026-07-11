@@ -36,6 +36,7 @@ import StaffBasedCountReport from "../reports/StaffBased/staffBasedCountReport";
 import DayAbstractReport from "../reports/Abstract/DayAbstractReport";
 import StockAbstractReport from "../reports/Abstract/StockAbstractReport";
 import CashBoxReport from "../reports/Abstract/CashBoxReport";
+import BankAbstractReport from "../reports/Abstract/BankAbstractReport";
 import PendingSaleOrder from "../reports/Sales/PendingSaleOrderReport";
 import InStockReport from "../reports/Stock/InStockReport";
 import RetailerLocations from "./RetailerLocations";
@@ -475,6 +476,17 @@ const AppRouting: React.FC<AppRoutingProps> = ({
             <RequireAuth>
               <AppLayout fullWidth>
                 <CashBoxReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/bankAbstract"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <BankAbstractReport />
               </AppLayout>
             </RequireAuth>
           }

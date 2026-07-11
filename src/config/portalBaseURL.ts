@@ -12,15 +12,15 @@
 // export default api;
 
 export const getHostAPI = (): string => {
-  const { protocol, hostname, port } = window.location;
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.startsWith("192.168.")) {
-    return `${protocol}//${hostname}:9001/api/`;
-  }
-  return `${protocol}//${hostname}${port ? `:${port}` : ""}/api/`;
+  // const { protocol, hostname, port } = window.location;
+  // if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.startsWith("192.168.")) {
+  //   return `${protocol}//${hostname}:9001/api/`;
+  // }
+  // return `${protocol}//${hostname}${port ? `:${port}` : ""}/api/`;
 
-  // const { protocol, host } = window.location, api = `${protocol}//${host}/api/`;
+  const { protocol, host } = window.location, api = `${protocol}//${host}/api/`;
 
-  // return api
+  return api
 };
 
 

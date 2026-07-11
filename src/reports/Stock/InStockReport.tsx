@@ -505,9 +505,29 @@ const InStockReport: React.FC = () => {
             const matchesSearch = productName.toLowerCase().includes(searchText.toLowerCase()) ||
                 brandName.toLowerCase().includes(searchText.toLowerCase());
             const matchesBrand = selectedBrand === "All" || brandName === selectedBrand;
-            return matchesSearch && matchesBrand;
+
+            if (!matchesSearch || !matchesBrand) return false;
+
+            if (inwardMode) {
+                const { stockInQty } = getProductDetails(item);
+                const totalStockIn = processApiData.length > 0 ? stockInQty : Number(item[qtyKeys.in] || 0);
+                if (totalStockIn <= 0) return false;
+            }
+            if (processMode) {
+                const { procInQty, procOutQty } = getProductDetails(item);
+                const totalProcIn = processApiData.length > 0 ? procInQty : Number(item[qtyKeys.procIn] || 0);
+                const totalProcOut = processApiData.length > 0 ? procOutQty : Number(item[qtyKeys.procOut] || 0);
+                if (totalProcIn <= 0 && totalProcOut <= 0) return false;
+            }
+            if (outwardMode) {
+                const { outwardQty } = getProductDetails(item);
+                const totalStockOut = processApiData.length > 0 ? outwardQty : Number(item[qtyKeys.out] || 0);
+                if (totalStockOut <= 0) return false;
+            }
+
+            return true;
         });
-    }, [detailedStockData, searchText, selectedBrand]);
+    }, [detailedStockData, searchText, selectedBrand, inwardMode, processMode, outwardMode, getProductDetails, qtyKeys, processApiData]);
 
     // Slice data for pagination
     const paginatedData = useMemo(() => {
@@ -669,7 +689,7 @@ const InStockReport: React.FC = () => {
                         excelData.push(row);
                     });
                 } else if (outwardMode) {
-                    excelData.push(["S.No", ...configLabels, "Out Details", "Delivery", "Total Outward"]);
+                    excelData.push(["S.No", ...configLabels, "Out Details", "Pending Delivery", "Total Outward"]);
                     filteredData.forEach((item, idx) => {
                         const { outTrips, deliveryQty, outwardQty } = getProductDetails(item);
                         const outDetailsStr = outTrips.map(t => `${Number(Number(t.quantity || 0).toFixed(2))} (Trip No: ${t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || 'N/A'})`).join("\n");
@@ -789,7 +809,7 @@ const InStockReport: React.FC = () => {
                         body.push(row);
                     });
                 } else if (outwardMode) {
-                    headers = [["S.No", ...configLabels, "Out Details", "Delivery", "Total Outward"]];
+                    headers = [["S.No", ...configLabels, "Out Details", "Pending Delivery", "Total Outward"]];
                     filteredData.forEach((item, idx) => {
                         const { outTrips, deliveryQty, outwardQty } = getProductDetails(item);
                         const outDetailsStr = outTrips.map(t => `${fmtStr(t.quantity)} (Trip No: ${t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || 'N/A'})`).join("\n");
@@ -862,7 +882,7 @@ const InStockReport: React.FC = () => {
                 ]);
             }
 
-                        autoTable(doc, {
+            autoTable(doc, {
                 head: headers,
                 body: body,
                 startY: 18,
@@ -1332,7 +1352,7 @@ const InStockReport: React.FC = () => {
                                     {outwardMode && (
                                         <>
                                             <TableCell align="left" sx={{ width: "20%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OUT DETAILS</TableCell>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>DELIVERY</TableCell>
+                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PENDING DELIVERY</TableCell>
                                             <TableCell
                                                 align="right"
                                                 onClick={() => handleSetOutwardMode(false)}

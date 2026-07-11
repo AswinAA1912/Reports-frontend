@@ -295,10 +295,12 @@ const Dashboard: React.FC = () => {
           sx={{
             flex: 1,
             px: isMobile ? 2 : 6,
-            py: isMobile ? 2 : 0,
+            py: isMobile ? 4 : 4,
             display: "flex",
             flexDirection: "column",
-            justifyContent: "center",
+            justifyContent: "flex-start",
+            overflowY: "auto",
+            maxHeight: "100%",
           }}
         >
           <Typography fontSize={22} fontWeight={700} mb={2}>

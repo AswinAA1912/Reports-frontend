@@ -200,6 +200,10 @@ const InStockReport: React.FC = () => {
     const [outwardMode, setOutwardMode] = useState(false);
     const [processMode, setProcessMode] = useState(false);
 
+    // Dynamic sticky header height calculation
+    const headerRowRef = React.useRef<HTMLTableRowElement>(null);
+    const [headerHeight, setHeaderHeight] = useState(41);
+
     // API Data state
     const [godownListData, setGodownListData] = useState<StockAbstractData4[]>([]);
     const [detailedStockData, setDetailedStockData] = useState<stockWiseReport[]>([]);
@@ -487,6 +491,8 @@ const InStockReport: React.FC = () => {
         };
     }, [mappedProcessData, selectedGodown]);
 
+
+
     // List of unique brands for filtering in detailed view
     const brands = useMemo(() => {
         const set = new Set<string>();
@@ -528,6 +534,93 @@ const InStockReport: React.FC = () => {
             return true;
         });
     }, [detailedStockData, searchText, selectedBrand, inwardMode, processMode, outwardMode, getProductDetails, qtyKeys, processApiData]);
+
+    const getTripLabel = React.useCallback((t: any): string => {
+        const rawVal = t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id;
+        if (!rawVal) return "N/A";
+        const str = String(rawVal).trim();
+        if (str.toLowerCase().startsWith("trip")) {
+            return str;
+        }
+        return `Trip - ${str}`;
+    }, []);
+
+    const getQtyForTrip = React.useCallback((tripsList: any[], label: string): number => {
+        return tripsList
+            .filter(t => getTripLabel(t) === label)
+            .reduce((sum, t) => sum + Number(t.quantity || 0), 0);
+    }, [getTripLabel]);
+
+    // Unique inward trip headers in filteredData
+    const inwardTripHeaders = useMemo(() => {
+        if (!inwardMode) return [];
+        const set = new Set<string>();
+        filteredData.forEach((item) => {
+            const { trips } = getProductDetails(item);
+            trips.forEach((t) => {
+                set.add(getTripLabel(t));
+            });
+        });
+        return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    }, [filteredData, inwardMode, getProductDetails, getTripLabel]);
+
+    // Unique outward trip headers in filteredData
+    const outwardTripHeaders = useMemo(() => {
+        if (!outwardMode) return [];
+        const set = new Set<string>();
+        filteredData.forEach((item) => {
+            const { outTrips } = getProductDetails(item);
+            outTrips.forEach((t) => {
+                set.add(getTripLabel(t));
+            });
+        });
+        return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    }, [filteredData, outwardMode, getProductDetails, getTripLabel]);
+
+    // Calculate total quantity for each trip in inwardMode
+    const inwardTripTotals = useMemo(() => {
+        const totals: Record<string, number> = {};
+        inwardTripHeaders.forEach(label => {
+            let sum = 0;
+            filteredData.forEach(item => {
+                const { trips } = getProductDetails(item);
+                sum += getQtyForTrip(trips, label);
+            });
+            totals[label] = sum;
+        });
+        return totals;
+    }, [filteredData, inwardTripHeaders, getProductDetails, getQtyForTrip]);
+
+    // Calculate total quantity for each trip in outwardMode
+    const outwardTripTotals = useMemo(() => {
+        const totals: Record<string, number> = {};
+        outwardTripHeaders.forEach(label => {
+            let sum = 0;
+            filteredData.forEach(item => {
+                const { outTrips } = getProductDetails(item);
+                sum += getQtyForTrip(outTrips, label);
+            });
+            totals[label] = sum;
+        });
+        return totals;
+    }, [filteredData, outwardTripHeaders, getProductDetails, getQtyForTrip]);
+
+    useEffect(() => {
+        const handleResize = () => {
+            if (headerRowRef.current) {
+                setHeaderHeight(headerRowRef.current.offsetHeight);
+            }
+        };
+        window.addEventListener("resize", handleResize);
+        
+        handleResize();
+        const t = setTimeout(handleResize, 100);
+
+        return () => {
+            window.removeEventListener("resize", handleResize);
+            clearTimeout(t);
+        };
+    }, [filteredData, inwardMode, outwardMode, processMode, columnsConfig, searchText, page, rowsPerPage]);
 
     // Slice data for pagination
     const paginatedData = useMemo(() => {
@@ -679,23 +772,33 @@ const InStockReport: React.FC = () => {
                 const configLabels = enabledConfigColumns.map(c => c.label);
 
                 if (inwardMode) {
-                    excelData.push(["S.No", ...configLabels, "Trip Details", "Return", "Total Stock In"]);
+                    excelData.push(["S.No", ...configLabels, ...inwardTripHeaders, "Return", "Total Stock In"]);
                     filteredData.forEach((item, idx) => {
                         const { trips, returnQty, stockInQty } = getProductDetails(item);
-                        const tripDetailsStr = trips.map(t => `${Number(Number(t.quantity || 0).toFixed(2))} (Trip No: ${t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || 'N/A'})`).join("\n");
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(tripDetailsStr || "-", fmt(returnQty), fmt(stockInQty));
+                        
+                        inwardTripHeaders.forEach(tripLabel => {
+                            const qty = getQtyForTrip(trips, tripLabel);
+                            row.push(qty === 0 ? "-" : fmt(qty));
+                        });
+
+                        row.push(fmt(returnQty), fmt(stockInQty));
                         excelData.push(row);
                     });
                 } else if (outwardMode) {
-                    excelData.push(["S.No", ...configLabels, "Out Details", "Pending Delivery", "Total Outward"]);
+                    excelData.push(["S.No", ...configLabels, ...outwardTripHeaders, "Pending Delivery", "Total Outward"]);
                     filteredData.forEach((item, idx) => {
                         const { outTrips, deliveryQty, outwardQty } = getProductDetails(item);
-                        const outDetailsStr = outTrips.map(t => `${Number(Number(t.quantity || 0).toFixed(2))} (Trip No: ${t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || 'N/A'})`).join("\n");
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(outDetailsStr || "-", fmt(deliveryQty), fmt(outwardQty));
+                        
+                        outwardTripHeaders.forEach(tripLabel => {
+                            const qty = getQtyForTrip(outTrips, tripLabel);
+                            row.push(qty === 0 ? "-" : fmt(qty));
+                        });
+
+                        row.push(fmt(deliveryQty), fmt(outwardQty));
                         excelData.push(row);
                     });
                 } else if (processMode) {
@@ -799,23 +902,33 @@ const InStockReport: React.FC = () => {
                 const configLabels = enabledConfigColumns.map(c => c.label);
 
                 if (inwardMode) {
-                    headers = [["S.No", ...configLabels, "Trip Details", "Return", "Total Stock In"]];
+                    headers = [["S.No", ...configLabels, ...inwardTripHeaders, "Return", "Total Stock In"]];
                     filteredData.forEach((item, idx) => {
                         const { trips, returnQty, stockInQty } = getProductDetails(item);
-                        const tripDetailsStr = trips.map(t => `${fmtStr(t.quantity)} (Trip No: ${t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || 'N/A'})`).join("\n");
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(tripDetailsStr || "-", fmtStr(returnQty), fmtStr(stockInQty));
+
+                        inwardTripHeaders.forEach(tripLabel => {
+                            const qty = getQtyForTrip(trips, tripLabel);
+                            row.push(fmtStr(qty));
+                        });
+
+                        row.push(fmtStr(returnQty), fmtStr(stockInQty));
                         body.push(row);
                     });
                 } else if (outwardMode) {
-                    headers = [["S.No", ...configLabels, "Out Details", "Pending Delivery", "Total Outward"]];
+                    headers = [["S.No", ...configLabels, ...outwardTripHeaders, "Pending Delivery", "Total Outward"]];
                     filteredData.forEach((item, idx) => {
                         const { outTrips, deliveryQty, outwardQty } = getProductDetails(item);
-                        const outDetailsStr = outTrips.map(t => `${fmtStr(t.quantity)} (Trip No: ${t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || 'N/A'})`).join("\n");
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(outDetailsStr || "-", fmtStr(deliveryQty), fmtStr(outwardQty));
+
+                        outwardTripHeaders.forEach(tripLabel => {
+                            const qty = getQtyForTrip(outTrips, tripLabel);
+                            row.push(fmtStr(qty));
+                        });
+
+                        row.push(fmtStr(deliveryQty), fmtStr(outwardQty));
                         body.push(row);
                     });
                 } else if (processMode) {
@@ -899,15 +1012,12 @@ const InStockReport: React.FC = () => {
             toast.error("Failed to export PDF ❌");
         }
     };
-    const remainingWidth = (inwardMode || outwardMode || processMode) ? 33 : 42;
-    const colWidth = enabledConfigColumns.length > 0
-        ? `${remainingWidth / enabledConfigColumns.length}%`
-        : "auto";
+
 
     const getTotalColumns = () => {
         const L = enabledConfigColumns.length;
-        if (inwardMode) return L + 4;
-        if (outwardMode) return L + 4;
+        if (inwardMode) return L + inwardTripHeaders.length + 3;
+        if (outwardMode) return L + outwardTripHeaders.length + 3;
         if (processMode) return L + 4;
         return L + 6;
     };
@@ -1172,7 +1282,7 @@ const InStockReport: React.FC = () => {
                             size="small"
                             stickyHeader
                             sx={{
-                                tableLayout: "fixed",
+                                tableLayout: (inwardMode || outwardMode) ? "auto" : "fixed",
                                 width: "100%",
                                 "& .MuiTableCell-root": {
                                     whiteSpace: "normal",
@@ -1184,25 +1294,30 @@ const InStockReport: React.FC = () => {
                             }}
                         >
                             <TableHead>
-                                <TableRow>
-                                    <TableCell align="center" sx={{ width: (inwardMode || outwardMode || processMode) ? "5%" : "6%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>S.NO</TableCell>
-                                    {enabledConfigColumns.map((col) => (
-                                        <TableCell
-                                            key={col.key}
-                                            sx={{
-                                                width: colWidth,
-                                                backgroundColor: "#1E3A8A",
-                                                color: "#fff",
-                                                fontWeight: 600,
-                                                py: 1.5,
-                                                borderRight: "1px solid #cbd5e1"
-                                            }}
-                                        >
-                                            {col.label.toUpperCase()}
-                                        </TableCell>
-                                    ))}
+                                <TableRow ref={headerRowRef}>
+                                    <TableCell align="center" sx={{ width: 60, minWidth: 60, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>S.NO</TableCell>
+                                    {enabledConfigColumns.map((col) => {
+                                        const isProduct = col.key === "stock_item_name" || col.key === "Stock_Item";
+                                        const w = isProduct ? 280 : 150;
+                                        return (
+                                            <TableCell
+                                                key={col.key}
+                                                sx={{
+                                                    width: w,
+                                                    minWidth: w,
+                                                    backgroundColor: "#1E3A8A",
+                                                    color: "#fff",
+                                                    fontWeight: 600,
+                                                    py: 1.5,
+                                                    borderRight: "1px solid #cbd5e1"
+                                                }}
+                                            >
+                                                {col.label.toUpperCase()}
+                                            </TableCell>
+                                        );
+                                    })}
                                     {!inwardMode && !outwardMode && !processMode && (
-                                        <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OPENING STOCK</TableCell>
+                                        <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OPENING STOCK</TableCell>
                                     )}
 
                                     {/* Stock In Header - Clicking toggles inwardMode. Shown only in Normal Mode */}
@@ -1213,7 +1328,8 @@ const InStockReport: React.FC = () => {
                                                 handleSetInwardMode(true);
                                             }}
                                             sx={{
-                                                width: "12%",
+                                                width: 120,
+                                                minWidth: 120,
                                                 backgroundColor: "#1E3A8A",
                                                 color: "#fff",
                                                 fontWeight: 600,
@@ -1237,13 +1353,30 @@ const InStockReport: React.FC = () => {
                                     {/* Show TRIP DETAILS, RETURN, and TOTAL STOCK IN columns when inwardMode is active */}
                                     {inwardMode && (
                                         <>
-                                            <TableCell align="left" sx={{ width: "20%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>TRIP DETAILS</TableCell>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>RETURN</TableCell>
+                                            {inwardTripHeaders.map((tripLabel) => (
+                                                <TableCell
+                                                    key={tripLabel}
+                                                    align="right"
+                                                    sx={{
+                                                        width: 110,
+                                                        minWidth: 110,
+                                                        backgroundColor: "#1E3A8A",
+                                                        color: "#fff",
+                                                        fontWeight: 600,
+                                                        py: 1.5,
+                                                        borderRight: "1px solid #cbd5e1"
+                                                    }}
+                                                >
+                                                    {tripLabel.toUpperCase()}
+                                                </TableCell>
+                                            ))}
+                                            <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>RETURN</TableCell>
                                             <TableCell
                                                 align="right"
                                                 onClick={() => handleSetInwardMode(false)}
                                                 sx={{
-                                                    width: "12%",
+                                                    width: 140,
+                                                    minWidth: 140,
                                                     backgroundColor: "#111827",
                                                     color: "#fff",
                                                     fontWeight: 700,
@@ -1269,7 +1402,8 @@ const InStockReport: React.FC = () => {
                                             align="right"
                                             onClick={() => handleSetProcessMode(true)}
                                             sx={{
-                                                width: "12%",
+                                                width: 120,
+                                                minWidth: 120,
                                                 backgroundColor: "#1E3A8A",
                                                 color: "#fff",
                                                 fontWeight: 600,
@@ -1293,13 +1427,14 @@ const InStockReport: React.FC = () => {
                                     {/* Show PROCESS IN, PROCESS OUT, and TOTAL PROCESS columns when processMode is active */}
                                     {processMode && (
                                         <>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PROCESS IN</TableCell>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PROCESS OUT</TableCell>
+                                            <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PROCESS IN</TableCell>
+                                            <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PROCESS OUT</TableCell>
                                             <TableCell
                                                 align="right"
                                                 onClick={() => handleSetProcessMode(false)}
                                                 sx={{
-                                                    width: "12%",
+                                                    width: 140,
+                                                    minWidth: 140,
                                                     backgroundColor: "#111827",
                                                     color: "#fff",
                                                     fontWeight: 700,
@@ -1327,7 +1462,8 @@ const InStockReport: React.FC = () => {
                                                 handleSetOutwardMode(true);
                                             }}
                                             sx={{
-                                                width: "12%",
+                                                width: 120,
+                                                minWidth: 120,
                                                 backgroundColor: "#1E3A8A",
                                                 color: "#fff",
                                                 fontWeight: 600,
@@ -1351,13 +1487,30 @@ const InStockReport: React.FC = () => {
                                     {/* Show splits for Stock Outwards when outwardMode is active */}
                                     {outwardMode && (
                                         <>
-                                            <TableCell align="left" sx={{ width: "20%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OUT DETAILS</TableCell>
-                                            <TableCell align="right" sx={{ width: "10%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PENDING DELIVERY</TableCell>
+                                            {outwardTripHeaders.map((tripLabel) => (
+                                                <TableCell
+                                                    key={tripLabel}
+                                                    align="right"
+                                                    sx={{
+                                                        width: 110,
+                                                        minWidth: 110,
+                                                        backgroundColor: "#1E3A8A",
+                                                        color: "#fff",
+                                                        fontWeight: 600,
+                                                        py: 1.5,
+                                                        borderRight: "1px solid #cbd5e1"
+                                                    }}
+                                                >
+                                                    {tripLabel.toUpperCase()}
+                                                </TableCell>
+                                            ))}
+                                            <TableCell align="right" sx={{ width: 130, minWidth: 130, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PENDING DELIVERY</TableCell>
                                             <TableCell
                                                 align="right"
                                                 onClick={() => handleSetOutwardMode(false)}
                                                 sx={{
-                                                    width: "12%",
+                                                    width: 140,
+                                                    minWidth: 140,
                                                     backgroundColor: "#111827",
                                                     color: "#fff",
                                                     fontWeight: 700,
@@ -1379,25 +1532,25 @@ const InStockReport: React.FC = () => {
 
                                     {/* Closing Stock is shown in Normal Mode */}
                                     {!inwardMode && !outwardMode && !processMode && (
-                                        <TableCell align="right" sx={{ width: "12%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5 }}>
+                                        <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5 }}>
                                             CLOSING STOCK
                                         </TableCell>
                                     )}
                                 </TableRow>
                                 {paginatedData.length > 0 && (
                                     <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
-                                        <TableCell colSpan={1 + enabledConfigColumns.length} align="center" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
+                                        <TableCell colSpan={1 + enabledConfigColumns.length} align="center" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
                                             GRAND TOTAL
                                         </TableCell>
                                         {!inwardMode && !outwardMode && !processMode && (
-                                            <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                            <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
                                                 {formatQtyVal(detailedTotals.opening)}
                                             </TableCell>
                                         )}
 
                                         {/* Normal Mode: Stock In */}
                                         {!inwardMode && !outwardMode && !processMode && (
-                                            <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                            <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
                                                 {formatQtyVal(detailedTotals.totalInward)}
                                             </TableCell>
                                         )}
@@ -1405,13 +1558,15 @@ const InStockReport: React.FC = () => {
                                         {/* Inward Mode: Trip Details & Returns & Total Stock In */}
                                         {inwardMode && (
                                             <>
-                                                <TableCell align="left" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pl: 1 }}>
-                                                    {formatQtyVal(detailedTotals.tripQtyTotal)}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                {inwardTripHeaders.map((tripLabel) => (
+                                                    <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 110, minWidth: 110 }}>
+                                                        {formatQtyVal(inwardTripTotals[tripLabel])}
+                                                    </TableCell>
+                                                ))}
+                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
                                                     {formatQtyVal(detailedTotals.returnQtyTotal)}
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af" }}>
+                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af", width: 140, minWidth: 140 }}>
                                                     {formatQtyVal(detailedTotals.totalInward)}
                                                 </TableCell>
                                             </>
@@ -1419,7 +1574,7 @@ const InStockReport: React.FC = () => {
 
                                         {/* Normal Mode: Process */}
                                         {!inwardMode && !outwardMode && !processMode && (
-                                            <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                            <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
                                                 {formatQtyVal(detailedTotals.totalProcess)}
                                             </TableCell>
                                         )}
@@ -1427,13 +1582,13 @@ const InStockReport: React.FC = () => {
                                         {/* Process Mode: PROCESS IN, PROCESS OUT, TOTAL PROCESS */}
                                         {processMode && (
                                             <>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
                                                     {formatQtyVal(detailedTotals.procIn)}
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
                                                     {formatQtyVal(detailedTotals.procOut)}
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af" }}>
+                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af", width: 140, minWidth: 140 }}>
                                                     {formatQtyVal(detailedTotals.totalProcess)}
                                                 </TableCell>
                                             </>
@@ -1441,7 +1596,7 @@ const InStockReport: React.FC = () => {
 
                                         {/* Normal Mode: Stock Outwards */}
                                         {!inwardMode && !outwardMode && !processMode && (
-                                            <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                            <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
                                                 {formatQtyVal(detailedTotals.totalOutward)}
                                             </TableCell>
                                         )}
@@ -1449,13 +1604,15 @@ const InStockReport: React.FC = () => {
                                         {/* Outward Mode: Out Details & Delivery & Total Outward */}
                                         {outwardMode && (
                                             <>
-                                                <TableCell align="left" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pl: 1 }}>
-                                                    {formatQtyVal(detailedTotals.outTripQtyTotal)}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                                {outwardTripHeaders.map((tripLabel) => (
+                                                    <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 110, minWidth: 110 }}>
+                                                        {formatQtyVal(outwardTripTotals[tripLabel])}
+                                                    </TableCell>
+                                                ))}
+                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 130, minWidth: 130 }}>
                                                     {formatQtyVal(detailedTotals.deliveryQtyTotal)}
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#b91c1c" }}>
+                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#b91c1c", width: 140, minWidth: 140 }}>
                                                     {formatQtyVal(detailedTotals.totalOutward)}
                                                 </TableCell>
                                             </>
@@ -1463,7 +1620,7 @@ const InStockReport: React.FC = () => {
 
                                         {/* Normal Mode: Closing */}
                                         {!inwardMode && !outwardMode && !processMode && (
-                                            <TableCell align="right" sx={{ position: "sticky", top: "41px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#15803d" }}>
+                                            <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#15803d", width: 120, minWidth: 120 }}>
                                                 {formatQtyVal(detailedTotals.closing)}
                                             </TableCell>
                                         )}
@@ -1514,20 +1671,24 @@ const InStockReport: React.FC = () => {
                                                 )}
                                                 {/* Data Row */}
                                                 <TableRow hover sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
-                                                    <TableCell align="center" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, color: "#475569" }}>
+                                                    <TableCell align="center" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, color: "#475569", width: 60, minWidth: 60 }}>
                                                         {sNo}
                                                     </TableCell>
                                                     {enabledConfigColumns.map((col) => {
                                                         const val = item[col.key] ?? "-";
+                                                        const isProduct = col.key === "stock_item_name" || col.key === "Stock_Item";
+                                                        const w = isProduct ? 280 : 150;
                                                         return (
                                                             <TableCell
                                                                 key={col.key}
                                                                 sx={{
                                                                     borderRight: "1px solid #e2e8f0",
-                                                                    fontWeight: col.key === "stock_item_name" || col.key === "Stock_Item" ? 700 : 600,
-                                                                    color: col.key === "stock_item_name" || col.key === "Stock_Item" ? "#1e293b" : "#475569",
+                                                                    fontWeight: isProduct ? 700 : 600,
+                                                                    color: isProduct ? "#1e293b" : "#475569",
                                                                     wordBreak: "break-word",
-                                                                    whiteSpace: "normal"
+                                                                    whiteSpace: "normal",
+                                                                    width: w,
+                                                                    minWidth: w
                                                                 }}
                                                             >
                                                                 {val}
@@ -1535,36 +1696,33 @@ const InStockReport: React.FC = () => {
                                                         );
                                                     })}
                                                     {!inwardMode && !outwardMode && !processMode && (
-                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
+                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
                                                             {formatQtyVal(openingStock)}
                                                         </TableCell>
                                                     )}
 
                                                     {/* Inward Mode or Normal Mode: Render Stock In */}
                                                     {!inwardMode && !outwardMode && !processMode && (
-                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: (processApiData.length > 0 ? stockInQty : stockIn) > 0 ? "#2563eb" : "#475569" }}>
+                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: (processApiData.length > 0 ? stockInQty : stockIn) > 0 ? "#2563eb" : "#475569", width: 120, minWidth: 120 }}>
                                                             {formatQtyVal(processApiData.length > 0 ? stockInQty : stockIn)}
                                                         </TableCell>
                                                     )}
 
-                                                    {/* Inward Mode: Render TRIP DETAILS and RETURN */}
+                                                    {/* Inward Mode: Render dynamic TRIP columns, RETURN and TOTAL STOCK IN */}
                                                     {inwardMode && (
                                                         <>
-                                                            <TableCell align="left" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, color: "#475569" }}>
-                                                                {trips.length > 0 ? (
-                                                                    <Box display="flex" flexDirection="column" gap={0.5}>
-                                                                        {trips.map((t, tIdx) => (
-                                                                            <Box key={tIdx} sx={{ fontSize: "0.8rem", whiteSpace: "nowrap" }}>
-                                                                                {formatQtyVal(t.quantity)} (Trip No: {t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || "N/A"})
-                                                                            </Box>
-                                                                        ))}
-                                                                    </Box>
-                                                                ) : "-"}
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: returnQty > 0 ? "#475569" : "#475569" }}>
+                                                            {inwardTripHeaders.map((tripLabel) => {
+                                                                const qty = getQtyForTrip(trips, tripLabel);
+                                                                return (
+                                                                    <TableCell key={tripLabel} align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: qty > 0 ? "#1e293b" : "#94a3b8", width: 110, minWidth: 110 }}>
+                                                                        {formatQtyVal(qty)}
+                                                                    </TableCell>
+                                                                );
+                                                            })}
+                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: returnQty > 0 ? "#475569" : "#475569", width: 120, minWidth: 120 }}>
                                                                 {formatQtyVal(returnQty)}
                                                             </TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af" }}>
+                                                            <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af", width: 140, minWidth: 140 }}>
                                                                 {formatQtyVal(stockInQty)}
                                                             </TableCell>
                                                         </>
@@ -1572,7 +1730,7 @@ const InStockReport: React.FC = () => {
 
                                                     {/* Normal Mode: Render Process */}
                                                     {!inwardMode && !outwardMode && !processMode && (
-                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
+                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
                                                             {formatQtyVal(processApiData.length > 0 ? (procInQty - procOutQty) : (getProcIn(item) - getProcOut(item)))}
                                                         </TableCell>
                                                     )}
@@ -1580,13 +1738,13 @@ const InStockReport: React.FC = () => {
                                                     {/* Process Mode: Render PROCESS IN, PROCESS OUT, and TOTAL PROCESS */}
                                                     {processMode && (
                                                         <>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
+                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
                                                                 {formatQtyVal(procInQty)}
                                                             </TableCell>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
+                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
                                                                 {formatQtyVal(procOutQty)}
                                                             </TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af" }}>
+                                                            <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af", width: 140, minWidth: 140 }}>
                                                                 {formatQtyVal(procInQty - procOutQty)}
                                                             </TableCell>
                                                         </>
@@ -1600,31 +1758,30 @@ const InStockReport: React.FC = () => {
                                                                 borderRight: "1px solid #e2e8f0",
                                                                 fontWeight: 600,
                                                                 pr: 2,
-                                                                color: (processApiData.length > 0 ? outwardQty : stockOut) > 0 ? "#ef4444" : "#475569"
+                                                                color: (processApiData.length > 0 ? outwardQty : stockOut) > 0 ? "#ef4444" : "#475569",
+                                                                width: 120,
+                                                                minWidth: 120
                                                             }}
                                                         >
                                                             {formatQtyVal(processApiData.length > 0 ? outwardQty : stockOut)}
                                                         </TableCell>
                                                     )}
 
-                                                    {/* Outward Mode: Render OUT DETAILS, DELIVERY, and TOTAL OUTWARD */}
+                                                    {/* Outward Mode: Render dynamic TRIP columns, PENDING DELIVERY, and TOTAL OUTWARD */}
                                                     {outwardMode && (
                                                         <>
-                                                            <TableCell align="left" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, color: "#475569" }}>
-                                                                {outTrips.length > 0 ? (
-                                                                    <Box display="flex" flexDirection="column" gap={0.5}>
-                                                                        {outTrips.map((t, tIdx) => (
-                                                                            <Box key={tIdx} sx={{ fontSize: "0.8rem", whiteSpace: "nowrap" }}>
-                                                                                {formatQtyVal(t.quantity)} (Trip No: {t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id || "N/A"})
-                                                                            </Box>
-                                                                        ))}
-                                                                    </Box>
-                                                                ) : "-"}
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
+                                                            {outwardTripHeaders.map((tripLabel) => {
+                                                                const qty = getQtyForTrip(outTrips, tripLabel);
+                                                                return (
+                                                                    <TableCell key={tripLabel} align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: qty > 0 ? "#1e293b" : "#94a3b8", width: 110, minWidth: 110 }}>
+                                                                        {formatQtyVal(qty)}
+                                                                    </TableCell>
+                                                                );
+                                                            })}
+                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 130, minWidth: 130 }}>
                                                                 {formatQtyVal(deliveryQty)}
                                                             </TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#fef2f2", color: "#b91c1c" }}>
+                                                            <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#fef2f2", color: "#b91c1c", width: 140, minWidth: 140 }}>
                                                                 {formatQtyVal(outwardQty)}
                                                             </TableCell>
                                                         </>
@@ -1638,7 +1795,9 @@ const InStockReport: React.FC = () => {
                                                                 fontWeight: 700,
                                                                 pr: 2,
                                                                 backgroundColor: closing > 0 ? "#dcfce7" : "transparent",
-                                                                color: closing > 0 ? "#15803d" : "#475569"
+                                                                color: closing > 0 ? "#15803d" : "#475569",
+                                                                width: 120,
+                                                                minWidth: 120
                                                             }}
                                                         >
                                                             {formatQtyVal(closing)}

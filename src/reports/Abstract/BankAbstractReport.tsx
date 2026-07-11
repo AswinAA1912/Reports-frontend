@@ -34,8 +34,9 @@ interface GroupConfig {
 }
 
 const DEBIT_GROUPS: GroupConfig[] = [
-    { key: "cash_paid", label: "Cash Withdraw (Contra)", side: "debit", masterKey: "Cash" },
+
     { key: "bank_dep", label: "Bank Transfer (Contra)", side: "debit", masterKey: "Bank" },
+    { key: "cash_paid", label: "Cash Withdraw (Contra)", side: "debit", masterKey: "Cash" },
     { key: "ledger_pay", label: "Ledger Groups (Payment)", side: "debit", masterKey: "LedgerGrp" },
     { key: "dex_deb", label: "Direct Expenses", side: "debit", masterKey: "DEX" },
     { key: "idex_deb", label: "In-Direct Expenses", side: "debit", masterKey: "IDEX" },
@@ -43,8 +44,8 @@ const DEBIT_GROUPS: GroupConfig[] = [
 ];
 
 const CREDIT_GROUPS: GroupConfig[] = [
-    { key: "cash_rec", label: "Cash Deposit (Contra)", side: "credit", masterKey: "Cash" },
     { key: "bank_rec", label: "Bank Received (Contra)", side: "credit", masterKey: "Bank" },
+    { key: "cash_rec", label: "Cash Deposit (Contra)", side: "credit", masterKey: "Cash" },
     { key: "ledger_rec", label: "Ledger Groups (Receipts)", side: "credit", masterKey: "LedgerGrp" },
     { key: "dex_cred", label: "Direct Expenses- Income", side: "credit", masterKey: "DEX" },
     { key: "idex_cred", label: "InDirect Expenses- Income", side: "credit", masterKey: "IDEX" },

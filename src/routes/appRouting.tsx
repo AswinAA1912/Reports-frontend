@@ -403,7 +403,7 @@ const AppRouting: React.FC<AppRoutingProps> = ({
         />
 
         <Route
-          path="/transaction-details/:accId/:partyName"
+          path="/transaction-details/:accId"
           element={
             <RequireAuth>
               <AppLayout>

@@ -1877,7 +1877,7 @@ const OutstandingReport: React.FC = () => {
                                                                                     size="small"
                                                                                     onClick={() =>
                                                                                         window.open(
-                                                                                            `/transaction-details/${row.Acc_Id}/${encodeURIComponent(
+                                                                                            `/transaction-details/${row.Acc_Id}?partyName=${encodeURIComponent(
                                                                                                 row.Retailer_Name
                                                                                             )}`,
                                                                                             "_blank"

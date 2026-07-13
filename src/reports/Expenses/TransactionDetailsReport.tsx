@@ -53,8 +53,8 @@ const TransactionDetailsReport:
 
         const {
             accId,
-            partyName,
         } = useParams();
+        const partyName = new URLSearchParams(window.location.search).get("partyName");
 
         /* ================= DEFAULT LAST 30 DAYS ================= */
 

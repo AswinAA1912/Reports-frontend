@@ -24,6 +24,8 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import SettingsIcon from "@mui/icons-material/Settings";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
+import CloseIcon from "@mui/icons-material/Close";
+import AddIcon from "@mui/icons-material/Add";
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import { arrayMove, SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -200,6 +202,32 @@ const InStockReport: React.FC = () => {
     const [outwardMode, setOutwardMode] = useState(false);
     const [processMode, setProcessMode] = useState(false);
 
+    // Hidden dynamic columns
+    const [hiddenInwardColumns, setHiddenInwardColumns] = useState<string[]>([]);
+    const [hiddenOutwardColumns, setHiddenOutwardColumns] = useState<string[]>([]);
+    const [hiddenProcessColumns, setHiddenProcessColumns] = useState<string[]>([]);
+
+    const handleHideInwardColumn = (col: string) => {
+        setHiddenInwardColumns(prev => [...prev, col]);
+    };
+    const handleShowInwardColumn = (col: string) => {
+        setHiddenInwardColumns(prev => prev.filter(c => c !== col));
+    };
+
+    const handleHideOutwardColumn = (col: string) => {
+        setHiddenOutwardColumns(prev => [...prev, col]);
+    };
+    const handleShowOutwardColumn = (col: string) => {
+        setHiddenOutwardColumns(prev => prev.filter(c => c !== col));
+    };
+
+    const handleHideProcessColumn = (col: string) => {
+        setHiddenProcessColumns(prev => [...prev, col]);
+    };
+    const handleShowProcessColumn = (col: string) => {
+        setHiddenProcessColumns(prev => prev.filter(c => c !== col));
+    };
+
     // Dynamic sticky header height calculation
     const headerRowRef = React.useRef<HTMLTableRowElement>(null);
     const [headerHeight, setHeaderHeight] = useState(41);
@@ -214,6 +242,8 @@ const InStockReport: React.FC = () => {
         if (val) {
             setOutwardMode(false);
             setProcessMode(false);
+        } else {
+            setHiddenInwardColumns([]);
         }
     };
 
@@ -222,6 +252,8 @@ const InStockReport: React.FC = () => {
         if (val) {
             setInwardMode(false);
             setProcessMode(false);
+        } else {
+            setHiddenOutwardColumns([]);
         }
     };
 
@@ -230,6 +262,8 @@ const InStockReport: React.FC = () => {
         if (val) {
             setInwardMode(false);
             setOutwardMode(false);
+        } else {
+            setHiddenProcessColumns([]);
         }
     };
 
@@ -757,6 +791,115 @@ const InStockReport: React.FC = () => {
         };
     }, [filteredData, qtyKeys, mappedProcessData, processApiData, selectedGodown]);
 
+    // Recalculated row-level Stock In Quantity summing only visible columns
+    const getRecalculatedStockInQty = React.useCallback((item: stockWiseReport) => {
+        const { trips, returnQty } = getProductDetails(item);
+        let sum = 0;
+        inwardTripHeaders.forEach((tripLabel) => {
+            if (!hiddenInwardColumns.includes(tripLabel)) {
+                sum += getQtyForTrip(trips, tripLabel);
+            }
+        });
+        if (!hiddenInwardColumns.includes("RETURN")) {
+            sum += returnQty;
+        }
+        return sum;
+    }, [getProductDetails, inwardTripHeaders, hiddenInwardColumns, getQtyForTrip]);
+
+    // Recalculated row-level Stock Out Quantity summing only visible columns
+    const getRecalculatedStockOutQty = React.useCallback((item: stockWiseReport) => {
+        const { outTrips, deliveryQty } = getProductDetails(item);
+        let sum = 0;
+        outwardTripHeaders.forEach((tripLabel) => {
+            if (!hiddenOutwardColumns.includes(tripLabel)) {
+                sum += getQtyForTrip(outTrips, tripLabel);
+            }
+        });
+        if (!hiddenOutwardColumns.includes("PENDING DELIVERY")) {
+            sum += deliveryQty;
+        }
+        return sum;
+    }, [getProductDetails, outwardTripHeaders, hiddenOutwardColumns, getQtyForTrip]);
+
+    // Recalculated row-level Process Quantity summing only visible columns
+    const getRecalculatedProcessQty = React.useCallback((item: stockWiseReport) => {
+        let pIn = 0;
+        let pOut = 0;
+        if (processApiData.length > 0) {
+            const { procInQty, procOutQty } = getProductDetails(item);
+            pIn = procInQty;
+            pOut = procOutQty;
+        } else {
+            pIn = getProcIn(item);
+            pOut = getProcOut(item);
+        }
+        
+        let sum = 0;
+        if (!hiddenProcessColumns.includes("PROCESS IN")) {
+            sum += pIn;
+        }
+        if (!hiddenProcessColumns.includes("PROCESS OUT")) {
+            sum -= pOut;
+        }
+        return sum;
+    }, [getProductDetails, hiddenProcessColumns, processApiData, qtyKeys]);
+
+    // Memoized recalculated grand totals
+    const recalculatedTotals = useMemo(() => {
+        // 1. Inward total
+        let inwardTotal = 0;
+        if (processApiData.length > 0) {
+            inwardTripHeaders.forEach(tripLabel => {
+                if (!hiddenInwardColumns.includes(tripLabel)) {
+                    inwardTotal += inwardTripTotals[tripLabel] || 0;
+                }
+            });
+            if (!hiddenInwardColumns.includes("RETURN")) {
+                inwardTotal += detailedTotals.returnQtyTotal;
+            }
+        } else {
+            inwardTotal = detailedTotals.stockIn;
+        }
+
+        // 2. Outward total
+        let outwardTotal = 0;
+        if (processApiData.length > 0) {
+            outwardTripHeaders.forEach(tripLabel => {
+                if (!hiddenOutwardColumns.includes(tripLabel)) {
+                    outwardTotal += outwardTripTotals[tripLabel] || 0;
+                }
+            });
+            if (!hiddenOutwardColumns.includes("PENDING DELIVERY")) {
+                outwardTotal += detailedTotals.deliveryQtyTotal;
+            }
+        } else {
+            outwardTotal = detailedTotals.stockOutTotal;
+        }
+
+        // 3. Process total
+        let visibleProcIn = 0;
+        let visibleProcOut = 0;
+        visibleProcIn = !hiddenProcessColumns.includes("PROCESS IN") ? detailedTotals.procIn : 0;
+        visibleProcOut = !hiddenProcessColumns.includes("PROCESS OUT") ? detailedTotals.procOut : 0;
+        const processTotal = visibleProcIn - visibleProcOut;
+
+        return {
+            inwardTotal,
+            outwardTotal,
+            processTotal
+        };
+    }, [
+        processApiData,
+        inwardTripHeaders,
+        inwardTripTotals,
+        hiddenInwardColumns,
+        detailedTotals,
+        outwardTripHeaders,
+        outwardTripTotals,
+        hiddenOutwardColumns,
+        hiddenProcessColumns
+    ]);
+
     // Excel Export
     const handleExportExcel = () => {
         try {
@@ -772,42 +915,73 @@ const InStockReport: React.FC = () => {
                 const configLabels = enabledConfigColumns.map(c => c.label);
 
                 if (inwardMode) {
-                    excelData.push(["S.No", ...configLabels, ...inwardTripHeaders, "Return", "Total Stock In"]);
+                    const visibleTrips = inwardTripHeaders.filter(t => !hiddenInwardColumns.includes(t));
+                    const isReturnVisible = !hiddenInwardColumns.includes("RETURN");
+                    
+                    const inwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
+                    if (isReturnVisible) inwardHeaderRow.push("Return");
+                    inwardHeaderRow.push("Total Stock In");
+                    excelData.push(inwardHeaderRow);
+
                     filteredData.forEach((item, idx) => {
-                        const { trips, returnQty, stockInQty } = getProductDetails(item);
+                        const { trips, returnQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
                         
-                        inwardTripHeaders.forEach(tripLabel => {
+                        visibleTrips.forEach(tripLabel => {
                             const qty = getQtyForTrip(trips, tripLabel);
                             row.push(qty === 0 ? "-" : fmt(qty));
                         });
 
-                        row.push(fmt(returnQty), fmt(stockInQty));
+                        if (isReturnVisible) {
+                            row.push(fmt(returnQty));
+                        }
+                        row.push(fmt(getRecalculatedStockInQty(item)));
                         excelData.push(row);
                     });
                 } else if (outwardMode) {
-                    excelData.push(["S.No", ...configLabels, ...outwardTripHeaders, "Pending Delivery", "Total Outward"]);
+                    const visibleTrips = outwardTripHeaders.filter(t => !hiddenOutwardColumns.includes(t));
+                    const isPendingVisible = !hiddenOutwardColumns.includes("PENDING DELIVERY");
+                    
+                    const outwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
+                    if (isPendingVisible) outwardHeaderRow.push("Pending Delivery");
+                    outwardHeaderRow.push("Total Outward");
+                    excelData.push(outwardHeaderRow);
+
                     filteredData.forEach((item, idx) => {
-                        const { outTrips, deliveryQty, outwardQty } = getProductDetails(item);
+                        const { outTrips, deliveryQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
                         
-                        outwardTripHeaders.forEach(tripLabel => {
+                        visibleTrips.forEach(tripLabel => {
                             const qty = getQtyForTrip(outTrips, tripLabel);
                             row.push(qty === 0 ? "-" : fmt(qty));
                         });
 
-                        row.push(fmt(deliveryQty), fmt(outwardQty));
+                        if (isPendingVisible) {
+                            row.push(fmt(deliveryQty));
+                        }
+                        row.push(fmt(getRecalculatedStockOutQty(item)));
                         excelData.push(row);
                     });
                 } else if (processMode) {
-                    excelData.push(["S.No", ...configLabels, "Process In", "Process Out", "Total Process"]);
+                    const isProcessInVisible = !hiddenProcessColumns.includes("PROCESS IN");
+                    const isProcessOutVisible = !hiddenProcessColumns.includes("PROCESS OUT");
+
+                    const processHeaderRow = ["S.No", ...configLabels];
+                    if (isProcessInVisible) processHeaderRow.push("Process In");
+                    if (isProcessOutVisible) processHeaderRow.push("Process Out");
+                    processHeaderRow.push("Total Process");
+                    excelData.push(processHeaderRow);
+
                     filteredData.forEach((item, idx) => {
                         const { procInQty, procOutQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        row.push(fmt(procInQty), fmt(procOutQty), fmt(procInQty - procOutQty));
+                        
+                        if (isProcessInVisible) row.push(fmt(procInQty));
+                        if (isProcessOutVisible) row.push(fmt(procOutQty));
+                        row.push(fmt(getRecalculatedProcessQty(item)));
                         excelData.push(row);
                     });
                 } else {
@@ -902,42 +1076,73 @@ const InStockReport: React.FC = () => {
                 const configLabels = enabledConfigColumns.map(c => c.label);
 
                 if (inwardMode) {
-                    headers = [["S.No", ...configLabels, ...inwardTripHeaders, "Return", "Total Stock In"]];
+                    const visibleTrips = inwardTripHeaders.filter(t => !hiddenInwardColumns.includes(t));
+                    const isReturnVisible = !hiddenInwardColumns.includes("RETURN");
+                    
+                    const inwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
+                    if (isReturnVisible) inwardHeaderRow.push("Return");
+                    inwardHeaderRow.push("Total Stock In");
+                    headers = [inwardHeaderRow];
+
                     filteredData.forEach((item, idx) => {
-                        const { trips, returnQty, stockInQty } = getProductDetails(item);
+                        const { trips, returnQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
 
-                        inwardTripHeaders.forEach(tripLabel => {
+                        visibleTrips.forEach(tripLabel => {
                             const qty = getQtyForTrip(trips, tripLabel);
                             row.push(fmtStr(qty));
                         });
 
-                        row.push(fmtStr(returnQty), fmtStr(stockInQty));
+                        if (isReturnVisible) {
+                            row.push(fmtStr(returnQty));
+                        }
+                        row.push(fmtStr(getRecalculatedStockInQty(item)));
                         body.push(row);
                     });
                 } else if (outwardMode) {
-                    headers = [["S.No", ...configLabels, ...outwardTripHeaders, "Pending Delivery", "Total Outward"]];
+                    const visibleTrips = outwardTripHeaders.filter(t => !hiddenOutwardColumns.includes(t));
+                    const isPendingVisible = !hiddenOutwardColumns.includes("PENDING DELIVERY");
+
+                    const outwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
+                    if (isPendingVisible) outwardHeaderRow.push("Pending Delivery");
+                    outwardHeaderRow.push("Total Outward");
+                    headers = [outwardHeaderRow];
+
                     filteredData.forEach((item, idx) => {
-                        const { outTrips, deliveryQty, outwardQty } = getProductDetails(item);
+                        const { outTrips, deliveryQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
 
-                        outwardTripHeaders.forEach(tripLabel => {
+                        visibleTrips.forEach(tripLabel => {
                             const qty = getQtyForTrip(outTrips, tripLabel);
                             row.push(fmtStr(qty));
                         });
 
-                        row.push(fmtStr(deliveryQty), fmtStr(outwardQty));
+                        if (isPendingVisible) {
+                            row.push(fmtStr(deliveryQty));
+                        }
+                        row.push(fmtStr(getRecalculatedStockOutQty(item)));
                         body.push(row);
                     });
                 } else if (processMode) {
-                    headers = [["S.No", ...configLabels, "Process In", "Process Out", "Total Process"]];
+                    const isProcessInVisible = !hiddenProcessColumns.includes("PROCESS IN");
+                    const isProcessOutVisible = !hiddenProcessColumns.includes("PROCESS OUT");
+
+                    const processHeaderRow = ["S.No", ...configLabels];
+                    if (isProcessInVisible) processHeaderRow.push("Process In");
+                    if (isProcessOutVisible) processHeaderRow.push("Process Out");
+                    processHeaderRow.push("Total Process");
+                    headers = [processHeaderRow];
+
                     filteredData.forEach((item, idx) => {
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
                         const { procInQty, procOutQty } = getProductDetails(item);
-                        row.push(fmtStr(procInQty), fmtStr(procOutQty), fmtStr(procInQty - procOutQty));
+
+                        if (isProcessInVisible) row.push(fmtStr(procInQty));
+                        if (isProcessOutVisible) row.push(fmtStr(procOutQty));
+                        row.push(fmtStr(getRecalculatedProcessQty(item)));
                         body.push(row);
                     });
                 } else {
@@ -1016,9 +1221,21 @@ const InStockReport: React.FC = () => {
 
     const getTotalColumns = () => {
         const L = enabledConfigColumns.length;
-        if (inwardMode) return L + inwardTripHeaders.length + 3;
-        if (outwardMode) return L + outwardTripHeaders.length + 3;
-        if (processMode) return L + 4;
+        if (inwardMode) {
+            const visibleTripsCount = inwardTripHeaders.filter(t => !hiddenInwardColumns.includes(t)).length;
+            const isReturnVisible = !hiddenInwardColumns.includes("RETURN") ? 1 : 0;
+            return L + visibleTripsCount + isReturnVisible + 2; // S.No + Config + Trips + Return + Total Stock In
+        }
+        if (outwardMode) {
+            const visibleTripsCount = outwardTripHeaders.filter(t => !hiddenOutwardColumns.includes(t)).length;
+            const isPendingVisible = !hiddenOutwardColumns.includes("PENDING DELIVERY") ? 1 : 0;
+            return L + visibleTripsCount + isPendingVisible + 2; // S.No + Config + Trips + Pending Delivery + Total Outward
+        }
+        if (processMode) {
+            const visibleIn = !hiddenProcessColumns.includes("PROCESS IN") ? 1 : 0;
+            const visibleOut = !hiddenProcessColumns.includes("PROCESS OUT") ? 1 : 0;
+            return L + visibleIn + visibleOut + 2; // S.No + Config + Proc In + Proc Out + Total Process
+        }
         return L + 6;
     };
 
@@ -1266,6 +1483,64 @@ const InStockReport: React.FC = () => {
                         ))}
                     </Box>
 
+                    {/* Hidden Columns Bar */}
+                    {inwardMode && hiddenInwardColumns.length > 0 && (
+                        <Box sx={{ display: "flex", gap: 1, alignItems: "center", mb: 2, flexWrap: "wrap", p: 1.2, bgcolor: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 1.5 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: "#1e40af", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                Hidden Columns (Click to Restore):
+                            </Typography>
+                            {hiddenInwardColumns.map((col) => (
+                                <Chip
+                                    key={col}
+                                    label={col}
+                                    size="small"
+                                    onClick={() => handleShowInwardColumn(col)}
+                                    color="primary"
+                                    icon={<AddIcon fontSize="small" />}
+                                    sx={{ fontWeight: 600, bgcolor: "#1e40af", color: "#fff", "& .MuiChip-icon": { color: "#fff" } }}
+                                />
+                            ))}
+                        </Box>
+                    )}
+
+                    {outwardMode && hiddenOutwardColumns.length > 0 && (
+                        <Box sx={{ display: "flex", gap: 1, alignItems: "center", mb: 2, flexWrap: "wrap", p: 1.2, bgcolor: "#fef2f2", border: "1px solid #fecaca", borderRadius: 1.5 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: "#991b1b", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                Hidden Columns (Click to Restore):
+                            </Typography>
+                            {hiddenOutwardColumns.map((col) => (
+                                <Chip
+                                    key={col}
+                                    label={col}
+                                    size="small"
+                                    onClick={() => handleShowOutwardColumn(col)}
+                                    color="error"
+                                    icon={<AddIcon fontSize="small" />}
+                                    sx={{ fontWeight: 600, bgcolor: "#b91c1c", color: "#fff", "& .MuiChip-icon": { color: "#fff" } }}
+                                />
+                            ))}
+                        </Box>
+                    )}
+
+                    {processMode && hiddenProcessColumns.length > 0 && (
+                        <Box sx={{ display: "flex", gap: 1, alignItems: "center", mb: 2, flexWrap: "wrap", p: 1.2, bgcolor: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 1.5 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: "#166534", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                Hidden Columns (Click to Restore):
+                            </Typography>
+                            {hiddenProcessColumns.map((col) => (
+                                <Chip
+                                    key={col}
+                                    label={col}
+                                    size="small"
+                                    onClick={() => handleShowProcessColumn(col)}
+                                    color="success"
+                                    icon={<AddIcon fontSize="small" />}
+                                    sx={{ fontWeight: 600, bgcolor: "#15803d", color: "#fff", "& .MuiChip-icon": { color: "#fff" } }}
+                                />
+                            ))}
+                        </Box>
+                    )}
+
                     {/* Detailed Stock Table Container */}
                     <TableContainer
                         component={Paper}
@@ -1353,24 +1628,60 @@ const InStockReport: React.FC = () => {
                                     {/* Show TRIP DETAILS, RETURN, and TOTAL STOCK IN columns when inwardMode is active */}
                                     {inwardMode && (
                                         <>
-                                            {inwardTripHeaders.map((tripLabel) => (
+                                            {inwardTripHeaders.map((tripLabel) => {
+                                                if (hiddenInwardColumns.includes(tripLabel)) return null;
+                                                return (
+                                                    <TableCell
+                                                        key={tripLabel}
+                                                        align="right"
+                                                        sx={{
+                                                            width: 120,
+                                                            minWidth: 120,
+                                                            backgroundColor: "#1E3A8A",
+                                                            color: "#fff",
+                                                            fontWeight: 600,
+                                                            py: 0.5,
+                                                            borderRight: "1px solid #cbd5e1"
+                                                        }}
+                                                    >
+                                                        <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                                                            {tripLabel.toUpperCase()}
+                                                            <IconButton
+                                                                size="small"
+                                                                onClick={() => handleHideInwardColumn(tripLabel)}
+                                                                sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
+                                                            >
+                                                                <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
+                                                            </IconButton>
+                                                        </Box>
+                                                    </TableCell>
+                                                );
+                                            })}
+                                            {!hiddenInwardColumns.includes("RETURN") && (
                                                 <TableCell
-                                                    key={tripLabel}
                                                     align="right"
                                                     sx={{
-                                                        width: 110,
-                                                        minWidth: 110,
+                                                        width: 120,
+                                                        minWidth: 120,
                                                         backgroundColor: "#1E3A8A",
                                                         color: "#fff",
                                                         fontWeight: 600,
-                                                        py: 1.5,
+                                                        py: 0.5,
                                                         borderRight: "1px solid #cbd5e1"
                                                     }}
                                                 >
-                                                    {tripLabel.toUpperCase()}
+                                                    <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                                                        RETURN
+                                                        <IconButton
+                                                            size="small"
+                                                            onClick={() => handleHideInwardColumn("RETURN")}
+                                                            sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
+                                                        >
+                                                            <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
+                                                        </IconButton>
+                                                    </Box>
                                                 </TableCell>
-                                            ))}
-                                            <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>RETURN</TableCell>
+                                            )}
                                             <TableCell
                                                 align="right"
                                                 onClick={() => handleSetInwardMode(false)}
@@ -1427,8 +1738,56 @@ const InStockReport: React.FC = () => {
                                     {/* Show PROCESS IN, PROCESS OUT, and TOTAL PROCESS columns when processMode is active */}
                                     {processMode && (
                                         <>
-                                            <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PROCESS IN</TableCell>
-                                            <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PROCESS OUT</TableCell>
+                                            {!hiddenProcessColumns.includes("PROCESS IN") && (
+                                                <TableCell
+                                                    align="right"
+                                                    sx={{
+                                                        width: 120,
+                                                        minWidth: 120,
+                                                        backgroundColor: "#1E3A8A",
+                                                        color: "#fff",
+                                                        fontWeight: 600,
+                                                        py: 0.5,
+                                                        borderRight: "1px solid #cbd5e1"
+                                                    }}
+                                                >
+                                                    <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                                                        PROCESS IN
+                                                        <IconButton
+                                                            size="small"
+                                                            onClick={() => handleHideProcessColumn("PROCESS IN")}
+                                                            sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
+                                                        >
+                                                            <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
+                                                        </IconButton>
+                                                    </Box>
+                                                </TableCell>
+                                            )}
+                                            {!hiddenProcessColumns.includes("PROCESS OUT") && (
+                                                <TableCell
+                                                    align="right"
+                                                    sx={{
+                                                        width: 120,
+                                                        minWidth: 120,
+                                                        backgroundColor: "#1E3A8A",
+                                                        color: "#fff",
+                                                        fontWeight: 600,
+                                                        py: 0.5,
+                                                        borderRight: "1px solid #cbd5e1"
+                                                    }}
+                                                >
+                                                    <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                                                        PROCESS OUT
+                                                        <IconButton
+                                                            size="small"
+                                                            onClick={() => handleHideProcessColumn("PROCESS OUT")}
+                                                            sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
+                                                        >
+                                                            <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
+                                                        </IconButton>
+                                                    </Box>
+                                                </TableCell>
+                                            )}
                                             <TableCell
                                                 align="right"
                                                 onClick={() => handleSetProcessMode(false)}
@@ -1487,24 +1846,60 @@ const InStockReport: React.FC = () => {
                                     {/* Show splits for Stock Outwards when outwardMode is active */}
                                     {outwardMode && (
                                         <>
-                                            {outwardTripHeaders.map((tripLabel) => (
+                                            {outwardTripHeaders.map((tripLabel) => {
+                                                if (hiddenOutwardColumns.includes(tripLabel)) return null;
+                                                return (
+                                                    <TableCell
+                                                        key={tripLabel}
+                                                        align="right"
+                                                        sx={{
+                                                            width: 120,
+                                                            minWidth: 120,
+                                                            backgroundColor: "#1E3A8A",
+                                                            color: "#fff",
+                                                            fontWeight: 600,
+                                                            py: 0.5,
+                                                            borderRight: "1px solid #cbd5e1"
+                                                        }}
+                                                    >
+                                                        <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                                                            {tripLabel.toUpperCase()}
+                                                            <IconButton
+                                                                size="small"
+                                                                onClick={() => handleHideOutwardColumn(tripLabel)}
+                                                                sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
+                                                            >
+                                                                <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
+                                                            </IconButton>
+                                                        </Box>
+                                                    </TableCell>
+                                                );
+                                            })}
+                                            {!hiddenOutwardColumns.includes("PENDING DELIVERY") && (
                                                 <TableCell
-                                                    key={tripLabel}
                                                     align="right"
                                                     sx={{
-                                                        width: 110,
-                                                        minWidth: 110,
+                                                        width: 130,
+                                                        minWidth: 130,
                                                         backgroundColor: "#1E3A8A",
                                                         color: "#fff",
                                                         fontWeight: 600,
-                                                        py: 1.5,
+                                                        py: 0.5,
                                                         borderRight: "1px solid #cbd5e1"
                                                     }}
                                                 >
-                                                    {tripLabel.toUpperCase()}
+                                                    <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                                                        PENDING DELIVERY
+                                                        <IconButton
+                                                            size="small"
+                                                            onClick={() => handleHideOutwardColumn("PENDING DELIVERY")}
+                                                            sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
+                                                        >
+                                                            <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
+                                                        </IconButton>
+                                                    </Box>
                                                 </TableCell>
-                                            ))}
-                                            <TableCell align="right" sx={{ width: 130, minWidth: 130, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PENDING DELIVERY</TableCell>
+                                            )}
                                             <TableCell
                                                 align="right"
                                                 onClick={() => handleSetOutwardMode(false)}
@@ -1558,16 +1953,21 @@ const InStockReport: React.FC = () => {
                                         {/* Inward Mode: Trip Details & Returns & Total Stock In */}
                                         {inwardMode && (
                                             <>
-                                                {inwardTripHeaders.map((tripLabel) => (
-                                                    <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 110, minWidth: 110 }}>
-                                                        {formatQtyVal(inwardTripTotals[tripLabel])}
+                                                {inwardTripHeaders.map((tripLabel) => {
+                                                    if (hiddenInwardColumns.includes(tripLabel)) return null;
+                                                    return (
+                                                        <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 110, minWidth: 110 }}>
+                                                            {formatQtyVal(inwardTripTotals[tripLabel])}
+                                                        </TableCell>
+                                                    );
+                                                })}
+                                                {!hiddenInwardColumns.includes("RETURN") && (
+                                                    <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
+                                                        {formatQtyVal(detailedTotals.returnQtyTotal)}
                                                     </TableCell>
-                                                ))}
-                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
-                                                    {formatQtyVal(detailedTotals.returnQtyTotal)}
-                                                </TableCell>
+                                                )}
                                                 <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af", width: 140, minWidth: 140 }}>
-                                                    {formatQtyVal(detailedTotals.totalInward)}
+                                                    {formatQtyVal(recalculatedTotals.inwardTotal)}
                                                 </TableCell>
                                             </>
                                         )}
@@ -1582,14 +1982,18 @@ const InStockReport: React.FC = () => {
                                         {/* Process Mode: PROCESS IN, PROCESS OUT, TOTAL PROCESS */}
                                         {processMode && (
                                             <>
-                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
-                                                    {formatQtyVal(detailedTotals.procIn)}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
-                                                    {formatQtyVal(detailedTotals.procOut)}
-                                                </TableCell>
+                                                {!hiddenProcessColumns.includes("PROCESS IN") && (
+                                                    <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
+                                                        {formatQtyVal(detailedTotals.procIn)}
+                                                    </TableCell>
+                                                )}
+                                                {!hiddenProcessColumns.includes("PROCESS OUT") && (
+                                                    <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
+                                                        {formatQtyVal(detailedTotals.procOut)}
+                                                    </TableCell>
+                                                )}
                                                 <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af", width: 140, minWidth: 140 }}>
-                                                    {formatQtyVal(detailedTotals.totalProcess)}
+                                                    {formatQtyVal(recalculatedTotals.processTotal)}
                                                 </TableCell>
                                             </>
                                         )}
@@ -1604,16 +2008,21 @@ const InStockReport: React.FC = () => {
                                         {/* Outward Mode: Out Details & Delivery & Total Outward */}
                                         {outwardMode && (
                                             <>
-                                                {outwardTripHeaders.map((tripLabel) => (
-                                                    <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 110, minWidth: 110 }}>
-                                                        {formatQtyVal(outwardTripTotals[tripLabel])}
+                                                {outwardTripHeaders.map((tripLabel) => {
+                                                    if (hiddenOutwardColumns.includes(tripLabel)) return null;
+                                                    return (
+                                                        <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 110, minWidth: 110 }}>
+                                                            {formatQtyVal(outwardTripTotals[tripLabel])}
+                                                        </TableCell>
+                                                    );
+                                                })}
+                                                {!hiddenOutwardColumns.includes("PENDING DELIVERY") && (
+                                                    <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 130, minWidth: 130 }}>
+                                                        {formatQtyVal(detailedTotals.deliveryQtyTotal)}
                                                     </TableCell>
-                                                ))}
-                                                <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 130, minWidth: 130 }}>
-                                                    {formatQtyVal(detailedTotals.deliveryQtyTotal)}
-                                                </TableCell>
+                                                )}
                                                 <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#b91c1c", width: 140, minWidth: 140 }}>
-                                                    {formatQtyVal(detailedTotals.totalOutward)}
+                                                    {formatQtyVal(recalculatedTotals.outwardTotal)}
                                                 </TableCell>
                                             </>
                                         )}
@@ -1712,6 +2121,7 @@ const InStockReport: React.FC = () => {
                                                     {inwardMode && (
                                                         <>
                                                             {inwardTripHeaders.map((tripLabel) => {
+                                                                if (hiddenInwardColumns.includes(tripLabel)) return null;
                                                                 const qty = getQtyForTrip(trips, tripLabel);
                                                                 return (
                                                                     <TableCell key={tripLabel} align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: qty > 0 ? "#1e293b" : "#94a3b8", width: 110, minWidth: 110 }}>
@@ -1719,73 +2129,82 @@ const InStockReport: React.FC = () => {
                                                                     </TableCell>
                                                                 );
                                                             })}
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: returnQty > 0 ? "#475569" : "#475569", width: 120, minWidth: 120 }}>
-                                                                {formatQtyVal(returnQty)}
-                                                            </TableCell>
+                                                            {!hiddenInwardColumns.includes("RETURN") && (
+                                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: returnQty > 0 ? "#475569" : "#475569", width: 120, minWidth: 120 }}>
+                                                                    {formatQtyVal(returnQty)}
+                                                                </TableCell>
+                                                            )}
                                                             <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af", width: 140, minWidth: 140 }}>
-                                                                {formatQtyVal(stockInQty)}
-                                                            </TableCell>
-                                                        </>
-                                                    )}
+                                                                {formatQtyVal(getRecalculatedStockInQty(item))}
+                                                             </TableCell>
+                                                         </>
+                                                     )}
 
-                                                    {/* Normal Mode: Render Process */}
-                                                    {!inwardMode && !outwardMode && !processMode && (
-                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
-                                                            {formatQtyVal(processApiData.length > 0 ? (procInQty - procOutQty) : (getProcIn(item) - getProcOut(item)))}
-                                                        </TableCell>
-                                                    )}
+                                                     {/* Normal Mode: Render Process */}
+                                                     {!inwardMode && !outwardMode && !processMode && (
+                                                         <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
+                                                             {formatQtyVal(processApiData.length > 0 ? (procInQty - procOutQty) : (getProcIn(item) - getProcOut(item)))}
+                                                         </TableCell>
+                                                     )}
 
-                                                    {/* Process Mode: Render PROCESS IN, PROCESS OUT, and TOTAL PROCESS */}
-                                                    {processMode && (
-                                                        <>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
-                                                                {formatQtyVal(procInQty)}
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
-                                                                {formatQtyVal(procOutQty)}
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af", width: 140, minWidth: 140 }}>
-                                                                {formatQtyVal(procInQty - procOutQty)}
-                                                            </TableCell>
-                                                        </>
-                                                    )}
+                                                     {/* Process Mode: Render PROCESS IN, PROCESS OUT, and TOTAL PROCESS */}
+                                                     {processMode && (
+                                                         <>
+                                                             {!hiddenProcessColumns.includes("PROCESS IN") && (
+                                                                 <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
+                                                                     {formatQtyVal(procInQty)}
+                                                                 </TableCell>
+                                                             )}
+                                                             {!hiddenProcessColumns.includes("PROCESS OUT") && (
+                                                                 <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
+                                                                     {formatQtyVal(procOutQty)}
+                                                                 </TableCell>
+                                                             )}
+                                                             <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af", width: 140, minWidth: 140 }}>
+                                                                 {formatQtyVal(getRecalculatedProcessQty(item))}
+                                                             </TableCell>
+                                                         </>
+                                                     )}
 
-                                                    {/* Normal Mode: Render STOCK OUTWARDS */}
-                                                    {!inwardMode && !outwardMode && !processMode && (
-                                                        <TableCell
-                                                            align="right"
-                                                            sx={{
-                                                                borderRight: "1px solid #e2e8f0",
-                                                                fontWeight: 600,
-                                                                pr: 2,
-                                                                color: (processApiData.length > 0 ? outwardQty : stockOut) > 0 ? "#ef4444" : "#475569",
-                                                                width: 120,
-                                                                minWidth: 120
-                                                            }}
-                                                        >
-                                                            {formatQtyVal(processApiData.length > 0 ? outwardQty : stockOut)}
-                                                        </TableCell>
-                                                    )}
+                                                     {/* Normal Mode: Render STOCK OUTWARDS */}
+                                                     {!inwardMode && !outwardMode && !processMode && (
+                                                         <TableCell
+                                                             align="right"
+                                                             sx={{
+                                                                 borderRight: "1px solid #e2e8f0",
+                                                                 fontWeight: 600,
+                                                                 pr: 2,
+                                                                 color: (processApiData.length > 0 ? outwardQty : stockOut) > 0 ? "#ef4444" : "#475569",
+                                                                 width: 120,
+                                                                 minWidth: 120
+                                                             }}
+                                                         >
+                                                             {formatQtyVal(processApiData.length > 0 ? outwardQty : stockOut)}
+                                                         </TableCell>
+                                                     )}
 
-                                                    {/* Outward Mode: Render dynamic TRIP columns, PENDING DELIVERY, and TOTAL OUTWARD */}
-                                                    {outwardMode && (
-                                                        <>
-                                                            {outwardTripHeaders.map((tripLabel) => {
-                                                                const qty = getQtyForTrip(outTrips, tripLabel);
-                                                                return (
-                                                                    <TableCell key={tripLabel} align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: qty > 0 ? "#1e293b" : "#94a3b8", width: 110, minWidth: 110 }}>
-                                                                        {formatQtyVal(qty)}
-                                                                    </TableCell>
-                                                                );
-                                                            })}
-                                                            <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 130, minWidth: 130 }}>
-                                                                {formatQtyVal(deliveryQty)}
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#fef2f2", color: "#b91c1c", width: 140, minWidth: 140 }}>
-                                                                {formatQtyVal(outwardQty)}
-                                                            </TableCell>
-                                                        </>
-                                                    )}
+                                                     {/* Outward Mode: Render dynamic TRIP columns, PENDING DELIVERY, and TOTAL OUTWARD */}
+                                                     {outwardMode && (
+                                                         <>
+                                                             {outwardTripHeaders.map((tripLabel) => {
+                                                                 if (hiddenOutwardColumns.includes(tripLabel)) return null;
+                                                                 const qty = getQtyForTrip(outTrips, tripLabel);
+                                                                 return (
+                                                                     <TableCell key={tripLabel} align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: qty > 0 ? "#1e293b" : "#94a3b8", width: 110, minWidth: 110 }}>
+                                                                         {formatQtyVal(qty)}
+                                                                     </TableCell>
+                                                                 );
+                                                             })}
+                                                             {!hiddenOutwardColumns.includes("PENDING DELIVERY") && (
+                                                                 <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 130, minWidth: 130 }}>
+                                                                     {formatQtyVal(deliveryQty)}
+                                                                 </TableCell>
+                                                             )}
+                                                             <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#fef2f2", color: "#b91c1c", width: 140, minWidth: 140 }}>
+                                                                 {formatQtyVal(getRecalculatedStockOutQty(item))}
+                                                             </TableCell>
+                                                         </>
+                                                     )}
 
                                                     {/* Normal Mode: Render CLOSING STOCK */}
                                                     {!inwardMode && !outwardMode && !processMode && (

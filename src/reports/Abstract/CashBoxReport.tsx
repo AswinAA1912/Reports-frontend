@@ -414,7 +414,15 @@ const CashBoxReport: React.FC = () => {
 
         return cleanTx.filter((tx) => {
             const key = getInvoiceKey(tx);
-            return key && selectedCashInvoiceKeys.has(key);
+            if (!key || !selectedCashInvoiceKeys.has(key)) return false;
+
+            // Exclude cash-to-cash transfers (where both debit and credit sides are cash accounts)
+            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id) : "";
+            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id) : "";
+            const isCashToCash = debitIdStr && creditIdStr && cashAccIds.has(debitIdStr) && cashAccIds.has(creditIdStr);
+            if (isCashToCash) return false;
+
+            return true;
         });
     }, [reportData, selectedCashAccIds, selectedGroups]);
 
@@ -517,8 +525,6 @@ const CashBoxReport: React.FC = () => {
     // Calculate groups and balances
     const parsedData = useMemo(() => {
         const obList = reportData?.OB || [];
-
-        const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
 
         const allCashAccIds = allCashAccIdsSet;
 
@@ -634,33 +640,19 @@ const CashBoxReport: React.FC = () => {
             Others: othersList,
         };
 
-        // Sum OB_Amount robustly
+        // Sum OB_Amount robustly based on selected group names
         let opening = 0;
         if (obList.length > 0) {
+            const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
             if (isFiltered) {
-                let hasFilteredOB = false;
                 let sum = 0;
                 obList.forEach((obItem: any) => {
-                    const accId = obItem.Acc_Id;
-                    const groupId = obItem.Group_Id;
-                    if (accId) {
-                        if (selectedCashAccIds.has(String(accId))) {
-                            sum += Number(obItem.OB_Amount) || 0;
-                            hasFilteredOB = true;
-                        }
-                    } else if (groupId) {
-                        if (selectedGroupIds.has(String(groupId))) {
-                            sum += Number(obItem.OB_Amount) || 0;
-                            hasFilteredOB = true;
-                        }
+                    const groupName = obItem.Group_Name ? obItem.Group_Name.trim() : "";
+                    if (groupName && selectedGroups.includes(groupName)) {
+                        sum += Number(obItem.OB_Amount) || 0;
                     }
                 });
-
-                if (hasFilteredOB) {
-                    opening = sum;
-                } else {
-                    opening = Number(obList[0].OB_Amount) || 0;
-                }
+                opening = sum;
             } else {
                 opening = obList.reduce((sum, obItem) => sum + (Number(obItem.OB_Amount) || 0), 0);
             }

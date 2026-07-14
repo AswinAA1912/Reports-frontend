@@ -73,6 +73,7 @@ interface ReportFilterDrawerProps {
     showQtyModeFilter?: boolean;
     qtyModeValue?: "qty" | "actQty";
     onQtyModeChange?: (value: "qty" | "actQty") => void;
+    children?: React.ReactNode;
 }
 
 const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
@@ -123,6 +124,7 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
     showQtyModeFilter,
     qtyModeValue,
     onQtyModeChange,
+    children,
 }) => {
     return (
         <>
@@ -429,6 +431,8 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                             </RadioGroup>
                         </FormControl>
                     )}
+
+                    {children}
 
                     <Button
                         fullWidth

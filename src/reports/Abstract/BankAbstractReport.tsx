@@ -15,8 +15,16 @@ import {
     DialogContent,
     Button,
     IconButton,
+    Collapse,
+    Autocomplete,
+    TextField,
+    MenuItem,
+    Menu,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import FilterAltIcon from "@mui/icons-material/FilterAlt";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -24,7 +32,9 @@ import * as XLSX from "xlsx-js-style";
 import { toast } from "react-toastify";
 import PageHeader from "../../Layout/PageHeader";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
-import { cashboxService, CashBoxReportResponse, CashBoxTransaction, CashBoxMasterAccount } from "../../services/cashbox.service";
+import { CashBoxReportResponse, CashBoxTransaction, CashBoxMasterAccount } from "../../services/cashbox.service";
+import { bankboxService } from "../../services/bankbox.service";
+import CommonPagination from "../../Components/CommonPagination";
 
 interface GroupConfig {
     key: string;
@@ -167,6 +177,7 @@ const styleBankWorksheet = (ws: XLSX.WorkSheet) => {
 const BankAbstractReport: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
 
+    const [viewMode, setViewMode] = useState<"abstract" | "expanded">("abstract");
     const [loading, setLoading] = useState(false);
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [fromDate, setFromDate] = useState(today);
@@ -176,6 +187,157 @@ const BankAbstractReport: React.FC = () => {
     });
 
     const [reportData, setReportData] = useState<CashBoxReportResponse | null>(null);
+
+    // Cheque Transactions (Expanded) view states
+    const [chequeData, setChequeData] = useState<any[]>([]);
+    
+    // Header Filters (Party Name, Voucher Type, Cheque No)
+    const [activeHeader, setActiveHeader] = useState<string | null>(null);
+    const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
+    const [searchText, setSearchText] = useState("");
+    const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({
+        creditAccountGet: [],
+        voucherTypeGet: [],
+        check_no: []
+    });
+
+    const [creditAccounts, setCreditAccounts] = useState<{ value: any; label: string }[]>([]);
+    const [voucherTypes, setVoucherTypes] = useState<{ value: any; label: string }[]>([]);
+
+    const handleHeaderClick = (e: React.MouseEvent<HTMLElement>, columnKey: string) => {
+        setActiveHeader(columnKey);
+        setSearchText("");
+        setFilterAnchor(e.currentTarget);
+    };
+
+    const [chequeFilters, setChequeFilters] = useState({
+        Fromdate: today,
+        Todate: today,
+        debitAccount: { value: "", label: "ALL" } as { value: any; label: string },
+        creditAccount: { value: "", label: "ALL" } as { value: any; label: string },
+        voucherType: { value: "", label: "ALL" } as { value: any; label: string },
+        partyType: "Pending Party",
+        chequeAccounts: [] as { value: any; label: string }[]
+    });
+
+    useEffect(() => {
+        bankboxService.getChequeAccounts()
+            .then(data => {
+                if (data && Array.isArray(data)) {
+                    setChequeFilters(pre => ({ ...pre, chequeAccounts: data }));
+                }
+            })
+            .catch(e => console.error("Failed to load cheque accounts", e));
+
+        bankboxService.getChequeCreditAccounts()
+            .then(data => {
+                if (data && Array.isArray(data)) {
+                    setCreditAccounts(data);
+                }
+            })
+            .catch(e => console.error("Failed to load credit accounts", e));
+
+        bankboxService.getChequeVoucherTypes()
+            .then(data => {
+                if (data && Array.isArray(data)) {
+                    setVoucherTypes(data);
+                }
+            })
+            .catch(e => console.error("Failed to load voucher types", e));
+    }, []);
+
+    const fetchChequeData = async () => {
+        const { Fromdate, Todate, debitAccount } = chequeFilters;
+        if (!debitAccount.value) {
+            toast.error("Please Select Debit Account");
+            return;
+        }
+
+        try {
+            setLoading(true);
+            const data = await bankboxService.getChequeTransactions({
+                Fromdate,
+                Todate,
+                debitAccount: debitAccount.value
+            });
+            if (data && Array.isArray(data)) {
+                setChequeData(data);
+            } else {
+                setChequeData([]);
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error("Failed to load cheque transaction data ❌");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+
+
+    const filteredChequeData = useMemo(() => {
+        return chequeData.filter((item: any) => {
+            const matchesCredit = chequeFilters.creditAccount.value === "" ||
+                Number(item.credit_ledger) === Number(chequeFilters.creditAccount.value);
+            const matchesVoucher = chequeFilters.voucherType.value === "" ||
+                Number(item.receipt_voucher_type_id) === Number(chequeFilters.voucherType.value);
+            const matchesPartyType =
+                chequeFilters.partyType === "ALL" ||
+                (chequeFilters.partyType === "Pending Party" && (!item.contraRef || item.contraRef.length === 0)) ||
+                (chequeFilters.partyType === "Payed Party" && item.contraRef && item.contraRef.length > 0);
+
+            // Filter for Pending Cheques: Bank Date is null or upcoming, or Cheque Date is upcoming
+            const bankDate = item.bank_date ? dayjs(item.bank_date) : null;
+            const chequeDate = item.check_date ? dayjs(item.check_date) : null;
+            const today = dayjs().startOf("day");
+
+            const isBankDateUpcoming = bankDate && bankDate.isAfter(today);
+            const isChequeDateUpcoming = chequeDate && chequeDate.isAfter(today);
+            const isNoBankDate = !bankDate || !item.bank_date;
+
+            const isPending = isNoBankDate || isBankDateUpcoming || isChequeDateUpcoming;
+
+            const matchesPending = chequeFilters.partyType !== "Pending Party" || isPending;
+
+            if (!(matchesCredit && matchesVoucher && matchesPartyType && matchesPending)) return false;
+
+            // Header Column Filters
+            const creditFilter = columnFilters.creditAccountGet || [];
+            if (creditFilter.length > 0 && !creditFilter.includes(item.creditAccountGet)) return false;
+
+            const voucherFilter = columnFilters.voucherTypeGet || [];
+            if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucherTypeGet)) return false;
+
+            const checkNoFilter = columnFilters.check_no || [];
+            if (checkNoFilter.length > 0 && !checkNoFilter.includes(item.check_no)) return false;
+
+            return true;
+        });
+    }, [chequeData, chequeFilters, columnFilters]);
+
+    const chequeTotals = useMemo(() => {
+        let debitSum = 0;
+        let creditSum = 0;
+        filteredChequeData.forEach((item: any) => {
+            debitSum += Number(item.debit_amount || 0);
+            creditSum += Number(item.credit_amount || 0);
+        });
+        return {
+            debit: debitSum,
+            credit: creditSum
+        };
+    }, [filteredChequeData]);
+
+    const [chequePage, setChequePage] = useState(1);
+    const [chequeRowsPerPage, setChequeRowsPerPage] = useState(100);
+
+    const paginatedChequeData = useMemo(() => {
+        return filteredChequeData.slice((chequePage - 1) * chequeRowsPerPage, chequePage * chequeRowsPerPage);
+    }, [filteredChequeData, chequePage, chequeRowsPerPage]);
+
+    useEffect(() => {
+        setChequePage(1);
+    }, [filteredChequeData]);
 
     // Selected groups for multi-select filter
     const [selectedGroups, setSelectedGroups] = useState<string[]>(["All"]);
@@ -238,7 +400,7 @@ const BankAbstractReport: React.FC = () => {
     const fetchData = async () => {
         try {
             setLoading(true);
-            const res = await cashboxService.getCashBoxReport({
+            const res = await bankboxService.getBankBoxReport({
                 Fromdate: filters.Date.from,
                 Todate: filters.Date.to,
             });
@@ -619,34 +781,19 @@ const BankAbstractReport: React.FC = () => {
             Others: othersList,
         };
 
-        // Sum OB_Amount robustly for Bank focus
+        // Sum OB_Amount robustly for Bank focus based on selected group names
         let opening = 0;
         if (obList.length > 0) {
-            let sum = 0;
-            let hasMatched = false;
-            let hasAnyAccOrGroup = false;
-
-            obList.forEach((obItem: any) => {
-                const accId = obItem.Acc_Id;
-                const groupId = obItem.Group_Id;
-                if (accId || groupId) {
-                    hasAnyAccOrGroup = true;
-                    if (accId && selectedBankAccIds.has(String(accId))) {
+            const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
+            if (isFiltered) {
+                let sum = 0;
+                obList.forEach((obItem: any) => {
+                    const groupName = obItem.Group_Name ? obItem.Group_Name.trim() : "";
+                    if (groupName && selectedGroups.includes(groupName)) {
                         sum += Number(obItem.OB_Amount) || 0;
-                        hasMatched = true;
-                    } else if (groupId && selectedGroupIds.has(String(groupId))) {
-                        sum += Number(obItem.OB_Amount) || 0;
-                        hasMatched = true;
                     }
-                }
-            });
-
-            if (hasAnyAccOrGroup) {
-                if (hasMatched) {
-                    opening = sum;
-                } else {
-                    opening = 0;
-                }
+                });
+                opening = sum;
             } else {
                 opening = obList.reduce((accSum, obItem) => accSum + (Number(obItem.OB_Amount) || 0), 0);
             }
@@ -808,7 +955,7 @@ const BankAbstractReport: React.FC = () => {
                 (j) => j.invoice_no && String(j.invoice_no).trim() === String(tx.invoice_no).trim()
             );
             if (jnlItem) {
-                return side === "debit" ? jnlItem.Debit_Names : jnlItem.Credit_Names;
+                return side === "debit" ? jnlItem.Credit_Names : jnlItem.Debit_Names;
             }
         }
 
@@ -852,8 +999,56 @@ const BankAbstractReport: React.FC = () => {
         }, 0);
     }, [modalTransactions, selectedLedger, getTransactionAmount]);
 
+    const handleChequeExportExcel = () => {
+        try {
+            const excelData: any[][] = [];
+            excelData.push(["CHEQUE TRANSACTION DETAILS"]);
+            excelData.push([]);
+            excelData.push([
+                "S.No",
+                "Rec.Date",
+                "Rec.No",
+                "VchType",
+                "Party Name",
+                "Chq.No",
+                "Chq.Date",
+                "Bank.Date",
+                "Debit",
+                "Credit"
+            ]);
+
+            filteredChequeData.forEach((row: any, idx: number) => {
+                excelData.push([
+                    idx + 1,
+                    row.receipt_date ? dayjs(row.receipt_date).format("DD-MM-YYYY") : "",
+                    row.receipt_invoice_no || "",
+                    row.voucherTypeGet || "",
+                    row.creditAccountGet || "",
+                    row.check_no || "",
+                    row.check_date ? dayjs(row.check_date).format("DD-MM-YYYY") : "",
+                    row.bank_date ? dayjs(row.bank_date).format("DD-MM-YYYY") : "",
+                    row.debit_amount || 0,
+                    row.credit_amount || 0
+                ]);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Cheque Transactions");
+            XLSX.writeFile(wb, `Cheque_Transactions_${dayjs().format("YYYYMMDD_HHmmss")}.xlsx`);
+            toast.success("Excel Exported ✅");
+        } catch (err) {
+            console.error(err);
+            toast.error("Excel Export Failed ❌");
+        }
+    };
+
     // Excel Export
     const handleExportExcel = () => {
+        if (viewMode === "expanded") {
+            handleChequeExportExcel();
+            return;
+        }
         try {
             const excelData: any[][] = [];
             const dateStr =
@@ -1001,8 +1196,50 @@ const BankAbstractReport: React.FC = () => {
         }
     };
 
+    const handleChequeExportPDF = () => {
+        try {
+            const doc = new jsPDF("landscape", "mm", "a4");
+            doc.setFontSize(14);
+            doc.setFont("helvetica", "bold");
+            doc.text("CHEQUE TRANSACTION DETAILS", 148, 12, { align: "center" });
+
+            const headers = [["S.No", "Rec.Date", "Rec.No", "VchType", "Party Name", "Chq.No", "Chq.Date", "Bank.Date", "Debit", "Credit"]];
+            const body = filteredChequeData.map((row: any, idx: number) => [
+                idx + 1,
+                row.receipt_date ? dayjs(row.receipt_date).format("DD-MM-YYYY") : "",
+                row.receipt_invoice_no || "",
+                row.voucherTypeGet || "",
+                row.creditAccountGet || "",
+                row.check_no || "",
+                row.check_date ? dayjs(row.check_date).format("DD-MM-YYYY") : "",
+                row.bank_date ? dayjs(row.bank_date).format("DD-MM-YYYY") : "",
+                row.debit_amount ? Number(row.debit_amount).toLocaleString() : "-",
+                row.credit_amount ? Number(row.credit_amount).toLocaleString() : "-"
+            ]);
+
+            autoTable(doc, {
+                startY: 20,
+                head: headers,
+                body: body,
+                styles: { fontSize: 8, cellPadding: 1.5 },
+                headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
+                theme: "grid"
+            });
+
+            doc.save(`Cheque_Transactions_${dayjs().format("YYYYMMDD_HHmmss")}.pdf`);
+            toast.success("PDF Exported ✅");
+        } catch (err) {
+            console.error(err);
+            toast.error("PDF Export Failed ❌");
+        }
+    };
+
     // PDF Export
     const handleExportPDF = () => {
+        if (viewMode === "expanded") {
+            handleChequeExportPDF();
+            return;
+        }
         try {
             const doc = new jsPDF("landscape", "mm", "a4");
             const dateStr =
@@ -1186,6 +1423,8 @@ const BankAbstractReport: React.FC = () => {
                 onExportExcel={handleExportExcel}
                 onExportPDF={handleExportPDF}
                 showPages={true}
+                toggleMode={viewMode === "abstract" ? "Abstract" : "Expanded"}
+                onToggleChange={(mode) => setViewMode(mode === "Abstract" ? "abstract" : "expanded")}
             />
 
             {/* Filter Drawer Toggle */}
@@ -1193,16 +1432,75 @@ const BankAbstractReport: React.FC = () => {
                 open={drawerOpen}
                 onClose={() => setDrawerOpen(false)}
                 onToggle={() => setDrawerOpen((p) => !p)}
-                fromDate={fromDate}
-                toDate={toDate}
-                onFromDateChange={setFromDate}
-                onToDateChange={setToDate}
-                onApply={() => setFilters({ Date: { from: fromDate, to: toDate } })}
-            />
+                fromDate={viewMode === "abstract" ? fromDate : chequeFilters.Fromdate}
+                toDate={viewMode === "abstract" ? toDate : chequeFilters.Todate}
+                onFromDateChange={viewMode === "abstract" ? setFromDate : (val) => setChequeFilters(p => ({ ...p, Fromdate: val }))}
+                onToDateChange={viewMode === "abstract" ? setToDate : (val) => setChequeFilters(p => ({ ...p, Todate: val }))}
+                onApply={() => {
+                    if (viewMode === "abstract") {
+                        setFilters({ Date: { from: fromDate, to: toDate } });
+                    } else {
+                        fetchChequeData();
+                    }
+                }}
+            >
+                {viewMode === "expanded" && (
+                    <Box mt={2}>
+                        <Autocomplete
+                            options={chequeFilters.chequeAccounts}
+                            getOptionLabel={(option) => option.label || ""}
+                            value={chequeFilters.debitAccount.value ? chequeFilters.debitAccount : null}
+                            onChange={(_, newValue) => {
+                                setChequeFilters(p => ({
+                                    ...p,
+                                    debitAccount: newValue || { value: "", label: "ALL" }
+                                }));
+                            }}
+                            renderInput={(params) => <TextField {...params} label="Debit Account" sx={{ mb: 2 }} />}
+                        />
+                        <Autocomplete
+                            options={creditAccounts}
+                            getOptionLabel={(option) => option.label || ""}
+                            value={chequeFilters.creditAccount.value ? chequeFilters.creditAccount : null}
+                            onChange={(_, newValue) => {
+                                setChequeFilters(p => ({
+                                    ...p,
+                                    creditAccount: newValue || { value: "", label: "ALL" }
+                                }));
+                            }}
+                            renderInput={(params) => <TextField {...params} label="Credit Account" sx={{ mb: 2 }} />}
+                        />
+                        <Autocomplete
+                            options={voucherTypes}
+                            getOptionLabel={(option) => option.label || ""}
+                            value={chequeFilters.voucherType.value ? chequeFilters.voucherType : null}
+                            onChange={(_, newValue) => {
+                                setChequeFilters(p => ({
+                                    ...p,
+                                    voucherType: newValue || { value: "", label: "ALL" }
+                                }));
+                            }}
+                            renderInput={(params) => <TextField {...params} label="Voucher Type" sx={{ mb: 2 }} />}
+                        />
+                        <TextField
+                            select
+                            label="Party Type"
+                            fullWidth
+                            value={chequeFilters.partyType}
+                            onChange={(e) => setChequeFilters(p => ({ ...p, partyType: e.target.value }))}
+                            sx={{ mb: 2 }}
+                        >
+                            <MenuItem value="ALL">ALL</MenuItem>
+                            <MenuItem value="Pending Party">Pending Party</MenuItem>
+                            <MenuItem value="Payed Party">Payed Party</MenuItem>
+                        </TextField>
+                    </Box>
+                )}
+            </ReportFilterDrawer>
 
             <Box px={2} pb={4} pt={2}>
                 {/* Chip Filters for Groups */}
-                {!loading && reportData && (
+                {!loading && reportData && viewMode === "abstract" && (
                     <Box mb={2} display="flex" flexWrap="wrap" gap={1}>
                         {["All", ...allGroupNames].map((name) => {
                             const isSelected = selectedGroups.includes(name);
@@ -1240,197 +1538,310 @@ const BankAbstractReport: React.FC = () => {
                     </Box>
                 ) : (
                     <>
-                        {/* Transaction Header Banner */}
-                        <Box
-                            sx={{
-                                border: "1px solid #cbd5e1",
-                                borderRadius: 1.5,
-                                py: 1.2,
-                                textAlign: "center",
-                                mb: 3,
-                                background: "#fff",
-                                boxShadow: 1,
-                            }}
-                        >
-                            <Typography variant="body1" fontWeight={700} sx={{ letterSpacing: 0.5, color: "#1e293b" }}>
-                                BANK TRANSACTION  {" "}
-                                {filters.Date.from === filters.Date.to
-                                    ? dayjs(filters.Date.from).format("DD-MM-YYYY")
-                                    : `${dayjs(filters.Date.from).format("DD-MM-YYYY")} - ${dayjs(filters.Date.to).format("DD-MM-YYYY")}`}
-                            </Typography>
-                        </Box>
+                        {viewMode === "abstract" && reportData && (
+                            <>
+                                {/* Transaction Header Banner */}
+                                <Box
+                                    sx={{
+                                        border: "1px solid #cbd5e1",
+                                        borderRadius: 1.5,
+                                        py: 1.2,
+                                        textAlign: "center",
+                                        mb: 3,
+                                        background: "#fff",
+                                        boxShadow: 1,
+                                    }}
+                                >
+                                    <Typography variant="body1" fontWeight={700} sx={{ letterSpacing: 0.5, color: "#1e293b" }}>
+                                        BANK ABSTRACT  {" "}
+                                        {filters.Date.from === filters.Date.to
+                                            ? dayjs(filters.Date.from).format("DD-MM-YYYY")
+                                            : `${dayjs(filters.Date.from).format("DD-MM-YYYY")} - ${dayjs(filters.Date.to).format("DD-MM-YYYY")}`}
+                                    </Typography>
+                                </Box>
 
-                        {/* Parallel Grid Table */}
-                        <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflowX: "auto" }}>
-                            <Table size="small" sx={{ minWidth: 800 }}>
-                                <TableHead>
-                                    <TableRow>
-                                        <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
-                                            Particulars
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 180, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
-                                            Debit Amt
-                                        </TableCell>
-                                        <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
-                                            Particulars
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 180, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
-                                            Credit amt
-                                        </TableCell>
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    {/* OPENING ROW */}
-                                    <TableRow>
-                                        <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                        <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                        <TableCell sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1" }}>
-                                            Opening Balance
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1", color: "#b45309" }}>
-                                            {formatNum(parsedData.opening)}
-                                        </TableCell>
-                                    </TableRow>
+                                {/* Parallel Grid Table */}
+                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 240px)" }}>
+                                    <Table size="small" sx={{ minWidth: 800 }} stickyHeader>
+                                        <TableHead>
+                                            <TableRow>
+                                                <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
+                                                    Particulars
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 180, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
+                                                    Debit Amt
+                                                </TableCell>
+                                                <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
+                                                    Particulars
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 180, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
+                                                    Credit amt
+                                                </TableCell>
+                                            </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                            {/* Opening row */}
+                                            <TableRow>
+                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                <TableCell sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1" }}>
+                                                    Opening Balance
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1", color: "#b45309" }}>
+                                                    {formatNum(parsedData.opening)}
+                                                </TableCell>
+                                            </TableRow>
 
-                                    {/* Main Parallel Group Rows */}
-                                    {parsedData.debitGroups.map((_, idx) => {
-                                        const leftGroup = parsedData.debitGroups[idx];
-                                        const rightGroup = parsedData.creditGroups[idx];
+                                            {/* Parallel Groups and Sub-ledgers */}
+                                            {parsedData.debitGroups.map((leftGroup, idx) => {
+                                                const rightGroup = parsedData.creditGroups[idx];
+                                                const isLeftExpanded = expanded[leftGroup.key];
+                                                const isRightExpanded = expanded[rightGroup.key];
+                                                const maxSubRows = Math.max(
+                                                    isLeftExpanded ? leftGroup.subLedgers.length : 0,
+                                                    isRightExpanded ? rightGroup.subLedgers.length : 0
+                                                );
 
-                                        const isLeftExpanded = expanded[leftGroup.key] && leftGroup.subLedgers.length > 0;
-                                        const isRightExpanded = expanded[rightGroup.key] && rightGroup.subLedgers.length > 0;
-                                        const maxSubRows = Math.max(
-                                            isLeftExpanded ? leftGroup.subLedgers.length : 0,
-                                            isRightExpanded ? rightGroup.subLedgers.length : 0
-                                        );
+                                                return (
+                                                    <React.Fragment key={`${leftGroup.key}-${rightGroup.key}`}>
+                                                        <TableRow>
+                                                            {/* Left Group Header */}
+                                                            <TableCell
+                                                                onClick={() => toggleGroup(leftGroup.key)}
+                                                                sx={{
+                                                                    cursor: "pointer",
+                                                                    fontWeight: 700,
+                                                                    border: "1px solid #cbd5e1",
+                                                                    userSelect: "none",
+                                                                    py: 1.2,
+                                                                    "&:hover": { backgroundColor: "#f1f5f9" }
+                                                                }}
+                                                            >
+                                                                <Box display="flex" alignItems="center" gap={1}>
+                                                                    {leftGroup.label}
+                                                                </Box>
+                                                            </TableCell>
+                                                            <TableCell align="right" sx={{ fontWeight: 700, border: "1px solid #cbd5e1" }}>
+                                                                {formatNum(leftGroup.total)}
+                                                            </TableCell>
 
-                                        return (
-                                            <React.Fragment key={`group-pair-${idx}`}>
-                                                {/* Parent Group Row */}
-                                                <TableRow sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
-                                                    {/* Left Group Header */}
-                                                    <TableCell
-                                                        onClick={() => toggleGroup(leftGroup.key)}
-                                                        sx={{
-                                                            cursor: "pointer",
-                                                            fontWeight: 700,
-                                                            border: "1px solid #cbd5e1",
-                                                            userSelect: "none",
-                                                            py: 1.2,
-                                                            "&:hover": { backgroundColor: "#f1f5f9" }
-                                                        }}
-                                                    >
-                                                        <Box display="flex" alignItems="center" gap={1}>
-                                                            {leftGroup.label}
-                                                        </Box>
+                                                            {/* Right Group Header */}
+                                                            <TableCell
+                                                                onClick={() => toggleGroup(rightGroup.key)}
+                                                                sx={{
+                                                                    cursor: "pointer",
+                                                                    fontWeight: 700,
+                                                                    border: "1px solid #cbd5e1",
+                                                                    userSelect: "none",
+                                                                    py: 1.2,
+                                                                    "&:hover": { backgroundColor: "#f1f5f9" }
+                                                                }}
+                                                            >
+                                                                <Box display="flex" alignItems="center" gap={1}>
+                                                                    {rightGroup.label}
+                                                                </Box>
+                                                            </TableCell>
+                                                            <TableCell align="right" sx={{ fontWeight: 700, border: "1px solid #cbd5e1" }}>
+                                                                {formatNum(rightGroup.total)}
+                                                            </TableCell>
+                                                        </TableRow>
+
+                                                        {/* Sub-ledgers Parallel Rows */}
+                                                        {maxSubRows > 0 &&
+                                                            Array.from({ length: maxSubRows }).map((_, i) => {
+                                                                const leftSub = isLeftExpanded ? leftGroup.subLedgers[i] : null;
+                                                                const rightSub = isRightExpanded ? rightGroup.subLedgers[i] : null;
+
+                                                                return (
+                                                                    <TableRow key={`sub-${leftGroup.key}-${rightGroup.key}-${i}`} sx={{ bgcolor: "#fafafa" }}>
+                                                                        {/* Left Subledger */}
+                                                                        {leftSub ? (
+                                                                            <>
+                                                                                <TableCell
+                                                                                    onClick={() => handleLedgerClick(leftSub.accId, leftSub.name, "debit")}
+                                                                                    sx={{
+                                                                                        pl: 5,
+                                                                                        border: "1px solid #cbd5e1",
+                                                                                        cursor: "pointer",
+                                                                                        color: "#000000",
+                                                                                        fontWeight: 600,
+                                                                                        "&:hover": { color: "#000000" }
+                                                                                    }}
+                                                                                >
+                                                                                    {i + 1}. {leftSub.name}
+                                                                                </TableCell>
+                                                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
+                                                                                    {formatNum(leftSub.amount)}
+                                                                                </TableCell>
+                                                                            </>
+                                                                        ) : (
+                                                                            <>
+                                                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                                            </>
+                                                                        )}
+
+                                                                        {/* Right Subledger */}
+                                                                        {rightSub ? (
+                                                                            <>
+                                                                                <TableCell
+                                                                                    onClick={() => handleLedgerClick(rightSub.accId, rightSub.name, "credit")}
+                                                                                    sx={{
+                                                                                        pl: 5,
+                                                                                        border: "1px solid #cbd5e1",
+                                                                                        cursor: "pointer",
+                                                                                        color: "#000000",
+                                                                                        fontWeight: 600,
+                                                                                        "&:hover": { color: "#000000" }
+                                                                                    }}
+                                                                                >
+                                                                                    {i + 1}. {rightSub.name}
+                                                                                </TableCell>
+                                                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
+                                                                                    {formatNum(rightSub.amount)}
+                                                                                </TableCell>
+                                                                            </>
+                                                                        ) : (
+                                                                            <>
+                                                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                                            </>
+                                                                        )}
+                                                                    </TableRow>
+                                                                );
+                                                            })}
+                                                    </React.Fragment>
+                                                );
+                                            })}
+
+                                            {/* CLOSING ROW */}
+                                            <TableRow>
+                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                <TableCell sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1" }}>
+                                                    Closing Balance
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1", color: "#15803d" }}>
+                                                    {formatNum(parsedData.closing)}
+                                                </TableCell>
+                                            </TableRow>
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
+                            </>
+                        )}
+
+                        {viewMode === "expanded" && (
+                            <>
+                                {/* Transaction Header Banner */}
+                                <Box
+                                    sx={{
+                                        border: "1px solid #cbd5e1",
+                                        borderRadius: 1.5,
+                                        py: 1.2,
+                                        textAlign: "center",
+                                        mb: 3,
+                                        background: "#fff",
+                                        boxShadow: 1,
+                                    }}
+                                >
+                                    <Typography variant="body1" fontWeight={700} sx={{ letterSpacing: 0.5, color: "#1e293b" }}>
+                                        CHEQUE TRANSACTION DETAILS  {" "}
+                                        {chequeFilters.Fromdate === chequeFilters.Todate
+                                            ? dayjs(chequeFilters.Fromdate).format("DD-MM-YYYY")
+                                            : `${dayjs(chequeFilters.Fromdate).format("DD-MM-YYYY")} - ${dayjs(chequeFilters.Todate).format("DD-MM-YYYY")}`}
+                                    </Typography>
+                                </Box>
+
+                                {/* Cheque Transactions Table */}
+                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 190px)" }}>
+                                    <Table size="small" sx={{ minWidth: 1000 }} stickyHeader>
+                                        <TableHead>
+                                            <TableRow>
+                                                <TableCell align="center" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 80, border: "1px solid #cbd5e1" }}></TableCell>
+                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Rec.Date</TableCell>
+                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Rec.No</TableCell>
+                                                <TableCell 
+                                                    onClick={(e) => handleHeaderClick(e, "voucherTypeGet")}
+                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
+                                                >
+                                                    <Box display="flex" alignItems="center" gap={0.5}>
+                                                        VchType
+                                                        {columnFilters.voucherTypeGet.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#fbbf24" }} />}
+                                                    </Box>
+                                                </TableCell>
+                                                <TableCell 
+                                                    onClick={(e) => handleHeaderClick(e, "creditAccountGet")}
+                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
+                                                >
+                                                    <Box display="flex" alignItems="center" gap={0.5}>
+                                                        Party Name
+                                                        {columnFilters.creditAccountGet.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#fbbf24" }} />}
+                                                    </Box>
+                                                </TableCell>
+                                                <TableCell 
+                                                    onClick={(e) => handleHeaderClick(e, "check_no")}
+                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
+                                                >
+                                                    <Box display="flex" alignItems="center" gap={0.5}>
+                                                        Chq.No
+                                                        {columnFilters.check_no.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#fbbf24" }} />}
+                                                    </Box>
+                                                </TableCell>
+                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Chq.Date</TableCell>
+                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Bank.Date</TableCell>
+                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Debit</TableCell>
+                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Credit</TableCell>
+                                            </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                            {paginatedChequeData.length > 0 && (
+                                                <TableRow>
+                                                    <TableCell align="center" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
+                                                        Total
                                                     </TableCell>
-                                                    <TableCell align="right" sx={{ fontWeight: 700, border: "1px solid #cbd5e1" }}>
-                                                        {formatNum(leftGroup.total)}
+                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                                    <TableCell align="right" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, color: "#1e3a8a" }}>
+                                                        {formatNum(chequeTotals.debit)}
                                                     </TableCell>
-
-                                                    {/* Right Group Header */}
-                                                    <TableCell
-                                                        onClick={() => toggleGroup(rightGroup.key)}
-                                                        sx={{
-                                                            cursor: "pointer",
-                                                            fontWeight: 700,
-                                                            border: "1px solid #cbd5e1",
-                                                            userSelect: "none",
-                                                            py: 1.2,
-                                                            "&:hover": { backgroundColor: "#f1f5f9" }
-                                                        }}
-                                                    >
-                                                        <Box display="flex" alignItems="center" gap={1}>
-                                                            {rightGroup.label}
-                                                        </Box>
-                                                    </TableCell>
-                                                    <TableCell align="right" sx={{ fontWeight: 700, border: "1px solid #cbd5e1" }}>
-                                                        {formatNum(rightGroup.total)}
+                                                    <TableCell align="right" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, color: "#1e3a8a" }}>
+                                                        {formatNum(chequeTotals.credit)}
                                                     </TableCell>
                                                 </TableRow>
+                                            )}
+                                            {paginatedChequeData.length === 0 ? (
+                                                <TableRow>
+                                                    <TableCell colSpan={10} align="center" sx={{ py: 6, color: "#94a3b8" }}>
+                                                        {!chequeFilters.debitAccount.value
+                                                            ? "Please select a Debit Account in filters to load data."
+                                                            : "No cheque transactions match your filter criteria."
+                                                        }
+                                                    </TableCell>
+                                                </TableRow>
+                                            ) : (
+                                                paginatedChequeData.map((row: any, idx: number) => (
+                                                    <ChequeRow key={row.receipt_id || idx} row={row} index={(chequePage - 1) * chequeRowsPerPage + idx + 1} />
+                                                ))
+                                            )}
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
 
-                                                {/* Sub-ledgers Parallel Rows */}
-                                                {maxSubRows > 0 &&
-                                                    Array.from({ length: maxSubRows }).map((_, i) => {
-                                                        const leftSub = isLeftExpanded ? leftGroup.subLedgers[i] : null;
-                                                        const rightSub = isRightExpanded ? rightGroup.subLedgers[i] : null;
-
-                                                        return (
-                                                            <TableRow key={`sub-${leftGroup.key}-${rightGroup.key}-${i}`} sx={{ bgcolor: "#fafafa" }}>
-                                                                {/* Left Subledger */}
-                                                                {leftSub ? (
-                                                                    <>
-                                                                        <TableCell
-                                                                            onClick={() => handleLedgerClick(leftSub.accId, leftSub.name, "debit")}
-                                                                            sx={{
-                                                                                pl: 5,
-                                                                                border: "1px solid #cbd5e1",
-                                                                                cursor: "pointer",
-                                                                                color: "#000000",
-                                                                                fontWeight: 600,
-                                                                                "&:hover": { color: "#000000" }
-                                                                            }}
-                                                                        >
-                                                                            {i + 1}. {leftSub.name}
-                                                                        </TableCell>
-                                                                        <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
-                                                                            {formatNum(leftSub.amount)}
-                                                                        </TableCell>
-                                                                    </>
-                                                                ) : (
-                                                                    <>
-                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                                    </>
-                                                                )}
-
-                                                                {/* Right Subledger */}
-                                                                {rightSub ? (
-                                                                    <>
-                                                                        <TableCell
-                                                                            onClick={() => handleLedgerClick(rightSub.accId, rightSub.name, "credit")}
-                                                                            sx={{
-                                                                                pl: 5,
-                                                                                border: "1px solid #cbd5e1",
-                                                                                cursor: "pointer",
-                                                                                color: "#000000",
-                                                                                fontWeight: 600,
-                                                                                "&:hover": { color: "#000000" }
-                                                                            }}
-                                                                        >
-                                                                            {i + 1}. {rightSub.name}
-                                                                        </TableCell>
-                                                                        <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
-                                                                            {formatNum(rightSub.amount)}
-                                                                        </TableCell>
-                                                                    </>
-                                                                ) : (
-                                                                    <>
-                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                                    </>
-                                                                )}
-                                                            </TableRow>
-                                                        );
-                                                    })}
-                                            </React.Fragment>
-                                        );
-                                    })}
-
-                                    {/* CLOSING ROW */}
-                                    <TableRow>
-                                        <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                        <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                        <TableCell sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1" }}>
-                                            Closing Balance
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1", color: "#15803d" }}>
-                                            {formatNum(parsedData.closing)}
-                                        </TableCell>
-                                    </TableRow>
-                                </TableBody>
-                            </Table>
-                        </TableContainer>
+                                <CommonPagination
+                                    totalRows={filteredChequeData.length}
+                                    page={chequePage}
+                                    rowsPerPage={chequeRowsPerPage}
+                                    onPageChange={setChequePage}
+                                    onRowsPerPageChange={setChequeRowsPerPage}
+                                />
+                            </>
+                        )}
                     </>
                 )}
             </Box>
@@ -1525,7 +1936,247 @@ const BankAbstractReport: React.FC = () => {
                     </TableContainer>
                 </DialogContent>
             </Dialog>
+
+            {/* ================= FILTER MENU ================= */}
+            <Menu
+                anchorEl={filterAnchor}
+                open={Boolean(filterAnchor) && Boolean(activeHeader)}
+                onClose={() => setFilterAnchor(null)}
+            >
+                {activeHeader && (
+                    <Box p={2} sx={{ minWidth: 240, maxWidth: 300 }}>
+                        {/* SEARCH */}
+                        <TextField
+                            size="small"
+                            fullWidth
+                            placeholder="Search..."
+                            value={searchText}
+                            onChange={(e) => setSearchText(e.target.value)}
+                            sx={{ mb: 1.5 }}
+                        />
+
+                        {/* CLEAR FILTER */}
+                        <MenuItem
+                            sx={{ fontWeight: 700 }}
+                            onClick={() => {
+                                setColumnFilters((prev) => ({
+                                    ...prev,
+                                    [activeHeader]: [],
+                                }));
+                                setFilterAnchor(null);
+                            }}
+                        >
+                            Clear Filter (All)
+                        </MenuItem>
+
+                        {/* VALUES LIST */}
+                        <Box sx={{ maxHeight: 250, overflowY: "auto" }}>
+                            {(() => {
+                                const selectedValues = columnFilters[activeHeader] || [];
+                                
+                                // Extract unique values from raw chequeData for the active column
+                                const allValues = Array.from(
+                                    new Set(chequeData.map((r) => r[activeHeader]))
+                                )
+                                    .filter(Boolean)
+                                    .filter((v) =>
+                                        String(v)
+                                            .toLowerCase()
+                                            .includes(searchText.toLowerCase())
+                                    );
+
+                                // Sort selected values first
+                                const sortedValues = [
+                                    ...allValues.filter((v) => selectedValues.includes(v)),
+                                    ...allValues.filter((v) => !selectedValues.includes(v)),
+                                ];
+
+                                return sortedValues.map((v) => {
+                                    const isSelected = selectedValues.includes(v);
+
+                                    return (
+                                        <MenuItem
+                                            key={String(v)}
+                                            onClick={() => {
+                                                setColumnFilters((prev) => {
+                                                    const prevValues = prev[activeHeader] || [];
+                                                    const newValues = prevValues.includes(v)
+                                                        ? prevValues.filter((x: any) => x !== v)
+                                                        : [...prevValues, v];
+
+                                                    return {
+                                                        ...prev,
+                                                        [activeHeader]: newValues,
+                                                    };
+                                                });
+                                            }}
+                                            sx={{
+                                                backgroundColor: isSelected ? "#e0e7ff" : "transparent",
+                                                fontWeight: isSelected ? 600 : 400,
+                                                "&:hover": {
+                                                    backgroundColor: isSelected ? "#c7d2fe" : "#f1f5f9",
+                                                },
+                                            }}
+                                        >
+                                            {String(v)}
+                                        </MenuItem>
+                                    );
+                                });
+                            })()}
+                        </Box>
+                    </Box>
+                )}
+            </Menu>
         </Box>
+    );
+};
+
+interface ChequeRowProps {
+    row: any;
+    index: number;
+}
+
+const ChequeRow: React.FC<ChequeRowProps> = ({ row, index }) => {
+    const [open, setOpen] = useState(false);
+
+    const formatChequeNum = (v: any) => {
+        const num = Number(v);
+        if (isNaN(num) || num === 0) return "-";
+        return "₹" + new Intl.NumberFormat("en-IN", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        }).format(num);
+    };
+
+    return (
+        <>
+            <TableRow hover onClick={() => setOpen(!open)} sx={{ cursor: "pointer", "& > *": { borderBottom: "unset" } }}>
+                <TableCell align="center" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600 }}>
+                    <IconButton size="small">
+                        {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                    </IconButton>
+                    {index}
+                </TableCell>
+                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>
+                    {row.receipt_date ? dayjs(row.receipt_date).format("DD-MM-YYYY") : ""}
+                </TableCell>
+                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>{row.receipt_invoice_no}</TableCell>
+                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>{row.voucherTypeGet}</TableCell>
+                <TableCell sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 700 }}>{row.creditAccountGet}</TableCell>
+                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>{row.check_no}</TableCell>
+                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>
+                    {row.check_date ? dayjs(row.check_date).format("DD-MM-YYYY") : ""}
+                </TableCell>
+                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>
+                    {row.bank_date ? dayjs(row.bank_date).format("DD-MM-YYYY") : ""}
+                </TableCell>
+                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600 }}>
+                    {formatChequeNum(row.debit_amount)}
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: 600 }}>
+                    {formatChequeNum(row.credit_amount)}
+                </TableCell>
+            </TableRow>
+            <TableRow>
+                <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={10}>
+                    <Collapse in={open} timeout="auto" unmountOnExit>
+                        <Box sx={{ margin: 2 }}>
+                            {/* Sales Against Reference */}
+                            <Typography variant="subtitle2" fontWeight={700} gutterBottom component="div" color="#1E3A8A">
+                                Sales Against Reference
+                            </Typography>
+                            <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
+                                <Table size="small">
+                                    <TableHead>
+                                        <TableRow sx={{ bgcolor: "#f8fafc" }}>
+                                            <TableCell sx={{ fontWeight: 600 }}>S.No</TableCell>
+                                            <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
+                                            <TableCell sx={{ fontWeight: 600 }}>Sales Invoice No</TableCell>
+                                            <TableCell align="right" sx={{ fontWeight: 600 }}>Invoice Value</TableCell>
+                                            <TableCell align="right" sx={{ fontWeight: 600 }}>Payment Amount</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {!row.billRef || row.billRef.length === 0 ? (
+                                            <TableRow>
+                                                <TableCell colSpan={5} align="center" sx={{ color: "#94a3b8", py: 2 }}>
+                                                    No sales reference found.
+                                                </TableCell>
+                                            </TableRow>
+                                        ) : (
+                                            <>
+                                                {row.billRef.map((bill: any, idx: number) => (
+                                                    <TableRow key={idx}>
+                                                        <TableCell>{idx + 1}</TableCell>
+                                                        <TableCell>
+                                                            {bill.billDate ? dayjs(bill.billDate).format("DD-MM-YYYY") : ""}
+                                                        </TableCell>
+                                                        <TableCell>{bill.invoiceVoucherNumber}</TableCell>
+                                                        <TableCell align="right">{formatChequeNum(bill.invoiceValue)}</TableCell>
+                                                        <TableCell align="right">{formatChequeNum(bill.paidAmount)}</TableCell>
+                                                    </TableRow>
+                                                ))}
+                                                <TableRow sx={{ bgcolor: "#f1f5f9" }}>
+                                                    <TableCell colSpan={4} align="right" sx={{ fontWeight: 700 }}>Total</TableCell>
+                                                    <TableCell align="right" sx={{ fontWeight: 700 }}>
+                                                        {formatChequeNum(row.billRef.reduce((sum: number, b: any) => sum + Number(b.paidAmount || 0), 0))}
+                                                    </TableCell>
+                                                </TableRow>
+                                            </>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+
+                            {/* Contra Reference */}
+                            <Typography variant="subtitle2" fontWeight={700} gutterBottom component="div" color="#1E3A8A">
+                                Contra Reference
+                            </Typography>
+                            <TableContainer component={Paper} variant="outlined">
+                                <Table size="small">
+                                    <TableHead>
+                                        <TableRow sx={{ bgcolor: "#f8fafc" }}>
+                                            <TableCell sx={{ fontWeight: 600 }}>Voucher No</TableCell>
+                                            <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
+                                            <TableCell align="right" sx={{ fontWeight: 600 }}>Amount</TableCell>
+                                            <TableCell sx={{ fontWeight: 600 }}>Cheque Date</TableCell>
+                                            <TableCell sx={{ fontWeight: 600 }}>Bank Date</TableCell>
+                                            <TableCell sx={{ fontWeight: 600 }}>Narration</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {!row.contraRef || row.contraRef.length === 0 ? (
+                                            <TableRow>
+                                                <TableCell colSpan={6} align="center" sx={{ color: "#94a3b8", py: 2 }}>
+                                                    No contra reference found.
+                                                </TableCell>
+                                            </TableRow>
+                                        ) : (
+                                            row.contraRef.map((contra: any, idx: number) => (
+                                                <TableRow key={idx}>
+                                                    <TableCell>{contra.contraVoucherNumber}</TableCell>
+                                                    <TableCell>
+                                                        {contra.contraDate ? dayjs(contra.contraDate).format("DD-MM-YYYY") : ""}
+                                                    </TableCell>
+                                                    <TableCell align="right">{formatChequeNum(contra.contraAmount)}</TableCell>
+                                                    <TableCell>
+                                                        {contra.chequeDate ? dayjs(contra.chequeDate).format("DD-MM-YYYY") : ""}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        {contra.bankDate ? dayjs(contra.bankDate).format("DD-MM-YYYY") : ""}
+                                                    </TableCell>
+                                                    <TableCell>{contra.narration}</TableCell>
+                                                </TableRow>
+                                            ))
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        </Box>
+                    </Collapse>
+                </TableCell>
+            </TableRow>
+        </>
     );
 };
 

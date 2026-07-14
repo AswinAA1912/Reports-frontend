@@ -92,6 +92,10 @@ const InStockReport: React.FC = () => {
             .sort((a, b) => a.order - b.order);
     }, [columnsConfig]);
 
+    const isPivotMode = useMemo(() => {
+        return !enabledConfigColumns.some(col => col.key === "stock_item_name" || col.key === "Stock_Item");
+    }, [enabledConfigColumns]);
+
     /* ================= SORTABLE COLUMN ================= */
     type SortableColumnProps = {
         column: ColumnConfig;
@@ -459,8 +463,19 @@ const InStockReport: React.FC = () => {
     const getProductDetails = useMemo(() => {
         return (item: stockWiseReport) => {
             const godownName = String(item.Godown_Name || selectedGodown?.godown_name || "").toLowerCase().trim();
-            const key = `${item.Product_Id}_${godownName}`;
-            const records = mappedProcessData[key] || [];
+            
+            let records: any[] = [];
+            const productIds = (item as any).Product_Ids;
+            if (productIds && Array.isArray(productIds)) {
+                productIds.forEach((pId) => {
+                    const key = `${pId}_${godownName}`;
+                    const recs = mappedProcessData[key] || [];
+                    records = [...records, ...recs];
+                });
+            } else {
+                const key = `${item.Product_Id}_${godownName}`;
+                records = mappedProcessData[key] || [];
+            }
 
             const isTrip = (r: any) => {
                 return (
@@ -538,7 +553,7 @@ const InStockReport: React.FC = () => {
     }, [detailedStockData]);
 
     // Filtered data based on search and brand filter
-    const filteredData = useMemo(() => {
+    const filteredDetailedData = useMemo(() => {
         return (detailedStockData || []).filter((item) => {
             const productName = item.stock_item_name || item.Stock_Item || "";
             const brandName = item.Brand || item.Group_Name || "";
@@ -568,6 +583,72 @@ const InStockReport: React.FC = () => {
             return true;
         });
     }, [detailedStockData, searchText, selectedBrand, inwardMode, processMode, outwardMode, getProductDetails, qtyKeys, processApiData]);
+
+    const filteredData = useMemo(() => {
+        if (!isPivotMode) return filteredDetailedData;
+
+        const groups: Record<string, stockWiseReport> = {};
+
+        filteredDetailedData.forEach(item => {
+            const groupKeyParts: string[] = [];
+            
+            // Always group by Brand
+            const brandVal = item.Brand || item.Group_Name || "Others";
+            groupKeyParts.push(brandVal);
+            
+            // Add other enabled columns that are NOT product-specific identifiers
+            const excludedKeys = ["stock_item_name", "Stock_Item", "Product_Id", "POS_Item_Name", "Item_Name_Modified"];
+            enabledConfigColumns.forEach(col => {
+                if (!excludedKeys.includes(col.key) && col.key !== "Brand" && col.key !== "Group_Name") {
+                    groupKeyParts.push(String(item[col.key] ?? ""));
+                }
+            });
+
+            const key = groupKeyParts.join(" | ");
+
+            if (!groups[key]) {
+                const groupedItem: any = {
+                    ...item,
+                    Product_Ids: [],
+                };
+
+                // Initialize numeric fields to 0
+                const numericKeys = [
+                    "OB_Bal_Qty", "Pur_Qty", "Sal_Qty", "Bal_Qty",
+                    "OB_Act_Qty", "Pur_Act_Qty", "Sal_Act_Qty", "Bal_Act_Qty",
+                    "OB_Qty", "IN_Qty", "Out_Qty", "CL_QTY",
+                    "ACt_OB_Qty", "ACt_In_Qty", "Process_Act_IN_OUT_Qty", "ACt_Out_Qty", "CL_ACt_QTY",
+                    "Process_IN_OUT_Qty"
+                ];
+                numericKeys.forEach(k => {
+                    groupedItem[k] = 0;
+                });
+
+                groups[key] = groupedItem;
+            }
+
+            const g = groups[key];
+            if (item.Product_Id) {
+                (g as any).Product_Ids.push(item.Product_Id);
+            }
+
+            // Sum numeric fields
+            const numericKeys = [
+                "OB_Bal_Qty", "Pur_Qty", "Sal_Qty", "Bal_Qty",
+                "OB_Act_Qty", "Pur_Act_Qty", "Sal_Act_Qty", "Bal_Act_Qty",
+                "OB_Qty", "IN_Qty", "Out_Qty", "CL_QTY",
+                "ACt_OB_Qty", "ACt_In_Qty", "Process_Act_IN_OUT_Qty", "ACt_Out_Qty", "CL_ACt_QTY",
+                "Process_IN_OUT_Qty"
+            ];
+            numericKeys.forEach(k => {
+                if (item[k] !== undefined && item[k] !== null) {
+                    g[k] = (Number(g[k]) || 0) + (Number(item[k]) || 0);
+                }
+            });
+        });
+
+        return Object.values(groups);
+    }, [filteredDetailedData, enabledConfigColumns, isPivotMode]);
 
     const getTripLabel = React.useCallback((t: any): string => {
         const rawVal = t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id;
@@ -691,58 +772,17 @@ const InStockReport: React.FC = () => {
             opening += op;
             closing += clQty;
 
-            const godownName = String(item.Godown_Name || selectedGodown?.godown_name || "").toLowerCase().trim();
-            const key = `${item.Product_Id}_${godownName}`;
-            const records = mappedProcessData[key] || [];
+            const { trips, returnQty, stockInQty, procInQty, procOutQty, outwardQty, outTrips, deliveryQty } = getProductDetails(item);
 
             if (processApiData.length > 0) {
-                const isTrip = (r: any) => {
-                    return (
-                        r.trip_voucher_number !== null ||
-                        r.trip_id !== null ||
-                        (r.Trip_No !== null && r.Trip_No !== undefined && String(r.Trip_No).trim() !== "") ||
-                        (r.trip_no !== null && r.trip_no !== undefined && String(r.trip_no).trim() !== "")
-                    );
-                };
-                const trips = records.filter(
-                    (r) =>
-                        r.stock_direction?.toUpperCase() === "IN" &&
-                        isTrip(r)
-                );
-                const returns = records.filter(
-                    (r) =>
-                        r.stock_direction?.toUpperCase() === "IN" &&
-                        !isTrip(r)
-                );
                 const itemTripQty = trips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
-                const itemReturnQty = returns.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
-
-                const itemStockIn = records
-                    .filter((r) => r.stock_direction?.toUpperCase() === "IN")
-                    .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
-
-                const itemProcIn = records
-                    .filter((r) => r.stock_direction?.toUpperCase() === "PROCESS IN")
-                    .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
-                const itemProcOut = records
-                    .filter((r) => r.stock_direction?.toUpperCase() === "PROCESS OUT")
-                    .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
-
-                const outTrips = records.filter(
-                    (r) =>
-                        r.stock_direction?.toUpperCase() === "OUT" &&
-                        isTrip(r)
-                );
-                const deliveries = records.filter(
-                    (r) =>
-                        r.stock_direction?.toUpperCase() === "OUT" &&
-                        !isTrip(r)
-                );
+                const itemReturnQty = returnQty;
+                const itemStockIn = stockInQty;
+                const itemProcIn = procInQty;
+                const itemProcOut = procOutQty;
                 const itemOutTripQty = outTrips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
-                const itemDeliveryQty = deliveries.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
-                const itemStockOut = records
-                    .filter((r) => r.stock_direction?.toUpperCase() === "OUT")
-                    .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+                const itemDeliveryQty = deliveryQty;
+                const itemStockOut = outwardQty;
 
                 tripQtyTotal += itemTripQty;
                 returnQtyTotal += itemReturnQty;
@@ -789,7 +829,7 @@ const InStockReport: React.FC = () => {
             totalOutward: stockOutTotal,
             totalProcess: procIn - procOut
         };
-    }, [filteredData, qtyKeys, mappedProcessData, processApiData, selectedGodown]);
+    }, [filteredData, qtyKeys, getProductDetails, processApiData]);
 
     // Recalculated row-level Stock In Quantity summing only visible columns
     const getRecalculatedStockInQty = React.useCallback((item: stockWiseReport) => {

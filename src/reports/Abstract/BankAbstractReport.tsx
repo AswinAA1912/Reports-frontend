@@ -15,16 +15,8 @@ import {
     DialogContent,
     Button,
     IconButton,
-    Collapse,
-    Autocomplete,
-    TextField,
-    MenuItem,
-    Menu,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import FilterAltIcon from "@mui/icons-material/FilterAlt";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -34,7 +26,6 @@ import PageHeader from "../../Layout/PageHeader";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import { CashBoxReportResponse, CashBoxTransaction, CashBoxMasterAccount } from "../../services/cashbox.service";
 import { bankboxService } from "../../services/bankbox.service";
-import CommonPagination from "../../Components/CommonPagination";
 
 interface GroupConfig {
     key: string;
@@ -177,9 +168,12 @@ const styleBankWorksheet = (ws: XLSX.WorkSheet) => {
 const BankAbstractReport: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
 
-    const [viewMode, setViewMode] = useState<"abstract" | "expanded">("abstract");
+
     const [loading, setLoading] = useState(false);
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const [exportModalOpen, setExportModalOpen] = useState(false);
+    const [exportType, setExportType] = useState<"excel" | "pdf" | null>(null);
+    const [exportDetails, setExportDetails] = useState(false);
     const [fromDate, setFromDate] = useState(today);
     const [toDate, setToDate] = useState(today);
     const [filters, setFilters] = useState({
@@ -188,156 +182,7 @@ const BankAbstractReport: React.FC = () => {
 
     const [reportData, setReportData] = useState<CashBoxReportResponse | null>(null);
 
-    // Cheque Transactions (Expanded) view states
-    const [chequeData, setChequeData] = useState<any[]>([]);
-    
-    // Header Filters (Party Name, Voucher Type, Cheque No)
-    const [activeHeader, setActiveHeader] = useState<string | null>(null);
-    const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
-    const [searchText, setSearchText] = useState("");
-    const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({
-        creditAccountGet: [],
-        voucherTypeGet: [],
-        check_no: []
-    });
 
-    const [creditAccounts, setCreditAccounts] = useState<{ value: any; label: string }[]>([]);
-    const [voucherTypes, setVoucherTypes] = useState<{ value: any; label: string }[]>([]);
-
-    const handleHeaderClick = (e: React.MouseEvent<HTMLElement>, columnKey: string) => {
-        setActiveHeader(columnKey);
-        setSearchText("");
-        setFilterAnchor(e.currentTarget);
-    };
-
-    const [chequeFilters, setChequeFilters] = useState({
-        Fromdate: today,
-        Todate: today,
-        debitAccount: { value: "", label: "ALL" } as { value: any; label: string },
-        creditAccount: { value: "", label: "ALL" } as { value: any; label: string },
-        voucherType: { value: "", label: "ALL" } as { value: any; label: string },
-        partyType: "Pending Party",
-        chequeAccounts: [] as { value: any; label: string }[]
-    });
-
-    useEffect(() => {
-        bankboxService.getChequeAccounts()
-            .then(data => {
-                if (data && Array.isArray(data)) {
-                    setChequeFilters(pre => ({ ...pre, chequeAccounts: data }));
-                }
-            })
-            .catch(e => console.error("Failed to load cheque accounts", e));
-
-        bankboxService.getChequeCreditAccounts()
-            .then(data => {
-                if (data && Array.isArray(data)) {
-                    setCreditAccounts(data);
-                }
-            })
-            .catch(e => console.error("Failed to load credit accounts", e));
-
-        bankboxService.getChequeVoucherTypes()
-            .then(data => {
-                if (data && Array.isArray(data)) {
-                    setVoucherTypes(data);
-                }
-            })
-            .catch(e => console.error("Failed to load voucher types", e));
-    }, []);
-
-    const fetchChequeData = async () => {
-        const { Fromdate, Todate, debitAccount } = chequeFilters;
-        if (!debitAccount.value) {
-            toast.error("Please Select Debit Account");
-            return;
-        }
-
-        try {
-            setLoading(true);
-            const data = await bankboxService.getChequeTransactions({
-                Fromdate,
-                Todate,
-                debitAccount: debitAccount.value
-            });
-            if (data && Array.isArray(data)) {
-                setChequeData(data);
-            } else {
-                setChequeData([]);
-            }
-        } catch (e) {
-            console.error(e);
-            toast.error("Failed to load cheque transaction data ❌");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-
-
-    const filteredChequeData = useMemo(() => {
-        return chequeData.filter((item: any) => {
-            const matchesCredit = chequeFilters.creditAccount.value === "" ||
-                Number(item.credit_ledger) === Number(chequeFilters.creditAccount.value);
-            const matchesVoucher = chequeFilters.voucherType.value === "" ||
-                Number(item.receipt_voucher_type_id) === Number(chequeFilters.voucherType.value);
-            const matchesPartyType =
-                chequeFilters.partyType === "ALL" ||
-                (chequeFilters.partyType === "Pending Party" && (!item.contraRef || item.contraRef.length === 0)) ||
-                (chequeFilters.partyType === "Payed Party" && item.contraRef && item.contraRef.length > 0);
-
-            // Filter for Pending Cheques: Bank Date is null or upcoming, or Cheque Date is upcoming
-            const bankDate = item.bank_date ? dayjs(item.bank_date) : null;
-            const chequeDate = item.check_date ? dayjs(item.check_date) : null;
-            const today = dayjs().startOf("day");
-
-            const isBankDateUpcoming = bankDate && bankDate.isAfter(today);
-            const isChequeDateUpcoming = chequeDate && chequeDate.isAfter(today);
-            const isNoBankDate = !bankDate || !item.bank_date;
-
-            const isPending = isNoBankDate || isBankDateUpcoming || isChequeDateUpcoming;
-
-            const matchesPending = chequeFilters.partyType !== "Pending Party" || isPending;
-
-            if (!(matchesCredit && matchesVoucher && matchesPartyType && matchesPending)) return false;
-
-            // Header Column Filters
-            const creditFilter = columnFilters.creditAccountGet || [];
-            if (creditFilter.length > 0 && !creditFilter.includes(item.creditAccountGet)) return false;
-
-            const voucherFilter = columnFilters.voucherTypeGet || [];
-            if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucherTypeGet)) return false;
-
-            const checkNoFilter = columnFilters.check_no || [];
-            if (checkNoFilter.length > 0 && !checkNoFilter.includes(item.check_no)) return false;
-
-            return true;
-        });
-    }, [chequeData, chequeFilters, columnFilters]);
-
-    const chequeTotals = useMemo(() => {
-        let debitSum = 0;
-        let creditSum = 0;
-        filteredChequeData.forEach((item: any) => {
-            debitSum += Number(item.debit_amount || 0);
-            creditSum += Number(item.credit_amount || 0);
-        });
-        return {
-            debit: debitSum,
-            credit: creditSum
-        };
-    }, [filteredChequeData]);
-
-    const [chequePage, setChequePage] = useState(1);
-    const [chequeRowsPerPage, setChequeRowsPerPage] = useState(100);
-
-    const paginatedChequeData = useMemo(() => {
-        return filteredChequeData.slice((chequePage - 1) * chequeRowsPerPage, chequePage * chequeRowsPerPage);
-    }, [filteredChequeData, chequePage, chequeRowsPerPage]);
-
-    useEffect(() => {
-        setChequePage(1);
-    }, [filteredChequeData]);
 
     // Selected groups for multi-select filter
     const [selectedGroups, setSelectedGroups] = useState<string[]>(["All"]);
@@ -470,7 +315,7 @@ const BankAbstractReport: React.FC = () => {
         return new Set(
             (reportData?.Bank || [])
                 .filter((acc) => !isFiltered || (acc.Group_Name && selectedGroups.includes(acc.Group_Name.trim())))
-                .map((acc) => String(acc.Acc_Id))
+                .map((acc) => String(acc.Acc_Id).trim())
         );
     }, [reportData, selectedGroups]);
 
@@ -480,7 +325,7 @@ const BankAbstractReport: React.FC = () => {
         return new Set(
             (reportData?.Bank || [])
                 .filter((acc) => !isFiltered || (acc.Group_Name && selectedGroups.includes(acc.Group_Name.trim())))
-                .map((acc) => String(acc.Group_Id))
+                .map((acc) => String(acc.Group_Id).trim())
         );
     }, [reportData, selectedGroups]);
 
@@ -490,20 +335,20 @@ const BankAbstractReport: React.FC = () => {
 
         // Map all Bank Acc_Ids to a Set for O(1) lookup
         const bankAccIds = new Set(
-            (reportData?.Bank || []).map((acc) => String(acc.Acc_Id))
+            (reportData?.Bank || []).map((acc) => String(acc.Acc_Id).trim())
         );
 
         // Map all non-bank Acc_Ids and cash-related Acc_Ids
         const nonBankAccIds = new Set<string>();
         const cashRelatedAccIds = new Set<string>();
         const cashMasterAccIds = new Set(
-            (reportData?.Cash || []).map((acc) => String(acc.Acc_Id))
+            (reportData?.Cash || []).map((acc) => String(acc.Acc_Id).trim())
         );
 
         if (reportData) {
-            (reportData.Cash || []).forEach((acc) => cashRelatedAccIds.add(String(acc.Acc_Id)));
+            (reportData.Cash || []).forEach((acc) => cashRelatedAccIds.add(String(acc.Acc_Id).trim()));
             (reportData.LedgerGrp || []).forEach((acc) => {
-                const accIdStr = String(acc.Acc_Id);
+                const accIdStr = String(acc.Acc_Id).trim();
                 if (acc.Account_name && acc.Account_name.toLowerCase().includes("(cash)")) {
                     cashRelatedAccIds.add(accIdStr);
                 } else {
@@ -511,7 +356,7 @@ const BankAbstractReport: React.FC = () => {
                 }
             });
             (reportData.DEX || []).forEach((acc) => {
-                const accIdStr = String(acc.Acc_Id);
+                const accIdStr = String(acc.Acc_Id).trim();
                 if (acc.Account_name && acc.Account_name.toLowerCase().includes("(cash)")) {
                     cashRelatedAccIds.add(accIdStr);
                 } else {
@@ -519,7 +364,7 @@ const BankAbstractReport: React.FC = () => {
                 }
             });
             (reportData.IDEX || []).forEach((acc) => {
-                const accIdStr = String(acc.Acc_Id);
+                const accIdStr = String(acc.Acc_Id).trim();
                 if (acc.Account_name && acc.Account_name.toLowerCase().includes("(cash)")) {
                     cashRelatedAccIds.add(accIdStr);
                 } else {
@@ -533,8 +378,8 @@ const BankAbstractReport: React.FC = () => {
         // Find all invoice keys that have at least one transaction touching any active bank account
         const bankInvoiceKeys = new Set<string>();
         allTx.forEach((tx) => {
-            const isCreditBank = tx.Credit_Ac_Id && bankAccIds.has(String(tx.Credit_Ac_Id));
-            const isDebitBank = tx.Debit_Ac_Id && bankAccIds.has(String(tx.Debit_Ac_Id));
+            const isCreditBank = tx.Credit_Ac_Id && bankAccIds.has(String(tx.Credit_Ac_Id).trim());
+            const isDebitBank = tx.Debit_Ac_Id && bankAccIds.has(String(tx.Debit_Ac_Id).trim());
             if (isCreditBank || isDebitBank) {
                 const key = getInvoiceKey(tx);
                 if (key) bankInvoiceKeys.add(key);
@@ -548,8 +393,8 @@ const BankAbstractReport: React.FC = () => {
                 return false;
             }
 
-            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id) : "";
-            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id) : "";
+            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id).trim() : "";
+            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id).trim() : "";
 
             // If either side is a cash-related expense/ledger (not a contra Cash account, but containing "(cash)"), filter it out
             const isDebitCashExpense = debitIdStr && cashRelatedAccIds.has(debitIdStr) && !cashMasterAccIds.has(debitIdStr);
@@ -577,7 +422,15 @@ const BankAbstractReport: React.FC = () => {
 
         return cleanTx.filter((tx) => {
             const key = getInvoiceKey(tx);
-            return key && selectedBankInvoiceKeys.has(key);
+            if (!key || !selectedBankInvoiceKeys.has(key)) return false;
+
+            // Exclude bank-to-bank contra transfers (where both debit and credit sides are selected bank accounts)
+            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id) : "";
+            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id) : "";
+            const isBankToBank = debitIdStr && creditIdStr && selectedBankAccIds.has(debitIdStr) && selectedBankAccIds.has(creditIdStr);
+            if (isBankToBank) return false;
+
+            return true;
         });
     }, [reportData, selectedBankAccIds, selectedGroups]);
 
@@ -693,6 +546,20 @@ const BankAbstractReport: React.FC = () => {
             }
         });
 
+        const invoiceKeysWithDebitSelectedBank = new Set<string>();
+        const invoiceKeysWithCreditSelectedBank = new Set<string>();
+        filteredTransactions.forEach((tx) => {
+            const key = getInvoiceKey(tx);
+            if (key) {
+                if (tx.Debit_Ac_Id && selectedBankAccIds.has(String(tx.Debit_Ac_Id).trim())) {
+                    invoiceKeysWithDebitSelectedBank.add(key);
+                }
+                if (tx.Credit_Ac_Id && selectedBankAccIds.has(String(tx.Credit_Ac_Id).trim())) {
+                    invoiceKeysWithCreditSelectedBank.add(key);
+                }
+            }
+        });
+
         const cashList = (reportData?.Cash || []).filter(
             (acc) => matchingOpposingAccIds.has(String(acc.Acc_Id)) && !allBankAccIds.has(String(acc.Acc_Id))
         );
@@ -781,22 +648,23 @@ const BankAbstractReport: React.FC = () => {
             Others: othersList,
         };
 
-        // Sum OB_Amount robustly for Bank focus based on selected group names
+        // Sum OB_Amount robustly for Bank focus based on selected group names and account IDs
         let opening = 0;
         if (obList.length > 0) {
             const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
-            if (isFiltered) {
-                let sum = 0;
-                obList.forEach((obItem: any) => {
-                    const groupName = obItem.Group_Name ? obItem.Group_Name.trim() : "";
-                    if (groupName && selectedGroups.includes(groupName)) {
-                        sum += Number(obItem.OB_Amount) || 0;
-                    }
-                });
-                opening = sum;
-            } else {
-                opening = obList.reduce((accSum, obItem) => accSum + (Number(obItem.OB_Amount) || 0), 0);
-            }
+            const bankGroupNames = new Set((reportData?.Bank || []).map(acc => acc.Group_Name ? acc.Group_Name.trim() : ""));
+
+            let sum = 0;
+            obList.forEach((obItem: any) => {
+                const isSelected = isFiltered
+                    ? (obItem.Acc_Id ? selectedBankAccIds.has(String(obItem.Acc_Id).trim()) : (obItem.Group_Name && selectedGroups.includes(obItem.Group_Name.trim())))
+                    : (obItem.Acc_Id ? allBankAccIdsSet.has(String(obItem.Acc_Id).trim()) : (obItem.Group_Name ? bankGroupNames.has(obItem.Group_Name.trim()) : true));
+
+                if (isSelected) {
+                    sum += Number(obItem.OB_Amount) || 0;
+                }
+            });
+            opening = sum;
         }
 
         const getGroupData = (config: GroupConfig) => {
@@ -806,6 +674,7 @@ const BankAbstractReport: React.FC = () => {
             const matchedTransactions = filteredTransactions.filter((tx) => {
                 const txCreditAcIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id).trim() : "";
                 const txDebitAcIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id).trim() : "";
+                const key = getInvoiceKey(tx);
 
                 // If it is the Bank group (contra Bank-to-Bank), BOTH sides of the transaction must be Bank accounts
                 if (config.masterKey === "Bank") {
@@ -814,16 +683,20 @@ const BankAbstractReport: React.FC = () => {
                     if (!isBankToBank) return false;
 
                     if (config.side === "debit") {
-                        return tx.Credit_Ac_Id && allBankAccIds.has(txCreditAcIdStr);
+                        // Bank payments: selected bank account is credited
+                        return tx.Credit_Ac_Id && selectedBankAccIds.has(txCreditAcIdStr);
                     } else {
-                        return tx.Debit_Ac_Id && allBankAccIds.has(txDebitAcIdStr);
+                        // Bank receipts: selected bank account is debited
+                        return tx.Debit_Ac_Id && selectedBankAccIds.has(txDebitAcIdStr);
                     }
                 }
 
                 if (config.side === "debit") {
-                    return tx.Debit_Ac_Id && masterIds.has(txDebitAcIdStr);
+                    // Outflows/Payments (Debit to opposing account, Credit to selected Bank)
+                    return tx.Debit_Ac_Id && masterIds.has(txDebitAcIdStr) && key && invoiceKeysWithCreditSelectedBank.has(key);
                 } else {
-                    return tx.Credit_Ac_Id && masterIds.has(txCreditAcIdStr);
+                    // Inflows/Receipts (Credit to opposing account, Debit to selected Bank)
+                    return tx.Credit_Ac_Id && masterIds.has(txCreditAcIdStr) && key && invoiceKeysWithDebitSelectedBank.has(key);
                 }
             });
 
@@ -884,7 +757,29 @@ const BankAbstractReport: React.FC = () => {
 
         const totalDebits = debitGroups.reduce((sum, g) => sum + g.total, 0);
         const totalCredits = creditGroups.reduce((sum, g) => sum + g.total, 0);
-        const closing = opening + totalCredits - totalDebits;
+
+        // Sum CL_Amount robustly based on selected group names and account IDs from Cls dataset
+        let closing = 0;
+        const clsList = reportData?.Cls || [];
+        if (clsList.length > 0) {
+            const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
+            const bankGroupNames = new Set((reportData?.Bank || []).map(acc => acc.Group_Name ? acc.Group_Name.trim() : ""));
+
+            let sum = 0;
+            clsList.forEach((clsItem: any) => {
+                const isSelected = isFiltered
+                    ? (clsItem.Acc_Id ? selectedBankAccIds.has(String(clsItem.Acc_Id).trim()) : (clsItem.Group_Name && selectedGroups.includes(clsItem.Group_Name.trim())))
+                    : (clsItem.Acc_Id ? allBankAccIdsSet.has(String(clsItem.Acc_Id).trim()) : (clsItem.Group_Name ? bankGroupNames.has(clsItem.Group_Name.trim()) : true));
+
+                if (isSelected) {
+                    sum += Number(clsItem.CL_Amount) || 0;
+                }
+            });
+            closing = opening + sum;
+        } else {
+            // Fallback to manual calculation if Cls is empty/missing
+            closing = opening + totalCredits - totalDebits;
+        }
 
         return {
             debitGroups,
@@ -999,56 +894,8 @@ const BankAbstractReport: React.FC = () => {
         }, 0);
     }, [modalTransactions, selectedLedger, getTransactionAmount]);
 
-    const handleChequeExportExcel = () => {
-        try {
-            const excelData: any[][] = [];
-            excelData.push(["CHEQUE TRANSACTION DETAILS"]);
-            excelData.push([]);
-            excelData.push([
-                "S.No",
-                "Rec.Date",
-                "Rec.No",
-                "VchType",
-                "Party Name",
-                "Chq.No",
-                "Chq.Date",
-                "Bank.Date",
-                "Debit",
-                "Credit"
-            ]);
-
-            filteredChequeData.forEach((row: any, idx: number) => {
-                excelData.push([
-                    idx + 1,
-                    row.receipt_date ? dayjs(row.receipt_date).format("DD-MM-YYYY") : "",
-                    row.receipt_invoice_no || "",
-                    row.voucherTypeGet || "",
-                    row.creditAccountGet || "",
-                    row.check_no || "",
-                    row.check_date ? dayjs(row.check_date).format("DD-MM-YYYY") : "",
-                    row.bank_date ? dayjs(row.bank_date).format("DD-MM-YYYY") : "",
-                    row.debit_amount || 0,
-                    row.credit_amount || 0
-                ]);
-            });
-
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Cheque Transactions");
-            XLSX.writeFile(wb, `Cheque_Transactions_${dayjs().format("YYYYMMDD_HHmmss")}.xlsx`);
-            toast.success("Excel Exported ✅");
-        } catch (err) {
-            console.error(err);
-            toast.error("Excel Export Failed ❌");
-        }
-    };
-
     // Excel Export
-    const handleExportExcel = () => {
-        if (viewMode === "expanded") {
-            handleChequeExportExcel();
-            return;
-        }
+    const handleExportExcel = (includeDetails: boolean = false) => {
         try {
             const excelData: any[][] = [];
             const dateStr =
@@ -1095,78 +942,80 @@ const BankAbstractReport: React.FC = () => {
                         rightSub ? rightSub.amount : "",
                     ]);
 
-                    // Gather nested transactions for these sub-ledgers
-                    const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
-                    const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
-                    const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
+                    if (includeDetails) {
+                        // Gather nested transactions for these sub-ledgers
+                        const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
+                        const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
+                        const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
 
-                    for (let j = 0; j < maxTxRows; j++) {
-                        const txL = leftTxs[j];
-                        const txR = rightTxs[j];
+                        for (let j = 0; j < maxTxRows; j++) {
+                            const txL = leftTxs[j];
+                            const txR = rightTxs[j];
 
-                        let col0 = "";
-                        let col1: any = "";
-                        let narrationL = "";
-                        if (txL) {
-                            const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
-                            const timeStr = formatTime(txL.Created_Time);
-                            col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                            col1 = getTransactionAmount(txL, leftSub.accId, leftGroup.side);
-                            narrationL = (txL.Narration || txL.Line_Naration || "").trim();
-                        }
-
-                        let col2 = "";
-                        let col3: any = "";
-                        let narrationR = "";
-                        if (txR) {
-                            const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
-                            const timeStr = formatTime(txR.Created_Time);
-                            col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                            col3 = getTransactionAmount(txR, rightSub.accId, rightGroup.side);
-                            narrationR = (txR.Narration || txR.Line_Naration || "").trim();
-                        }
-
-                        excelData.push([col0, col1, col2, col3]);
-
-                        if (narrationL || narrationR) {
-                            excelData.push([
-                                narrationL ? `        * ${narrationL}` : "",
-                                "",
-                                narrationR ? `        * ${narrationR}` : "",
-                                ""
-                            ]);
-                        }
-
-                        // RecPay details below transaction
-                        const recPaysL = txL && txL.invoice_no && reportData?.RecPay
-                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
-                            : [];
-                        const recPaysR = txR && txR.invoice_no && reportData?.RecPay
-                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
-                            : [];
-
-                        const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
-                        for (let k = 0; k < maxRecPayRows; k++) {
-                            const rpL = recPaysL[k];
-                            const rpR = recPaysR[k];
-
-                            let rCol0 = "";
-                            let rCol1: any = "";
-                            if (rpL) {
-                                const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
-                                rCol0 = `        ${rpL.bill_name}${dateStr}`;
-                                rCol1 = rpL.Amount;
+                            let col0 = "";
+                            let col1: any = "";
+                            let narrationL = "";
+                            if (txL) {
+                                const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
+                                const timeStr = formatTime(txL.Created_Time);
+                                col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                col1 = getTransactionAmount(txL, leftSub.accId, leftGroup.side);
+                                narrationL = (txL.Narration || txL.Line_Naration || "").trim();
                             }
 
-                            let rCol2 = "";
-                            let rCol3: any = "";
-                            if (rpR) {
-                                const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
-                                rCol2 = `        ${rpR.bill_name}${dateStr}`;
-                                rCol3 = rpR.Amount;
+                            let col2 = "";
+                            let col3: any = "";
+                            let narrationR = "";
+                            if (txR) {
+                                const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
+                                const timeStr = formatTime(txR.Created_Time);
+                                col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                col3 = getTransactionAmount(txR, rightSub.accId, rightGroup.side);
+                                narrationR = (txR.Narration || txR.Line_Naration || "").trim();
                             }
 
-                            excelData.push([rCol0, rCol1, rCol2, rCol3]);
+                            excelData.push([col0, col1, col2, col3]);
+
+                            if (narrationL || narrationR) {
+                                excelData.push([
+                                    narrationL ? `        * ${narrationL}` : "",
+                                    "",
+                                    narrationR ? `        * ${narrationR}` : "",
+                                    ""
+                                ]);
+                            }
+
+                            // RecPay details below transaction
+                            const recPaysL = txL && txL.invoice_no && reportData?.RecPay
+                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
+                                : [];
+                            const recPaysR = txR && txR.invoice_no && reportData?.RecPay
+                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
+                                : [];
+
+                            const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
+                            for (let k = 0; k < maxRecPayRows; k++) {
+                                const rpL = recPaysL[k];
+                                const rpR = recPaysR[k];
+
+                                let rCol0 = "";
+                                let rCol1: any = "";
+                                if (rpL) {
+                                    const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
+                                    rCol0 = `        ${rpL.bill_name}${dateStr}`;
+                                    rCol1 = rpL.Amount;
+                                }
+
+                                let rCol2 = "";
+                                let rCol3: any = "";
+                                if (rpR) {
+                                    const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
+                                    rCol2 = `        ${rpR.bill_name}${dateStr}`;
+                                    rCol3 = rpR.Amount;
+                                }
+
+                                excelData.push([rCol0, rCol1, rCol2, rCol3]);
+                            }
                         }
                     }
                 }
@@ -1196,50 +1045,8 @@ const BankAbstractReport: React.FC = () => {
         }
     };
 
-    const handleChequeExportPDF = () => {
-        try {
-            const doc = new jsPDF("landscape", "mm", "a4");
-            doc.setFontSize(14);
-            doc.setFont("helvetica", "bold");
-            doc.text("CHEQUE TRANSACTION DETAILS", 148, 12, { align: "center" });
-
-            const headers = [["S.No", "Rec.Date", "Rec.No", "VchType", "Party Name", "Chq.No", "Chq.Date", "Bank.Date", "Debit", "Credit"]];
-            const body = filteredChequeData.map((row: any, idx: number) => [
-                idx + 1,
-                row.receipt_date ? dayjs(row.receipt_date).format("DD-MM-YYYY") : "",
-                row.receipt_invoice_no || "",
-                row.voucherTypeGet || "",
-                row.creditAccountGet || "",
-                row.check_no || "",
-                row.check_date ? dayjs(row.check_date).format("DD-MM-YYYY") : "",
-                row.bank_date ? dayjs(row.bank_date).format("DD-MM-YYYY") : "",
-                row.debit_amount ? Number(row.debit_amount).toLocaleString() : "-",
-                row.credit_amount ? Number(row.credit_amount).toLocaleString() : "-"
-            ]);
-
-            autoTable(doc, {
-                startY: 20,
-                head: headers,
-                body: body,
-                styles: { fontSize: 8, cellPadding: 1.5 },
-                headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
-                theme: "grid"
-            });
-
-            doc.save(`Cheque_Transactions_${dayjs().format("YYYYMMDD_HHmmss")}.pdf`);
-            toast.success("PDF Exported ✅");
-        } catch (err) {
-            console.error(err);
-            toast.error("PDF Export Failed ❌");
-        }
-    };
-
     // PDF Export
-    const handleExportPDF = () => {
-        if (viewMode === "expanded") {
-            handleChequeExportPDF();
-            return;
-        }
+    const handleExportPDF = (includeDetails: boolean = false) => {
         try {
             const doc = new jsPDF("landscape", "mm", "a4");
             const dateStr =
@@ -1277,78 +1084,80 @@ const BankAbstractReport: React.FC = () => {
                         rightSub ? formatNum(rightSub.amount) : "",
                     ]);
 
-                    // Gather nested transactions for these sub-ledgers for PDF
-                    const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
-                    const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
-                    const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
+                    if (includeDetails) {
+                        // Gather nested transactions for these sub-ledgers for PDF
+                        const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
+                        const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
+                        const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
 
-                    for (let j = 0; j < maxTxRows; j++) {
-                        const txL = leftTxs[j];
-                        const txR = rightTxs[j];
+                        for (let j = 0; j < maxTxRows; j++) {
+                            const txL = leftTxs[j];
+                            const txR = rightTxs[j];
 
-                        let col0 = "";
-                        let col1 = "";
-                        let narrationL = "";
-                        if (txL) {
-                            const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
-                            const timeStr = formatTime(txL.Created_Time);
-                            col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                            col1 = formatNum(getTransactionAmount(txL, leftSub.accId, leftGroup.side));
-                            narrationL = (txL.Narration || txL.Line_Naration || "").trim();
-                        }
-
-                        let col2 = "";
-                        let col3 = "";
-                        let narrationR = "";
-                        if (txR) {
-                            const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
-                            const timeStr = formatTime(txR.Created_Time);
-                            col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                            col3 = formatNum(getTransactionAmount(txR, rightSub.accId, rightGroup.side));
-                            narrationR = (txR.Narration || txR.Line_Naration || "").trim();
-                        }
-
-                        pdfBody.push([col0, col1, col2, col3]);
-
-                        if (narrationL || narrationR) {
-                            pdfBody.push([
-                                narrationL ? `        * ${narrationL}` : "",
-                                "",
-                                narrationR ? `        * ${narrationR}` : "",
-                                ""
-                            ]);
-                        }
-
-                        // RecPay details below transaction for PDF
-                        const recPaysL = txL && txL.invoice_no && reportData?.RecPay
-                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
-                            : [];
-                        const recPaysR = txR && txR.invoice_no && reportData?.RecPay
-                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
-                            : [];
-
-                        const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
-                        for (let k = 0; k < maxRecPayRows; k++) {
-                            const rpL = recPaysL[k];
-                            const rpR = recPaysR[k];
-
-                            let rCol0 = "";
-                            let rCol1 = "";
-                            if (rpL) {
-                                const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
-                                rCol0 = `        ${rpL.bill_name}${dateStr}`;
-                                rCol1 = formatNum(rpL.Amount);
+                            let col0 = "";
+                            let col1 = "";
+                            let narrationL = "";
+                            if (txL) {
+                                const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
+                                const timeStr = formatTime(txL.Created_Time);
+                                col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                col1 = formatNum(getTransactionAmount(txL, leftSub.accId, leftGroup.side));
+                                narrationL = (txL.Narration || txL.Line_Naration || "").trim();
                             }
 
-                            let rCol2 = "";
-                            let rCol3 = "";
-                            if (rpR) {
-                                const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
-                                rCol2 = `        ${rpR.bill_name}${dateStr}`;
-                                rCol3 = formatNum(rpR.Amount);
+                            let col2 = "";
+                            let col3 = "";
+                            let narrationR = "";
+                            if (txR) {
+                                const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
+                                const timeStr = formatTime(txR.Created_Time);
+                                col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                col3 = formatNum(getTransactionAmount(txR, rightSub.accId, rightGroup.side));
+                                narrationR = (txR.Narration || txR.Line_Naration || "").trim();
                             }
 
-                            pdfBody.push([rCol0, rCol1, rCol2, rCol3]);
+                            pdfBody.push([col0, col1, col2, col3]);
+
+                            if (narrationL || narrationR) {
+                                pdfBody.push([
+                                    narrationL ? `        * ${narrationL}` : "",
+                                    "",
+                                    narrationR ? `        * ${narrationR}` : "",
+                                    ""
+                                ]);
+                            }
+
+                            // RecPay details below transaction for PDF
+                            const recPaysL = txL && txL.invoice_no && reportData?.RecPay
+                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
+                                : [];
+                            const recPaysR = txR && txR.invoice_no && reportData?.RecPay
+                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
+                                : [];
+
+                            const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
+                            for (let k = 0; k < maxRecPayRows; k++) {
+                                const rpL = recPaysL[k];
+                                const rpR = recPaysR[k];
+
+                                let rCol0 = "";
+                                let rCol1 = "";
+                                if (rpL) {
+                                    const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
+                                    rCol0 = `        ${rpL.bill_name}${dateStr}`;
+                                    rCol1 = formatNum(rpL.Amount);
+                                }
+
+                                let rCol2 = "";
+                                let rCol3 = "";
+                                if (rpR) {
+                                    const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
+                                    rCol2 = `        ${rpR.bill_name}${dateStr}`;
+                                    rCol3 = formatNum(rpR.Amount);
+                                }
+
+                                pdfBody.push([rCol0, rCol1, rCol2, rCol3]);
+                            }
                         }
                     }
                 }
@@ -1420,11 +1229,15 @@ const BankAbstractReport: React.FC = () => {
     return (
         <Box sx={{ width: "100%", overflowX: "hidden", minHeight: "100vh", bgcolor: "#f1f5f9" }}>
             <PageHeader
-                onExportExcel={handleExportExcel}
-                onExportPDF={handleExportPDF}
+                onExportExcel={() => {
+                    setExportType("excel");
+                    setExportModalOpen(true);
+                }}
+                onExportPDF={() => {
+                    setExportType("pdf");
+                    setExportModalOpen(true);
+                }}
                 showPages={true}
-                toggleMode={viewMode === "abstract" ? "Abstract" : "Expanded"}
-                onToggleChange={(mode) => setViewMode(mode === "Abstract" ? "abstract" : "expanded")}
             />
 
             {/* Filter Drawer Toggle */}
@@ -1432,75 +1245,18 @@ const BankAbstractReport: React.FC = () => {
                 open={drawerOpen}
                 onClose={() => setDrawerOpen(false)}
                 onToggle={() => setDrawerOpen((p) => !p)}
-                fromDate={viewMode === "abstract" ? fromDate : chequeFilters.Fromdate}
-                toDate={viewMode === "abstract" ? toDate : chequeFilters.Todate}
-                onFromDateChange={viewMode === "abstract" ? setFromDate : (val) => setChequeFilters(p => ({ ...p, Fromdate: val }))}
-                onToDateChange={viewMode === "abstract" ? setToDate : (val) => setChequeFilters(p => ({ ...p, Todate: val }))}
+                fromDate={fromDate}
+                toDate={toDate}
+                onFromDateChange={setFromDate}
+                onToDateChange={setToDate}
                 onApply={() => {
-                    if (viewMode === "abstract") {
-                        setFilters({ Date: { from: fromDate, to: toDate } });
-                    } else {
-                        fetchChequeData();
-                    }
+                    setFilters({ Date: { from: fromDate, to: toDate } });
                 }}
-            >
-                {viewMode === "expanded" && (
-                    <Box mt={2}>
-                        <Autocomplete
-                            options={chequeFilters.chequeAccounts}
-                            getOptionLabel={(option) => option.label || ""}
-                            value={chequeFilters.debitAccount.value ? chequeFilters.debitAccount : null}
-                            onChange={(_, newValue) => {
-                                setChequeFilters(p => ({
-                                    ...p,
-                                    debitAccount: newValue || { value: "", label: "ALL" }
-                                }));
-                            }}
-                            renderInput={(params) => <TextField {...params} label="Debit Account" sx={{ mb: 2 }} />}
-                        />
-                        <Autocomplete
-                            options={creditAccounts}
-                            getOptionLabel={(option) => option.label || ""}
-                            value={chequeFilters.creditAccount.value ? chequeFilters.creditAccount : null}
-                            onChange={(_, newValue) => {
-                                setChequeFilters(p => ({
-                                    ...p,
-                                    creditAccount: newValue || { value: "", label: "ALL" }
-                                }));
-                            }}
-                            renderInput={(params) => <TextField {...params} label="Credit Account" sx={{ mb: 2 }} />}
-                        />
-                        <Autocomplete
-                            options={voucherTypes}
-                            getOptionLabel={(option) => option.label || ""}
-                            value={chequeFilters.voucherType.value ? chequeFilters.voucherType : null}
-                            onChange={(_, newValue) => {
-                                setChequeFilters(p => ({
-                                    ...p,
-                                    voucherType: newValue || { value: "", label: "ALL" }
-                                }));
-                            }}
-                            renderInput={(params) => <TextField {...params} label="Voucher Type" sx={{ mb: 2 }} />}
-                        />
-                        <TextField
-                            select
-                            label="Party Type"
-                            fullWidth
-                            value={chequeFilters.partyType}
-                            onChange={(e) => setChequeFilters(p => ({ ...p, partyType: e.target.value }))}
-                            sx={{ mb: 2 }}
-                        >
-                            <MenuItem value="ALL">ALL</MenuItem>
-                            <MenuItem value="Pending Party">Pending Party</MenuItem>
-                            <MenuItem value="Payed Party">Payed Party</MenuItem>
-                        </TextField>
-                    </Box>
-                )}
-            </ReportFilterDrawer>
+            />
 
             <Box px={2} pb={4} pt={2}>
                 {/* Chip Filters for Groups */}
-                {!loading && reportData && viewMode === "abstract" && (
+                {!loading && reportData && (
                     <Box mb={2} display="flex" flexWrap="wrap" gap={1}>
                         {["All", ...allGroupNames].map((name) => {
                             const isSelected = selectedGroups.includes(name);
@@ -1538,7 +1294,7 @@ const BankAbstractReport: React.FC = () => {
                     </Box>
                 ) : (
                     <>
-                        {viewMode === "abstract" && reportData && (
+                        {reportData && (
                             <>
                                 {/* Transaction Header Banner */}
                                 <Box
@@ -1561,7 +1317,7 @@ const BankAbstractReport: React.FC = () => {
                                 </Box>
 
                                 {/* Parallel Grid Table */}
-                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 240px)" }}>
+                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflowX: "auto" }}>
                                     <Table size="small" sx={{ minWidth: 800 }} stickyHeader>
                                         <TableHead>
                                             <TableRow>
@@ -1731,117 +1487,7 @@ const BankAbstractReport: React.FC = () => {
                             </>
                         )}
 
-                        {viewMode === "expanded" && (
-                            <>
-                                {/* Transaction Header Banner */}
-                                <Box
-                                    sx={{
-                                        border: "1px solid #cbd5e1",
-                                        borderRadius: 1.5,
-                                        py: 1.2,
-                                        textAlign: "center",
-                                        mb: 3,
-                                        background: "#fff",
-                                        boxShadow: 1,
-                                    }}
-                                >
-                                    <Typography variant="body1" fontWeight={700} sx={{ letterSpacing: 0.5, color: "#1e293b" }}>
-                                        CHEQUE TRANSACTION DETAILS  {" "}
-                                        {chequeFilters.Fromdate === chequeFilters.Todate
-                                            ? dayjs(chequeFilters.Fromdate).format("DD-MM-YYYY")
-                                            : `${dayjs(chequeFilters.Fromdate).format("DD-MM-YYYY")} - ${dayjs(chequeFilters.Todate).format("DD-MM-YYYY")}`}
-                                    </Typography>
-                                </Box>
 
-                                {/* Cheque Transactions Table */}
-                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 190px)" }}>
-                                    <Table size="small" sx={{ minWidth: 1000 }} stickyHeader>
-                                        <TableHead>
-                                            <TableRow>
-                                                <TableCell align="center" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 80, border: "1px solid #cbd5e1" }}></TableCell>
-                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Rec.Date</TableCell>
-                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Rec.No</TableCell>
-                                                <TableCell 
-                                                    onClick={(e) => handleHeaderClick(e, "voucherTypeGet")}
-                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
-                                                >
-                                                    <Box display="flex" alignItems="center" gap={0.5}>
-                                                        VchType
-                                                        {columnFilters.voucherTypeGet.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#fbbf24" }} />}
-                                                    </Box>
-                                                </TableCell>
-                                                <TableCell 
-                                                    onClick={(e) => handleHeaderClick(e, "creditAccountGet")}
-                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
-                                                >
-                                                    <Box display="flex" alignItems="center" gap={0.5}>
-                                                        Party Name
-                                                        {columnFilters.creditAccountGet.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#fbbf24" }} />}
-                                                    </Box>
-                                                </TableCell>
-                                                <TableCell 
-                                                    onClick={(e) => handleHeaderClick(e, "check_no")}
-                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
-                                                >
-                                                    <Box display="flex" alignItems="center" gap={0.5}>
-                                                        Chq.No
-                                                        {columnFilters.check_no.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#fbbf24" }} />}
-                                                    </Box>
-                                                </TableCell>
-                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Chq.Date</TableCell>
-                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Bank.Date</TableCell>
-                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Debit</TableCell>
-                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Credit</TableCell>
-                                            </TableRow>
-                                        </TableHead>
-                                        <TableBody>
-                                            {paginatedChequeData.length > 0 && (
-                                                <TableRow>
-                                                    <TableCell align="center" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
-                                                        Total
-                                                    </TableCell>
-                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                                    <TableCell align="right" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, color: "#1e3a8a" }}>
-                                                        {formatNum(chequeTotals.debit)}
-                                                    </TableCell>
-                                                    <TableCell align="right" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, color: "#1e3a8a" }}>
-                                                        {formatNum(chequeTotals.credit)}
-                                                    </TableCell>
-                                                </TableRow>
-                                            )}
-                                            {paginatedChequeData.length === 0 ? (
-                                                <TableRow>
-                                                    <TableCell colSpan={10} align="center" sx={{ py: 6, color: "#94a3b8" }}>
-                                                        {!chequeFilters.debitAccount.value
-                                                            ? "Please select a Debit Account in filters to load data."
-                                                            : "No cheque transactions match your filter criteria."
-                                                        }
-                                                    </TableCell>
-                                                </TableRow>
-                                            ) : (
-                                                paginatedChequeData.map((row: any, idx: number) => (
-                                                    <ChequeRow key={row.receipt_id || idx} row={row} index={(chequePage - 1) * chequeRowsPerPage + idx + 1} />
-                                                ))
-                                            )}
-                                        </TableBody>
-                                    </Table>
-                                </TableContainer>
-
-                                <CommonPagination
-                                    totalRows={filteredChequeData.length}
-                                    page={chequePage}
-                                    rowsPerPage={chequeRowsPerPage}
-                                    onPageChange={setChequePage}
-                                    onRowsPerPageChange={setChequeRowsPerPage}
-                                />
-                            </>
-                        )}
                     </>
                 )}
             </Box>
@@ -1937,246 +1583,123 @@ const BankAbstractReport: React.FC = () => {
                 </DialogContent>
             </Dialog>
 
-            {/* ================= FILTER MENU ================= */}
-            <Menu
-                anchorEl={filterAnchor}
-                open={Boolean(filterAnchor) && Boolean(activeHeader)}
-                onClose={() => setFilterAnchor(null)}
-            >
-                {activeHeader && (
-                    <Box p={2} sx={{ minWidth: 240, maxWidth: 300 }}>
-                        {/* SEARCH */}
-                        <TextField
-                            size="small"
-                            fullWidth
-                            placeholder="Search..."
-                            value={searchText}
-                            onChange={(e) => setSearchText(e.target.value)}
-                            sx={{ mb: 1.5 }}
-                        />
 
-                        {/* CLEAR FILTER */}
-                        <MenuItem
-                            sx={{ fontWeight: 700 }}
-                            onClick={() => {
-                                setColumnFilters((prev) => ({
-                                    ...prev,
-                                    [activeHeader]: [],
-                                }));
-                                setFilterAnchor(null);
+
+            {/* Export Dialog Modal */}
+            <Dialog 
+                open={exportModalOpen} 
+                onClose={() => setExportModalOpen(false)}
+                PaperProps={{
+                    sx: {
+                        borderRadius: "16px",
+                        padding: "8px",
+                        boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
+                        width: "100%",
+                        maxWidth: "440px"
+                    }
+                }}
+            >
+                <DialogTitle sx={{ m: 0, p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9' }}>
+                    <Typography variant="h6" fontWeight="bold" color="#1e3a8a">
+                        Export Report
+                    </Typography>
+                    <IconButton onClick={() => setExportModalOpen(false)} size="small">
+                        <CloseIcon />
+                    </IconButton>
+                </DialogTitle>
+                
+                <DialogContent sx={{ p: 3, pt: 3 }}>
+                    <Typography variant="body2" color="text.secondary" mb={3}>
+                        Select how you would like to export your Bank Abstract report.
+                    </Typography>
+                    
+                    <Box display="flex" flexDirection="column" gap={2}>
+                        {/* Option 1: Summary */}
+                        <Box
+                            onClick={() => setExportDetails(false)}
+                            sx={{
+                                border: `2px solid ${!exportDetails ? '#3b82f6' : '#e2e8f0'}`,
+                                borderRadius: '12px',
+                                p: 2,
+                                cursor: 'pointer',
+                                bgcolor: !exportDetails ? '#eff6ff' : 'transparent',
+                                transition: 'all 0.2s',
+                                '&:hover': {
+                                    borderColor: '#3b82f6',
+                                    bgcolor: '#f8fafc'
+                                }
                             }}
                         >
-                            Clear Filter (All)
-                        </MenuItem>
-
-                        {/* VALUES LIST */}
-                        <Box sx={{ maxHeight: 250, overflowY: "auto" }}>
-                            {(() => {
-                                const selectedValues = columnFilters[activeHeader] || [];
-                                
-                                // Extract unique values from raw chequeData for the active column
-                                const allValues = Array.from(
-                                    new Set(chequeData.map((r) => r[activeHeader]))
-                                )
-                                    .filter(Boolean)
-                                    .filter((v) =>
-                                        String(v)
-                                            .toLowerCase()
-                                            .includes(searchText.toLowerCase())
-                                    );
-
-                                // Sort selected values first
-                                const sortedValues = [
-                                    ...allValues.filter((v) => selectedValues.includes(v)),
-                                    ...allValues.filter((v) => !selectedValues.includes(v)),
-                                ];
-
-                                return sortedValues.map((v) => {
-                                    const isSelected = selectedValues.includes(v);
-
-                                    return (
-                                        <MenuItem
-                                            key={String(v)}
-                                            onClick={() => {
-                                                setColumnFilters((prev) => {
-                                                    const prevValues = prev[activeHeader] || [];
-                                                    const newValues = prevValues.includes(v)
-                                                        ? prevValues.filter((x: any) => x !== v)
-                                                        : [...prevValues, v];
-
-                                                    return {
-                                                        ...prev,
-                                                        [activeHeader]: newValues,
-                                                    };
-                                                });
-                                            }}
-                                            sx={{
-                                                backgroundColor: isSelected ? "#e0e7ff" : "transparent",
-                                                fontWeight: isSelected ? 600 : 400,
-                                                "&:hover": {
-                                                    backgroundColor: isSelected ? "#c7d2fe" : "#f1f5f9",
-                                                },
-                                            }}
-                                        >
-                                            {String(v)}
-                                        </MenuItem>
-                                    );
-                                });
-                            })()}
+                            <Typography variant="subtitle1" fontWeight="bold" color={!exportDetails ? '#1e40af' : '#1e293b'}>
+                                Summary Report
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" mt={0.5}>
+                                Exports Group totals and Sub-ledger balances.
+                            </Typography>
+                        </Box>
+                        
+                        {/* Option 2: Detailed */}
+                        <Box
+                            onClick={() => setExportDetails(true)}
+                            sx={{
+                                border: `2px solid ${exportDetails ? '#3b82f6' : '#e2e8f0'}`,
+                                borderRadius: '12px',
+                                p: 2,
+                                cursor: 'pointer',
+                                bgcolor: exportDetails ? '#eff6ff' : 'transparent',
+                                transition: 'all 0.2s',
+                                '&:hover': {
+                                    borderColor: '#3b82f6',
+                                    bgcolor: '#f8fafc'
+                                }
+                            }}
+                        >
+                            <Typography variant="subtitle1" fontWeight="bold" color={exportDetails ? '#1e40af' : '#1e293b'}>
+                                Detailed Report
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" mt={0.5}>
+                                Includes individual transactions, timestamps, and narration.
+                            </Typography>
                         </Box>
                     </Box>
-                )}
-            </Menu>
+                    
+                    <Box display="flex" justifyContent="flex-end" gap={1.5} mt={4}>
+                        <Button 
+                            onClick={() => setExportModalOpen(false)}
+                            sx={{ 
+                                color: '#64748b', 
+                                textTransform: 'none',
+                                fontWeight: 'semibold',
+                                borderRadius: '8px'
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button 
+                            variant="contained"
+                            onClick={() => {
+                                setExportModalOpen(false);
+                                if (exportType === "excel") {
+                                    handleExportExcel(exportDetails);
+                                } else if (exportType === "pdf") {
+                                    handleExportPDF(exportDetails);
+                                }
+                            }}
+                            sx={{ 
+                                bgcolor: '#2563eb',
+                                '&:hover': { bgcolor: '#1d4ed8' },
+                                textTransform: 'none',
+                                fontWeight: 'semibold',
+                                borderRadius: '8px',
+                                px: 3
+                            }}
+                        >
+                            Export
+                        </Button>
+                    </Box>
+                </DialogContent>
+            </Dialog>
         </Box>
-    );
-};
-
-interface ChequeRowProps {
-    row: any;
-    index: number;
-}
-
-const ChequeRow: React.FC<ChequeRowProps> = ({ row, index }) => {
-    const [open, setOpen] = useState(false);
-
-    const formatChequeNum = (v: any) => {
-        const num = Number(v);
-        if (isNaN(num) || num === 0) return "-";
-        return "₹" + new Intl.NumberFormat("en-IN", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-        }).format(num);
-    };
-
-    return (
-        <>
-            <TableRow hover onClick={() => setOpen(!open)} sx={{ cursor: "pointer", "& > *": { borderBottom: "unset" } }}>
-                <TableCell align="center" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600 }}>
-                    <IconButton size="small">
-                        {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-                    </IconButton>
-                    {index}
-                </TableCell>
-                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>
-                    {row.receipt_date ? dayjs(row.receipt_date).format("DD-MM-YYYY") : ""}
-                </TableCell>
-                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>{row.receipt_invoice_no}</TableCell>
-                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>{row.voucherTypeGet}</TableCell>
-                <TableCell sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 700 }}>{row.creditAccountGet}</TableCell>
-                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>{row.check_no}</TableCell>
-                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>
-                    {row.check_date ? dayjs(row.check_date).format("DD-MM-YYYY") : ""}
-                </TableCell>
-                <TableCell sx={{ borderRight: "1px solid #e2e8f0" }}>
-                    {row.bank_date ? dayjs(row.bank_date).format("DD-MM-YYYY") : ""}
-                </TableCell>
-                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600 }}>
-                    {formatChequeNum(row.debit_amount)}
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatChequeNum(row.credit_amount)}
-                </TableCell>
-            </TableRow>
-            <TableRow>
-                <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={10}>
-                    <Collapse in={open} timeout="auto" unmountOnExit>
-                        <Box sx={{ margin: 2 }}>
-                            {/* Sales Against Reference */}
-                            <Typography variant="subtitle2" fontWeight={700} gutterBottom component="div" color="#1E3A8A">
-                                Sales Against Reference
-                            </Typography>
-                            <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
-                                <Table size="small">
-                                    <TableHead>
-                                        <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                                            <TableCell sx={{ fontWeight: 600 }}>S.No</TableCell>
-                                            <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
-                                            <TableCell sx={{ fontWeight: 600 }}>Sales Invoice No</TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 600 }}>Invoice Value</TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 600 }}>Payment Amount</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {!row.billRef || row.billRef.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={5} align="center" sx={{ color: "#94a3b8", py: 2 }}>
-                                                    No sales reference found.
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : (
-                                            <>
-                                                {row.billRef.map((bill: any, idx: number) => (
-                                                    <TableRow key={idx}>
-                                                        <TableCell>{idx + 1}</TableCell>
-                                                        <TableCell>
-                                                            {bill.billDate ? dayjs(bill.billDate).format("DD-MM-YYYY") : ""}
-                                                        </TableCell>
-                                                        <TableCell>{bill.invoiceVoucherNumber}</TableCell>
-                                                        <TableCell align="right">{formatChequeNum(bill.invoiceValue)}</TableCell>
-                                                        <TableCell align="right">{formatChequeNum(bill.paidAmount)}</TableCell>
-                                                    </TableRow>
-                                                ))}
-                                                <TableRow sx={{ bgcolor: "#f1f5f9" }}>
-                                                    <TableCell colSpan={4} align="right" sx={{ fontWeight: 700 }}>Total</TableCell>
-                                                    <TableCell align="right" sx={{ fontWeight: 700 }}>
-                                                        {formatChequeNum(row.billRef.reduce((sum: number, b: any) => sum + Number(b.paidAmount || 0), 0))}
-                                                    </TableCell>
-                                                </TableRow>
-                                            </>
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-
-                            {/* Contra Reference */}
-                            <Typography variant="subtitle2" fontWeight={700} gutterBottom component="div" color="#1E3A8A">
-                                Contra Reference
-                            </Typography>
-                            <TableContainer component={Paper} variant="outlined">
-                                <Table size="small">
-                                    <TableHead>
-                                        <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                                            <TableCell sx={{ fontWeight: 600 }}>Voucher No</TableCell>
-                                            <TableCell sx={{ fontWeight: 600 }}>Date</TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 600 }}>Amount</TableCell>
-                                            <TableCell sx={{ fontWeight: 600 }}>Cheque Date</TableCell>
-                                            <TableCell sx={{ fontWeight: 600 }}>Bank Date</TableCell>
-                                            <TableCell sx={{ fontWeight: 600 }}>Narration</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {!row.contraRef || row.contraRef.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={6} align="center" sx={{ color: "#94a3b8", py: 2 }}>
-                                                    No contra reference found.
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : (
-                                            row.contraRef.map((contra: any, idx: number) => (
-                                                <TableRow key={idx}>
-                                                    <TableCell>{contra.contraVoucherNumber}</TableCell>
-                                                    <TableCell>
-                                                        {contra.contraDate ? dayjs(contra.contraDate).format("DD-MM-YYYY") : ""}
-                                                    </TableCell>
-                                                    <TableCell align="right">{formatChequeNum(contra.contraAmount)}</TableCell>
-                                                    <TableCell>
-                                                        {contra.chequeDate ? dayjs(contra.chequeDate).format("DD-MM-YYYY") : ""}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        {contra.bankDate ? dayjs(contra.bankDate).format("DD-MM-YYYY") : ""}
-                                                    </TableCell>
-                                                    <TableCell>{contra.narration}</TableCell>
-                                                </TableRow>
-                                            ))
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                        </Box>
-                    </Collapse>
-                </TableCell>
-            </TableRow>
-        </>
     );
 };
 

@@ -47,6 +47,13 @@ export interface CashBoxRecPay {
     INV_Date?: string;
 }
 
+export interface CashBoxCls {
+    Group_Name: string;
+    CL_Amount: number | string;
+    Acc_Id?: string;
+    Group_Id?: string;
+}
+
 export interface CashBoxReportResponse {
     OB: CashBoxOB[];
     Data1: CashBoxTransaction[];
@@ -57,6 +64,7 @@ export interface CashBoxReportResponse {
     IDEX: CashBoxMasterAccount[];
     RecPay?: CashBoxRecPay[];
     Jnl?: CashBoxJnl[];
+    Cls?: CashBoxCls[];
 }
 
 export const cashboxService = {

@@ -168,6 +168,9 @@ const CashBoxReport: React.FC = () => {
 
     const [loading, setLoading] = useState(false);
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const [exportModalOpen, setExportModalOpen] = useState(false);
+    const [exportType, setExportType] = useState<"excel" | "pdf" | null>(null);
+    const [exportDetails, setExportDetails] = useState(false);
     const [fromDate, setFromDate] = useState(today);
     const [toDate, setToDate] = useState(today);
     const [filters, setFilters] = useState({
@@ -307,7 +310,7 @@ const CashBoxReport: React.FC = () => {
         return new Set(
             (reportData?.Cash || [])
                 .filter((acc) => !isFiltered || (acc.Group_Name && selectedGroups.includes(acc.Group_Name.trim())))
-                .map((acc) => String(acc.Acc_Id))
+                .map((acc) => String(acc.Acc_Id).trim())
         );
     }, [reportData, selectedGroups]);
 
@@ -317,7 +320,7 @@ const CashBoxReport: React.FC = () => {
         return new Set(
             (reportData?.Cash || [])
                 .filter((acc) => !isFiltered || (acc.Group_Name && selectedGroups.includes(acc.Group_Name.trim())))
-                .map((acc) => String(acc.Group_Id))
+                .map((acc) => String(acc.Group_Id).trim())
         );
     }, [reportData, selectedGroups]);
 
@@ -327,20 +330,20 @@ const CashBoxReport: React.FC = () => {
 
         // Map all Cash Acc_Ids to a Set for O(1) lookup
         const cashAccIds = new Set(
-            (reportData?.Cash || []).map((acc) => String(acc.Acc_Id))
+            (reportData?.Cash || []).map((acc) => String(acc.Acc_Id).trim())
         );
 
         // Map all non-cash Acc_Ids and bank-related Acc_Ids
         const nonCashAccIds = new Set<string>();
         const bankRelatedAccIds = new Set<string>();
         const bankMasterAccIds = new Set(
-            (reportData?.Bank || []).map((acc) => String(acc.Acc_Id))
+            (reportData?.Bank || []).map((acc) => String(acc.Acc_Id).trim())
         );
 
         if (reportData) {
-            (reportData.Bank || []).forEach((acc) => bankRelatedAccIds.add(String(acc.Acc_Id)));
+            (reportData.Bank || []).forEach((acc) => bankRelatedAccIds.add(String(acc.Acc_Id).trim()));
             (reportData.LedgerGrp || []).forEach((acc) => {
-                const accIdStr = String(acc.Acc_Id);
+                const accIdStr = String(acc.Acc_Id).trim();
                 if (acc.Account_name && acc.Account_name.toLowerCase().includes("(bank)")) {
                     bankRelatedAccIds.add(accIdStr);
                 } else {
@@ -348,7 +351,7 @@ const CashBoxReport: React.FC = () => {
                 }
             });
             (reportData.DEX || []).forEach((acc) => {
-                const accIdStr = String(acc.Acc_Id);
+                const accIdStr = String(acc.Acc_Id).trim();
                 if (acc.Account_name && acc.Account_name.toLowerCase().includes("(bank)")) {
                     bankRelatedAccIds.add(accIdStr);
                 } else {
@@ -356,7 +359,7 @@ const CashBoxReport: React.FC = () => {
                 }
             });
             (reportData.IDEX || []).forEach((acc) => {
-                const accIdStr = String(acc.Acc_Id);
+                const accIdStr = String(acc.Acc_Id).trim();
                 if (acc.Account_name && acc.Account_name.toLowerCase().includes("(bank)")) {
                     bankRelatedAccIds.add(accIdStr);
                 } else {
@@ -370,8 +373,8 @@ const CashBoxReport: React.FC = () => {
         // Find all invoice keys that have at least one transaction touching any active cash account
         const cashInvoiceKeys = new Set<string>();
         allTx.forEach((tx) => {
-            const isCreditCash = tx.Credit_Ac_Id && cashAccIds.has(String(tx.Credit_Ac_Id));
-            const isDebitCash = tx.Debit_Ac_Id && cashAccIds.has(String(tx.Debit_Ac_Id));
+            const isCreditCash = tx.Credit_Ac_Id && cashAccIds.has(String(tx.Credit_Ac_Id).trim());
+            const isDebitCash = tx.Debit_Ac_Id && cashAccIds.has(String(tx.Debit_Ac_Id).trim());
             if (isCreditCash || isDebitCash) {
                 const key = getInvoiceKey(tx);
                 if (key) cashInvoiceKeys.add(key);
@@ -385,8 +388,8 @@ const CashBoxReport: React.FC = () => {
                 return false;
             }
 
-            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id) : "";
-            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id) : "";
+            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id).trim() : "";
+            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id).trim() : "";
 
             // If either side is a bank-related expense/ledger (not a contra Bank account, but containing "(bank)"), filter it out
             const isDebitBankExpense = debitIdStr && bankRelatedAccIds.has(debitIdStr) && !bankMasterAccIds.has(debitIdStr);
@@ -419,7 +422,7 @@ const CashBoxReport: React.FC = () => {
             // Exclude cash-to-cash transfers (where both debit and credit sides are cash accounts)
             const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id) : "";
             const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id) : "";
-            const isCashToCash = debitIdStr && creditIdStr && cashAccIds.has(debitIdStr) && cashAccIds.has(creditIdStr);
+            const isCashToCash = debitIdStr && creditIdStr && selectedCashAccIds.has(debitIdStr) && selectedCashAccIds.has(creditIdStr);
             if (isCashToCash) return false;
 
             return true;
@@ -552,6 +555,20 @@ const CashBoxReport: React.FC = () => {
             }
         });
 
+        const invoiceKeysWithDebitSelectedCash = new Set<string>();
+        const invoiceKeysWithCreditSelectedCash = new Set<string>();
+        filteredTransactions.forEach((tx) => {
+            const key = getInvoiceKey(tx);
+            if (key) {
+                if (tx.Debit_Ac_Id && selectedCashAccIds.has(String(tx.Debit_Ac_Id).trim())) {
+                    invoiceKeysWithDebitSelectedCash.add(key);
+                }
+                if (tx.Credit_Ac_Id && selectedCashAccIds.has(String(tx.Credit_Ac_Id).trim())) {
+                    invoiceKeysWithCreditSelectedCash.add(key);
+                }
+            }
+        });
+
         const cashList = (reportData?.Cash || []).filter(
             (acc) => selectedCashAccIds.has(String(acc.Acc_Id))
         );
@@ -640,22 +657,23 @@ const CashBoxReport: React.FC = () => {
             Others: othersList,
         };
 
-        // Sum OB_Amount robustly based on selected group names
+        // Sum OB_Amount robustly based on selected group names and account IDs
         let opening = 0;
         if (obList.length > 0) {
             const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
-            if (isFiltered) {
-                let sum = 0;
-                obList.forEach((obItem: any) => {
-                    const groupName = obItem.Group_Name ? obItem.Group_Name.trim() : "";
-                    if (groupName && selectedGroups.includes(groupName)) {
-                        sum += Number(obItem.OB_Amount) || 0;
-                    }
-                });
-                opening = sum;
-            } else {
-                opening = obList.reduce((sum, obItem) => sum + (Number(obItem.OB_Amount) || 0), 0);
-            }
+            const cashGroupNames = new Set((reportData?.Cash || []).map(acc => acc.Group_Name ? acc.Group_Name.trim() : ""));
+
+            let sum = 0;
+            obList.forEach((obItem: any) => {
+                const isSelected = isFiltered
+                    ? (obItem.Acc_Id ? selectedCashAccIds.has(String(obItem.Acc_Id).trim()) : (obItem.Group_Name && selectedGroups.includes(obItem.Group_Name.trim())))
+                    : (obItem.Acc_Id ? allCashAccIds.has(String(obItem.Acc_Id).trim()) : (obItem.Group_Name ? cashGroupNames.has(obItem.Group_Name.trim()) : true));
+
+                if (isSelected) {
+                    sum += Number(obItem.OB_Amount) || 0;
+                }
+            });
+            opening = sum;
         }
 
         const getGroupData = (config: GroupConfig) => {
@@ -665,25 +683,29 @@ const CashBoxReport: React.FC = () => {
             const matchedTransactions = filteredTransactions.filter((tx) => {
                 const txCreditAcIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id).trim() : "";
                 const txDebitAcIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id).trim() : "";
+                const key = getInvoiceKey(tx);
 
                 // If it is the Cash group, BOTH sides of the transaction must be cash accounts,
                 // unless it is a one-sided transaction where Credit or Debit is 0.
                 if (config.masterKey === "Cash") {
-                    const key = getInvoiceKey(tx);
                     const isCashToCash = key && cashToCashInvoiceKeys.has(key);
                     if (!isCashToCash) return false;
 
                     if (config.side === "debit") {
-                        return tx.Credit_Ac_Id && allCashAccIds.has(txCreditAcIdStr);
+                        // Cash payments: selected cash account is credited
+                        return tx.Credit_Ac_Id && selectedCashAccIds.has(txCreditAcIdStr);
                     } else {
-                        return tx.Debit_Ac_Id && allCashAccIds.has(txDebitAcIdStr);
+                        // Cash receipts: selected cash account is debited
+                        return tx.Debit_Ac_Id && selectedCashAccIds.has(txDebitAcIdStr);
                     }
                 }
 
                 if (config.side === "debit") {
-                    return tx.Debit_Ac_Id && masterIds.has(txDebitAcIdStr);
+                    // Outflows/Payments (Debit to opposing account, Credit to selected Cash)
+                    return tx.Debit_Ac_Id && masterIds.has(txDebitAcIdStr) && key && invoiceKeysWithCreditSelectedCash.has(key);
                 } else {
-                    return tx.Credit_Ac_Id && masterIds.has(txCreditAcIdStr);
+                    // Inflows/Receipts (Credit to opposing account, Debit to selected Cash)
+                    return tx.Credit_Ac_Id && masterIds.has(txCreditAcIdStr) && key && invoiceKeysWithDebitSelectedCash.has(key);
                 }
             });
 
@@ -744,7 +766,29 @@ const CashBoxReport: React.FC = () => {
 
         const totalDebits = debitGroups.reduce((sum, g) => sum + g.total, 0);
         const totalCredits = creditGroups.reduce((sum, g) => sum + g.total, 0);
-        const closing = opening + totalCredits - totalDebits;
+
+        // Sum CL_Amount robustly based on selected group names and account IDs from Cls dataset
+        let closing = 0;
+        const clsList = reportData?.Cls || [];
+        if (clsList.length > 0) {
+            const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
+            const cashGroupNames = new Set((reportData?.Cash || []).map(acc => acc.Group_Name ? acc.Group_Name.trim() : ""));
+
+            let sum = 0;
+            clsList.forEach((clsItem: any) => {
+                const isSelected = isFiltered
+                    ? (clsItem.Acc_Id ? selectedCashAccIds.has(String(clsItem.Acc_Id).trim()) : (clsItem.Group_Name && selectedGroups.includes(clsItem.Group_Name.trim())))
+                    : (clsItem.Acc_Id ? allCashAccIds.has(String(clsItem.Acc_Id).trim()) : (clsItem.Group_Name ? cashGroupNames.has(clsItem.Group_Name.trim()) : true));
+
+                if (isSelected) {
+                    sum += Number(clsItem.CL_Amount) || 0;
+                }
+            });
+            closing = opening + sum;
+        } else {
+            // Fallback to manual calculation if Cls is empty/missing
+            closing = opening + totalCredits - totalDebits;
+        }
 
         return {
             debitGroups,
@@ -860,7 +904,7 @@ const CashBoxReport: React.FC = () => {
     }, [modalTransactions, selectedLedger, getTransactionAmount]);
 
     // Excel Export
-    const handleExportExcel = () => {
+    const handleExportExcel = (includeDetails: boolean = false) => {
         try {
             const excelData: any[][] = [];
             const dateStr =
@@ -907,78 +951,80 @@ const CashBoxReport: React.FC = () => {
                         rightSub ? rightSub.amount : "",
                     ]);
 
-                    // Gather nested transactions for these sub-ledgers
-                    const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
-                    const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
-                    const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
+                    if (includeDetails) {
+                        // Gather nested transactions for these sub-ledgers
+                        const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
+                        const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
+                        const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
 
-                    for (let j = 0; j < maxTxRows; j++) {
-                        const txL = leftTxs[j];
-                        const txR = rightTxs[j];
+                        for (let j = 0; j < maxTxRows; j++) {
+                            const txL = leftTxs[j];
+                            const txR = rightTxs[j];
 
-                        let col0 = "";
-                        let col1: any = "";
-                        let narrationL = "";
-                        if (txL) {
-                            const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
-                            const timeStr = formatTime(txL.Created_Time);
-                            col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                            col1 = getTransactionAmount(txL, leftSub.accId, leftGroup.side);
-                            narrationL = (txL.Narration || txL.Line_Naration || "").trim();
-                        }
-
-                        let col2 = "";
-                        let col3: any = "";
-                        let narrationR = "";
-                        if (txR) {
-                            const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
-                            const timeStr = formatTime(txR.Created_Time);
-                            col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                            col3 = getTransactionAmount(txR, rightSub.accId, rightGroup.side);
-                            narrationR = (txR.Narration || txR.Line_Naration || "").trim();
-                        }
-
-                        excelData.push([col0, col1, col2, col3]);
-
-                        if (narrationL || narrationR) {
-                            excelData.push([
-                                narrationL ? `        * ${narrationL}` : "",
-                                "",
-                                narrationR ? `        * ${narrationR}` : "",
-                                ""
-                            ]);
-                        }
-
-                        // RecPay details below transaction
-                        const recPaysL = txL && txL.invoice_no && reportData?.RecPay
-                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
-                            : [];
-                        const recPaysR = txR && txR.invoice_no && reportData?.RecPay
-                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
-                            : [];
-
-                        const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
-                        for (let k = 0; k < maxRecPayRows; k++) {
-                            const rpL = recPaysL[k];
-                            const rpR = recPaysR[k];
-
-                            let rCol0 = "";
-                            let rCol1: any = "";
-                            if (rpL) {
-                                const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
-                                rCol0 = `        ${rpL.bill_name}${dateStr}`;
-                                rCol1 = rpL.Amount;
+                            let col0 = "";
+                            let col1: any = "";
+                            let narrationL = "";
+                            if (txL) {
+                                const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
+                                const timeStr = formatTime(txL.Created_Time);
+                                col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                col1 = getTransactionAmount(txL, leftSub.accId, leftGroup.side);
+                                narrationL = (txL.Narration || txL.Line_Naration || "").trim();
                             }
 
-                            let rCol2 = "";
-                            let rCol3: any = "";
-                            if (rpR) {
-                                const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
-                                rCol2 = `        ${rpR.bill_name}${dateStr}`;
-                                rCol3 = rpR.Amount;
+                            let col2 = "";
+                            let col3: any = "";
+                            let narrationR = "";
+                            if (txR) {
+                                const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
+                                const timeStr = formatTime(txR.Created_Time);
+                                col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                col3 = getTransactionAmount(txR, rightSub.accId, rightGroup.side);
+                                narrationR = (txR.Narration || txR.Line_Naration || "").trim();
                             }
 
-                            excelData.push([rCol0, rCol1, rCol2, rCol3]);
+                            excelData.push([col0, col1, col2, col3]);
+
+                            if (narrationL || narrationR) {
+                                excelData.push([
+                                    narrationL ? `        * ${narrationL}` : "",
+                                    "",
+                                    narrationR ? `        * ${narrationR}` : "",
+                                    ""
+                                ]);
+                            }
+
+                            // RecPay details below transaction
+                            const recPaysL = txL && txL.invoice_no && reportData?.RecPay
+                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
+                                : [];
+                            const recPaysR = txR && txR.invoice_no && reportData?.RecPay
+                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
+                                : [];
+
+                            const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
+                            for (let k = 0; k < maxRecPayRows; k++) {
+                                const rpL = recPaysL[k];
+                                const rpR = recPaysR[k];
+
+                                let rCol0 = "";
+                                let rCol1: any = "";
+                                if (rpL) {
+                                    const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
+                                    rCol0 = `        ${rpL.bill_name}${dateStr}`;
+                                    rCol1 = rpL.Amount;
+                                }
+
+                                let rCol2 = "";
+                                let rCol3: any = "";
+                                if (rpR) {
+                                    const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
+                                    rCol2 = `        ${rpR.bill_name}${dateStr}`;
+                                    rCol3 = rpR.Amount;
+                                }
+
+                                excelData.push([rCol0, rCol1, rCol2, rCol3]);
+                            }
                         }
                     }
                 }
@@ -1009,7 +1055,7 @@ const CashBoxReport: React.FC = () => {
     };
 
     // PDF Export
-    const handleExportPDF = () => {
+    const handleExportPDF = (includeDetails: boolean = false) => {
         try {
             const doc = new jsPDF("landscape", "mm", "a4");
             const dateStr =
@@ -1047,78 +1093,80 @@ const CashBoxReport: React.FC = () => {
                         rightSub ? formatNum(rightSub.amount) : "",
                     ]);
 
-                    // Gather nested transactions for these sub-ledgers for PDF
-                    const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
-                    const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
-                    const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
+                    if (includeDetails) {
+                        // Gather nested transactions for these sub-ledgers for PDF
+                        const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
+                        const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
+                        const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
 
-                    for (let j = 0; j < maxTxRows; j++) {
-                        const txL = leftTxs[j];
-                        const txR = rightTxs[j];
+                        for (let j = 0; j < maxTxRows; j++) {
+                            const txL = leftTxs[j];
+                            const txR = rightTxs[j];
 
-                        let col0 = "";
-                        let col1 = "";
-                        let narrationL = "";
-                        if (txL) {
-                            const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
-                            const timeStr = formatTime(txL.Created_Time);
-                            col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                            col1 = formatNum(getTransactionAmount(txL, leftSub.accId, leftGroup.side));
-                            narrationL = (txL.Narration || txL.Line_Naration || "").trim();
-                        }
-
-                        let col2 = "";
-                        let col3 = "";
-                        let narrationR = "";
-                        if (txR) {
-                            const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
-                            const timeStr = formatTime(txR.Created_Time);
-                            col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                            col3 = formatNum(getTransactionAmount(txR, rightSub.accId, rightGroup.side));
-                            narrationR = (txR.Narration || txR.Line_Naration || "").trim();
-                        }
-
-                        pdfBody.push([col0, col1, col2, col3]);
-
-                        if (narrationL || narrationR) {
-                            pdfBody.push([
-                                narrationL ? `        * ${narrationL}` : "",
-                                "",
-                                narrationR ? `        * ${narrationR}` : "",
-                                ""
-                            ]);
-                        }
-
-                        // RecPay details below transaction for PDF
-                        const recPaysL = txL && txL.invoice_no && reportData?.RecPay
-                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
-                            : [];
-                        const recPaysR = txR && txR.invoice_no && reportData?.RecPay
-                            ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
-                            : [];
-
-                        const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
-                        for (let k = 0; k < maxRecPayRows; k++) {
-                            const rpL = recPaysL[k];
-                            const rpR = recPaysR[k];
-
-                            let rCol0 = "";
-                            let rCol1 = "";
-                            if (rpL) {
-                                const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
-                                rCol0 = `        ${rpL.bill_name}${dateStr}`;
-                                rCol1 = formatNum(rpL.Amount);
+                            let col0 = "";
+                            let col1 = "";
+                            let narrationL = "";
+                            if (txL) {
+                                const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
+                                const timeStr = formatTime(txL.Created_Time);
+                                col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                col1 = formatNum(getTransactionAmount(txL, leftSub.accId, leftGroup.side));
+                                narrationL = (txL.Narration || txL.Line_Naration || "").trim();
                             }
 
-                            let rCol2 = "";
-                            let rCol3 = "";
-                            if (rpR) {
-                                const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
-                                rCol2 = `        ${rpR.bill_name}${dateStr}`;
-                                rCol3 = formatNum(rpR.Amount);
+                            let col2 = "";
+                            let col3 = "";
+                            let narrationR = "";
+                            if (txR) {
+                                const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
+                                const timeStr = formatTime(txR.Created_Time);
+                                col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                col3 = formatNum(getTransactionAmount(txR, rightSub.accId, rightGroup.side));
+                                narrationR = (txR.Narration || txR.Line_Naration || "").trim();
                             }
 
-                            pdfBody.push([rCol0, rCol1, rCol2, rCol3]);
+                            pdfBody.push([col0, col1, col2, col3]);
+
+                            if (narrationL || narrationR) {
+                                pdfBody.push([
+                                    narrationL ? `        * ${narrationL}` : "",
+                                    "",
+                                    narrationR ? `        * ${narrationR}` : "",
+                                    ""
+                                ]);
+                            }
+
+                            // RecPay details below transaction for PDF
+                            const recPaysL = txL && txL.invoice_no && reportData?.RecPay
+                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
+                                : [];
+                            const recPaysR = txR && txR.invoice_no && reportData?.RecPay
+                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
+                                : [];
+
+                            const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
+                            for (let k = 0; k < maxRecPayRows; k++) {
+                                const rpL = recPaysL[k];
+                                const rpR = recPaysR[k];
+
+                                let rCol0 = "";
+                                let rCol1 = "";
+                                if (rpL) {
+                                    const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
+                                    rCol0 = `        ${rpL.bill_name}${dateStr}`;
+                                    rCol1 = formatNum(rpL.Amount);
+                                }
+
+                                let rCol2 = "";
+                                let rCol3 = "";
+                                if (rpR) {
+                                    const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
+                                    rCol2 = `        ${rpR.bill_name}${dateStr}`;
+                                    rCol3 = formatNum(rpR.Amount);
+                                }
+
+                                pdfBody.push([rCol0, rCol1, rCol2, rCol3]);
+                            }
                         }
                     }
                 }
@@ -1190,8 +1238,14 @@ const CashBoxReport: React.FC = () => {
     return (
         <Box sx={{ width: "100%", overflowX: "hidden", minHeight: "100vh", bgcolor: "#f1f5f9" }}>
             <PageHeader
-                onExportExcel={handleExportExcel}
-                onExportPDF={handleExportPDF}
+                onExportExcel={() => {
+                    setExportType("excel");
+                    setExportModalOpen(true);
+                }}
+                onExportPDF={() => {
+                    setExportType("pdf");
+                    setExportModalOpen(true);
+                }}
                 showPages={true}
             />
 
@@ -1533,6 +1587,121 @@ const CashBoxReport: React.FC = () => {
                     </TableContainer>
                 </DialogContent>
 
+            </Dialog>
+
+            {/* Export Dialog Modal */}
+            <Dialog 
+                open={exportModalOpen} 
+                onClose={() => setExportModalOpen(false)}
+                PaperProps={{
+                    sx: {
+                        borderRadius: "16px",
+                        padding: "8px",
+                        boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
+                        width: "100%",
+                        maxWidth: "440px"
+                    }
+                }}
+            >
+                <DialogTitle sx={{ m: 0, p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9' }}>
+                    <Typography variant="h6" fontWeight="bold" color="#1e3a8a">
+                        Export Report
+                    </Typography>
+                    <IconButton onClick={() => setExportModalOpen(false)} size="small">
+                        <CloseIcon />
+                    </IconButton>
+                </DialogTitle>
+                
+                <DialogContent sx={{ p: 3, pt: 3 }}>
+                    <Typography variant="body2" color="text.secondary" mb={3}>
+                        Select how you would like to export your Cash Box report.
+                    </Typography>
+                    
+                    <Box display="flex" flexDirection="column" gap={2}>
+                        {/* Option 1: Summary */}
+                        <Box
+                            onClick={() => setExportDetails(false)}
+                            sx={{
+                                border: `2px solid ${!exportDetails ? '#3b82f6' : '#e2e8f0'}`,
+                                borderRadius: '12px',
+                                p: 2,
+                                cursor: 'pointer',
+                                bgcolor: !exportDetails ? '#eff6ff' : 'transparent',
+                                transition: 'all 0.2s',
+                                '&:hover': {
+                                    borderColor: '#3b82f6',
+                                    bgcolor: '#f8fafc'
+                                }
+                            }}
+                        >
+                            <Typography variant="subtitle1" fontWeight="bold" color={!exportDetails ? '#1e40af' : '#1e293b'}>
+                                Summary Report
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" mt={0.5}>
+                                Exports Group totals and Sub-ledger balances.
+                            </Typography>
+                        </Box>
+                        
+                        {/* Option 2: Detailed */}
+                        <Box
+                            onClick={() => setExportDetails(true)}
+                            sx={{
+                                border: `2px solid ${exportDetails ? '#3b82f6' : '#e2e8f0'}`,
+                                borderRadius: '12px',
+                                p: 2,
+                                cursor: 'pointer',
+                                bgcolor: exportDetails ? '#eff6ff' : 'transparent',
+                                transition: 'all 0.2s',
+                                '&:hover': {
+                                    borderColor: '#3b82f6',
+                                    bgcolor: '#f8fafc'
+                                }
+                            }}
+                        >
+                            <Typography variant="subtitle1" fontWeight="bold" color={exportDetails ? '#1e40af' : '#1e293b'}>
+                                Detailed Report
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" mt={0.5}>
+                                Includes individual transactions, timestamps, and narration.
+                            </Typography>
+                        </Box>
+                    </Box>
+                    
+                    <Box display="flex" justifyContent="flex-end" gap={1.5} mt={4}>
+                        <Button 
+                            onClick={() => setExportModalOpen(false)}
+                            sx={{ 
+                                color: '#64748b', 
+                                textTransform: 'none',
+                                fontWeight: 'semibold',
+                                borderRadius: '8px'
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button 
+                            variant="contained"
+                            onClick={() => {
+                                setExportModalOpen(false);
+                                if (exportType === "excel") {
+                                    handleExportExcel(exportDetails);
+                                } else if (exportType === "pdf") {
+                                    handleExportPDF(exportDetails);
+                                }
+                            }}
+                            sx={{ 
+                                bgcolor: '#2563eb',
+                                '&:hover': { bgcolor: '#1d4ed8' },
+                                textTransform: 'none',
+                                fontWeight: 'semibold',
+                                borderRadius: '8px',
+                                px: 3
+                            }}
+                        >
+                            Export
+                        </Button>
+                    </Box>
+                </DialogContent>
             </Dialog>
         </Box>
     );

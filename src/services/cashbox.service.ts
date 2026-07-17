@@ -81,6 +81,19 @@ export const cashboxService = {
             { params }
         );
         return res.data.data;
+    },
+    getCashBoxDetailedReport: async (params?: {
+        Fromdate?: string;
+        Todate?: string;
+    }): Promise<{ OB: any[]; Data: any[]; Group: any[] }> => {
+        const res = await axios.get<{
+            success: boolean;
+            data: { OB: any[]; Data: any[]; Group: any[] };
+        }>(
+            `${getBaseURL()}api/reports/externalAPI/cashListDetailed`,
+            { params }
+        );
+        return res.data.data;
     }
 };
 

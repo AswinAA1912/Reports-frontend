@@ -15,8 +15,7 @@ import {
     Autocomplete,
     TextField,
     MenuItem,
-    Menu,
-    Button,
+    Menu
 } from "@mui/material";
 
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
@@ -493,11 +492,6 @@ const ChequeTransactionReport: React.FC = () => {
                         <MenuItem value="Pending Party">Pending Party</MenuItem>
                         <MenuItem value="Payed Party">Payed Party</MenuItem>
                     </TextField>
-                    <Box mt={2}>
-                        <Button variant="contained" fullWidth onClick={fetchChequeData}>
-                            Apply
-                        </Button>
-                    </Box>
                 </Box>
             </ReportFilterDrawer>
 
@@ -529,93 +523,93 @@ const ChequeTransactionReport: React.FC = () => {
                     <>
                         <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 190px)" }}>
                             <Table size="small" sx={{ minWidth: 1000 }} stickyHeader>
-                        <TableHead>
-                            <TableRow>
-                                <TableCell align="center" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 80, border: "1px solid #cbd5e1" }}></TableCell>
-                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Rec.Date</TableCell>
-                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Rec.No</TableCell>
-                                <TableCell
-                                    onClick={(e) => handleHeaderClick(e, "voucherTypeGet")}
-                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
-                                >
-                                    <Box display="flex" alignItems="center" gap={0.5}>
-                                        VchType
-                                        {columnFilters.voucherTypeGet.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
-                                    </Box>
-                                </TableCell>
-                                <TableCell
-                                    onClick={(e) => handleHeaderClick(e, "creditAccountGet")}
-                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
-                                >
-                                    <Box display="flex" alignItems="center" gap={0.5}>
-                                        Party Name
-                                        {columnFilters.creditAccountGet.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
-                                    </Box>
-                                </TableCell>
-                                <TableCell
-                                    onClick={(e) => handleHeaderClick(e, "check_no")}
-                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
-                                >
-                                    <Box display="flex" alignItems="center" gap={0.5}>
-                                        Chq.No
-                                        {columnFilters.check_no.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
-                                    </Box>
-                                </TableCell>
-                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Chq.Date</TableCell>
-                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Bank.Date</TableCell>
-                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Debit</TableCell>
-                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Credit</TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {paginatedChequeData.length > 0 && (
-                                <TableRow>
-                                    <TableCell align="center" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
-                                        Total
-                                    </TableCell>
-                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                    <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
-                                    <TableCell align="right" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, color: "#1e3a8a" }}>
-                                        {formatNum(chequeTotals.debit)}
-                                    </TableCell>
-                                    <TableCell align="right" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, color: "#1e3a8a" }}>
-                                        {formatNum(chequeTotals.credit)}
-                                    </TableCell>
-                                </TableRow>
-                            )}
-                            {paginatedChequeData.length === 0 ? (
-                                <TableRow>
-                                    <TableCell colSpan={10} align="center" sx={{ py: 6, color: "#94a3b8" }}>
-                                        {!chequeFilters.debitAccount.value
-                                            ? "Please select a Debit Account in filters to load data."
-                                            : "No cheque transactions match your filter criteria."
-                                        }
-                                    </TableCell>
-                                </TableRow>
-                            ) : (
-                                paginatedChequeData.map((row: any, idx: number) => (
-                                    <ChequeRow key={row.receipt_id || idx} row={row} index={(chequePage - 1) * chequeRowsPerPage + idx + 1} />
-                                ))
-                            )}
-                        </TableBody>
-                    </Table>
-                </TableContainer>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell align="center" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 80, border: "1px solid #cbd5e1" }}></TableCell>
+                                        <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Rec.Date</TableCell>
+                                        <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Rec.No</TableCell>
+                                        <TableCell
+                                            onClick={(e) => handleHeaderClick(e, "voucherTypeGet")}
+                                            sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
+                                        >
+                                            <Box display="flex" alignItems="center" gap={0.5}>
+                                                VchType
+                                                {columnFilters.voucherTypeGet.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
+                                            </Box>
+                                        </TableCell>
+                                        <TableCell
+                                            onClick={(e) => handleHeaderClick(e, "creditAccountGet")}
+                                            sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
+                                        >
+                                            <Box display="flex" alignItems="center" gap={0.5}>
+                                                Party Name
+                                                {columnFilters.creditAccountGet.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
+                                            </Box>
+                                        </TableCell>
+                                        <TableCell
+                                            onClick={(e) => handleHeaderClick(e, "check_no")}
+                                            sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
+                                        >
+                                            <Box display="flex" alignItems="center" gap={0.5}>
+                                                Chq.No
+                                                {columnFilters.check_no.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
+                                            </Box>
+                                        </TableCell>
+                                        <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Chq.Date</TableCell>
+                                        <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Bank.Date</TableCell>
+                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Debit</TableCell>
+                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Credit</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {paginatedChequeData.length > 0 && (
+                                        <TableRow>
+                                            <TableCell align="center" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
+                                                Total
+                                            </TableCell>
+                                            <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                            <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                            <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                            <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                            <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                            <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                            <TableCell sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1" }} />
+                                            <TableCell align="right" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, color: "#1e3a8a" }}>
+                                                {formatNum(chequeTotals.debit)}
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ position: "sticky", top: "45px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, color: "#1e3a8a" }}>
+                                                {formatNum(chequeTotals.credit)}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                    {paginatedChequeData.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={10} align="center" sx={{ py: 6, color: "#94a3b8" }}>
+                                                {!chequeFilters.debitAccount.value
+                                                    ? "Please select a Debit Account in filters to load data."
+                                                    : "No cheque transactions match your filter criteria."
+                                                }
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        paginatedChequeData.map((row: any, idx: number) => (
+                                            <ChequeRow key={row.receipt_id || idx} row={row} index={(chequePage - 1) * chequeRowsPerPage + idx + 1} />
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
 
-                <CommonPagination
-                    totalRows={filteredChequeData.length}
-                    page={chequePage}
-                    rowsPerPage={chequeRowsPerPage}
-                    onPageChange={setChequePage}
-                    onRowsPerPageChange={setChequeRowsPerPage}
-                />
-            </>
-        )}
-    </Box>
+                        <CommonPagination
+                            totalRows={filteredChequeData.length}
+                            page={chequePage}
+                            rowsPerPage={chequeRowsPerPage}
+                            onPageChange={setChequePage}
+                            onRowsPerPageChange={setChequeRowsPerPage}
+                        />
+                    </>
+                )}
+            </Box>
 
             {/* Header Column Filters Menu Popup */}
             <Menu
@@ -624,8 +618,8 @@ const ChequeTransactionReport: React.FC = () => {
                 onClose={() => setFilterAnchor(null)}
                 PaperProps={{
                     sx: {
-                        maxHeight: 300,
-                        width: 250,
+                        maxHeight: activeHeader === "creditAccountGet" ? 450 : 300,
+                        width: activeHeader === "creditAccountGet" ? 450 : 250,
                         boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)",
                         borderRadius: 1.5,
                         border: "1px solid #e2e8f0"
@@ -642,7 +636,7 @@ const ChequeTransactionReport: React.FC = () => {
                             onChange={(e) => setSearchText(e.target.value)}
                             sx={{ mb: 1.5 }}
                         />
-                        <Box sx={{ maxHeight: 180, overflowY: "auto" }}>
+                        <Box sx={{ maxHeight: activeHeader === "creditAccountGet" ? 330 : 180, overflowY: "auto" }}>
                             {(() => {
                                 const allValues = Array.from(
                                     new Set(chequeData.map((x) => x[activeHeader]))

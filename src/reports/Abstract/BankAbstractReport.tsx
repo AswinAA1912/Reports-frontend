@@ -15,15 +15,22 @@ import {
     DialogContent,
     Button,
     IconButton,
+    Menu,
+    MenuItem,
+    TextField,
+    Checkbox,
+    FormControlLabel,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
+import FilterAltIcon from "@mui/icons-material/FilterAlt";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
 import { toast } from "react-toastify";
-import PageHeader from "../../Layout/PageHeader";
+import PageHeader, { ToggleMode } from "../../Layout/PageHeader";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
+import CommonPagination from "../../Components/CommonPagination";
 import { CashBoxReportResponse, CashBoxTransaction, CashBoxMasterAccount } from "../../services/cashbox.service";
 import { bankboxService } from "../../services/bankbox.service";
 
@@ -35,7 +42,6 @@ interface GroupConfig {
 }
 
 const DEBIT_GROUPS: GroupConfig[] = [
-
     { key: "bank_dep", label: "Bank Transfer (Contra)", side: "debit", masterKey: "Bank" },
     { key: "cash_paid", label: "Cash Withdraw (Contra)", side: "debit", masterKey: "Cash" },
     { key: "ledger_pay", label: "Ledger Groups (Payment)", side: "debit", masterKey: "LedgerGrp" },
@@ -150,13 +156,6 @@ const styleBankWorksheet = (ws: XLSX.WorkSheet) => {
                 continue;
             }
 
-            // 6. Transaction Details table headers
-            if (particularsValDebit === "Transaction Particulars" || particularsValDebit === "Amount") {
-                cell.s.font = { name: "Arial", sz: 10, bold: true, color: { rgb: "000000" } };
-                cell.s.fill = { fgColor: { rgb: "E2E8F0" } };
-                continue;
-            }
-
             // For amounts alignment
             if (C === 1 || C === 3) {
                 cell.s.alignment = { horizontal: "right", vertical: "center" };
@@ -165,29 +164,47 @@ const styleBankWorksheet = (ws: XLSX.WorkSheet) => {
     }
 };
 
+const getInvoiceKey = (tx: CashBoxTransaction) => {
+    if (tx.invoice_no) return String(tx.invoice_no).trim();
+    if (tx.Trans_Id) return `TransId_${tx.Trans_Id}`;
+    return "";
+};
+
 const BankAbstractReport: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
-
 
     const [loading, setLoading] = useState(false);
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [exportModalOpen, setExportModalOpen] = useState(false);
     const [exportType, setExportType] = useState<"excel" | "pdf" | null>(null);
     const [exportDetails, setExportDetails] = useState(false);
+    const [detailedExportStages, setDetailedExportStages] = useState({
+        transactions: true,
+        voucherDetails: true,
+        narration: true,
+        recPay: true,
+    });
     const [fromDate, setFromDate] = useState(today);
     const [toDate, setToDate] = useState(today);
     const [filters, setFilters] = useState({
         Date: { from: today, to: today },
     });
 
+    const [toggleMode, setToggleMode] = useState<ToggleMode>("Abstract");
     const [reportData, setReportData] = useState<CashBoxReportResponse | null>(null);
+    const [detailedData, setDetailedData] = useState<{ OB: any[]; Data: any[]; Group: any[] } | null>(null);
 
+    // Pagination for Expanded view
+    const [page, setPage] = useState(1);
+    const [rowsPerPage, setRowsPerPage] = useState(100);
 
-
-    // Selected groups for multi-select filter
+    // Selected groups for Abstract view filter chip
     const [selectedGroups, setSelectedGroups] = useState<string[]>(["All"]);
 
-    // Extract all unique Group Names from Bank dataset only
+    // Selected groups for Expanded view chip filter
+    const [selectedDetailedGroups, setSelectedDetailedGroups] = useState<string[]>(["All"]);
+
+    // Extract all unique Group Names from Bank dataset only for Abstract view
     const allGroupNames = useMemo(() => {
         if (!reportData) return [];
 
@@ -199,6 +216,32 @@ const BankAbstractReport: React.FC = () => {
         });
         return Array.from(names).sort();
     }, [reportData]);
+
+    // Extract unique Group Names for the Expanded view from the detailed Group dataset
+    const detailedGroupNames = useMemo(() => {
+        if (!detailedData || !detailedData.Group) return [];
+        const names = new Set<string>();
+        detailedData.Group.forEach((g: any) => {
+            if (g.Group_Name) {
+                names.add(g.Group_Name.trim());
+            }
+        });
+        return Array.from(names).sort();
+    }, [detailedData]);
+
+    // Column header dropdown filtering for Expanded view
+    const [activeHeader, setActiveHeader] = useState<string | null>(null);
+    const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
+    const [searchText, setSearchText] = useState("");
+    const [columnFilters, setColumnFilters] = useState<{
+        voucher_name: string[];
+        Account_name: string[];
+        Particulars: string[];
+    }>({
+        voucher_name: [],
+        Account_name: [],
+        Particulars: [],
+    });
 
     const handleGroupChipClick = (groupName: string) => {
         if (groupName === "All") {
@@ -217,12 +260,32 @@ const BankAbstractReport: React.FC = () => {
         });
     };
 
+    const handleDetailedGroupChipClick = (groupName: string) => {
+        if (groupName === "All") {
+            setSelectedDetailedGroups(["All"]);
+            setPage(1);
+            return;
+        }
+
+        setSelectedDetailedGroups((prev) => {
+            const next = prev.filter((g) => g !== "All");
+            if (next.includes(groupName)) {
+                const updated = next.filter((g) => g !== groupName);
+                setPage(1);
+                return updated.length === 0 ? ["All"] : updated;
+            } else {
+                setPage(1);
+                return [...next, groupName];
+            }
+        });
+    };
+
     // Expansion state for each group key
     const [expanded, setExpanded] = useState<Record<string, boolean>>({
-        cash_paid: false,
-        cash_rec: false,
         bank_dep: false,
         bank_rec: false,
+        cash_paid: false,
+        cash_rec: false,
         ledger_pay: false,
         ledger_rec: false,
         dex_deb: false,
@@ -245,33 +308,45 @@ const BankAbstractReport: React.FC = () => {
     const fetchData = async () => {
         try {
             setLoading(true);
-            const res = await bankboxService.getBankBoxReport({
-                Fromdate: filters.Date.from,
-                Todate: filters.Date.to,
-            });
-            if (res && !Array.isArray(res)) {
-                const filterGroup = (arr: any[]) =>
-                    (arr || []).filter(
-                        (acc) =>
-                            !acc.Group_Name ||
-                            acc.Group_Name.trim().toLowerCase()
-                    );
+            if (toggleMode === "Abstract") {
+                const res = await bankboxService.getBankBoxReport({
+                    Fromdate: filters.Date.from,
+                    Todate: filters.Date.to,
+                });
+                if (res && !Array.isArray(res)) {
+                    const filterGroup = (arr: any[]) =>
+                        (arr || []).filter(
+                            (acc) =>
+                                !acc.Group_Name ||
+                                acc.Group_Name.trim().toLowerCase()
+                        );
 
-                const filteredRes = {
-                    ...res,
-                    Cash: filterGroup(res.Cash),
-                    Bank: filterGroup(res.Bank),
-                    LedgerGrp: filterGroup(res.LedgerGrp),
-                    DEX: filterGroup(res.DEX),
-                    IDEX: filterGroup(res.IDEX),
-                };
-                setReportData(filteredRes);
+                    const filteredRes = {
+                        ...res,
+                        Cash: filterGroup(res.Cash),
+                        Bank: filterGroup(res.Bank),
+                        LedgerGrp: filterGroup(res.LedgerGrp),
+                        DEX: filterGroup(res.DEX),
+                        IDEX: filterGroup(res.IDEX),
+                    };
+                    setReportData(filteredRes);
+                } else {
+                    setReportData(null);
+                }
             } else {
-                setReportData(null);
+                const res = await bankboxService.getBankBoxDetailedReport({
+                    Fromdate: filters.Date.from,
+                    Todate: filters.Date.to,
+                });
+                if (res && res.Data) {
+                    setDetailedData(res);
+                } else {
+                    setDetailedData(null);
+                }
             }
         } catch (err) {
             console.error(err);
-            toast.error("Failed to load bank abstract data ❌");
+            toast.error("Failed to load bank report data ❌");
         } finally {
             setLoading(false);
         }
@@ -279,15 +354,15 @@ const BankAbstractReport: React.FC = () => {
 
     useEffect(() => {
         fetchData();
-    }, [filters.Date.from, filters.Date.to]);
+    }, [filters.Date.from, filters.Date.to, toggleMode]);
 
     // Format helpers
-    const formatNum = (v: number) => {
-        if (v === 0) return "-";
+    const formatNum = (v: number | undefined | null) => {
+        if (v === undefined || v === null || isNaN(v) || v === 0) return "-";
         return "₹" + new Intl.NumberFormat("en-IN", {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
-        }).format(v);
+        }).format(Number(v));
     };
 
     const formatTime = (dateStr: string) => {
@@ -319,275 +394,107 @@ const BankAbstractReport: React.FC = () => {
         );
     }, [reportData, selectedGroups]);
 
-    // Get selected Bank Group IDs
-    const selectedGroupIds = useMemo(() => {
-        const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
-        return new Set(
-            (reportData?.Bank || [])
-                .filter((acc) => !isFiltered || (acc.Group_Name && selectedGroups.includes(acc.Group_Name.trim())))
-                .map((acc) => String(acc.Group_Id).trim())
-        );
-    }, [reportData, selectedGroups]);
-
-    // Filter transactions: group by invoice key and keep all entries for bank-involved invoices
-    const filteredTransactions = useMemo(() => {
-        const allTx = reportData?.Data1 || [];
-
-        // Map all Bank Acc_Ids to a Set for O(1) lookup
-        const bankAccIds = new Set(
-            (reportData?.Bank || []).map((acc) => String(acc.Acc_Id).trim())
-        );
-
-        // Map all non-bank Acc_Ids and cash-related Acc_Ids
-        const nonBankAccIds = new Set<string>();
-        const cashRelatedAccIds = new Set<string>();
-        const cashMasterAccIds = new Set(
-            (reportData?.Cash || []).map((acc) => String(acc.Acc_Id).trim())
-        );
-
-        if (reportData) {
-            (reportData.Cash || []).forEach((acc) => cashRelatedAccIds.add(String(acc.Acc_Id).trim()));
-            (reportData.LedgerGrp || []).forEach((acc) => {
-                const accIdStr = String(acc.Acc_Id).trim();
-                if (acc.Account_name && acc.Account_name.toLowerCase().includes("(cash)")) {
-                    cashRelatedAccIds.add(accIdStr);
-                } else {
-                    nonBankAccIds.add(accIdStr);
-                }
-            });
-            (reportData.DEX || []).forEach((acc) => {
-                const accIdStr = String(acc.Acc_Id).trim();
-                if (acc.Account_name && acc.Account_name.toLowerCase().includes("(cash)")) {
-                    cashRelatedAccIds.add(accIdStr);
-                } else {
-                    nonBankAccIds.add(accIdStr);
-                }
-            });
-            (reportData.IDEX || []).forEach((acc) => {
-                const accIdStr = String(acc.Acc_Id).trim();
-                if (acc.Account_name && acc.Account_name.toLowerCase().includes("(cash)")) {
-                    cashRelatedAccIds.add(accIdStr);
-                } else {
-                    nonBankAccIds.add(accIdStr);
-                }
-            });
-        }
-
-        const getInvoiceKey = (tx: any) => tx.invoice_no || tx.Trans_Id || "";
-
-        // Find all invoice keys that have at least one transaction touching any active bank account
-        const bankInvoiceKeys = new Set<string>();
-        allTx.forEach((tx) => {
-            const isCreditBank = tx.Credit_Ac_Id && bankAccIds.has(String(tx.Credit_Ac_Id).trim());
-            const isDebitBank = tx.Debit_Ac_Id && bankAccIds.has(String(tx.Debit_Ac_Id).trim());
-            if (isCreditBank || isDebitBank) {
-                const key = getInvoiceKey(tx);
-                if (key) bankInvoiceKeys.add(key);
-            }
-        });
-
-        // Clean transactions: must have an invoice key in bankInvoiceKeys
-        const cleanTx = allTx.filter((tx) => {
-            const key = getInvoiceKey(tx);
-            if (!key || !bankInvoiceKeys.has(key)) {
-                return false;
-            }
-
-            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id).trim() : "";
-            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id).trim() : "";
-
-            // If either side is a cash-related expense/ledger (not a contra Cash account, but containing "(cash)"), filter it out
-            const isDebitCashExpense = debitIdStr && cashRelatedAccIds.has(debitIdStr) && !cashMasterAccIds.has(debitIdStr);
-            const isCreditCashExpense = creditIdStr && cashRelatedAccIds.has(creditIdStr) && !cashMasterAccIds.has(creditIdStr);
-            if (isDebitCashExpense || isCreditCashExpense) {
-                return false;
-            }
-
-            return true;
-        });
-
-        const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
-        if (!isFiltered) return cleanTx;
-
-        // If filtered, find all invoice keys that have at least one transaction touching the selected Bank accounts
-        const selectedBankInvoiceKeys = new Set<string>();
-        cleanTx.forEach((tx) => {
-            const isCreditBankSelected = tx.Credit_Ac_Id && selectedBankAccIds.has(String(tx.Credit_Ac_Id));
-            const isDebitBankSelected = tx.Debit_Ac_Id && selectedBankAccIds.has(String(tx.Debit_Ac_Id));
-            if (isCreditBankSelected || isDebitBankSelected) {
-                const key = getInvoiceKey(tx);
-                if (key) selectedBankInvoiceKeys.add(key);
-            }
-        });
-
-        return cleanTx.filter((tx) => {
-            const key = getInvoiceKey(tx);
-            if (!key || !selectedBankInvoiceKeys.has(key)) return false;
-
-            // Exclude bank-to-bank contra transfers (where both debit and credit sides are selected bank accounts)
-            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id) : "";
-            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id) : "";
-            const isBankToBank = debitIdStr && creditIdStr && selectedBankAccIds.has(debitIdStr) && selectedBankAccIds.has(creditIdStr);
-            if (isBankToBank) return false;
-
-            return true;
-        });
-    }, [reportData, selectedBankAccIds, selectedGroups]);
-
-    // Compute matching opposing account IDs from transactions involving the selected Bank accounts
-    const matchingOpposingAccIds = useMemo(() => {
-        const opposing = new Set<string>();
-        const nonBankAccIds = new Set<string>();
-        const cashMasterAccIds = new Set(
-            (reportData?.Cash || []).map((acc) => String(acc.Acc_Id))
-        );
-
-        if (reportData) {
-            (reportData.LedgerGrp || []).forEach((acc) => {
-                if (acc.Account_name && !acc.Account_name.toLowerCase().includes("(cash)")) {
-                    nonBankAccIds.add(String(acc.Acc_Id));
-                }
-            });
-            (reportData.DEX || []).forEach((acc) => {
-                if (acc.Account_name && !acc.Account_name.toLowerCase().includes("(cash)")) {
-                    nonBankAccIds.add(String(acc.Acc_Id));
-                }
-            });
-            (reportData.IDEX || []).forEach((acc) => {
-                if (acc.Account_name && !acc.Account_name.toLowerCase().includes("(cash)")) {
-                    nonBankAccIds.add(String(acc.Acc_Id));
-                }
-            });
-        }
-
-        const allBankAccIds = new Set(
-            (reportData?.Bank || []).map((acc) => String(acc.Acc_Id))
-        );
-
-        filteredTransactions.forEach((tx) => {
-            const isDebitBank = tx.Debit_Ac_Id && selectedBankAccIds.has(String(tx.Debit_Ac_Id));
-            const isCreditBank = tx.Credit_Ac_Id && selectedBankAccIds.has(String(tx.Credit_Ac_Id));
-            const isJournal = tx.voucher_name && tx.voucher_name.toLowerCase().includes("journal");
-
-            if (isJournal) {
-                if (tx.Debit_Ac_Id) {
-                    const debitIdStr = String(tx.Debit_Ac_Id);
-                    if (!allBankAccIds.has(debitIdStr) && (cashMasterAccIds.has(debitIdStr) || nonBankAccIds.has(debitIdStr))) {
-                        opposing.add(debitIdStr);
-                    }
-                }
-                if (tx.Credit_Ac_Id) {
-                    const creditIdStr = String(tx.Credit_Ac_Id);
-                    if (!allBankAccIds.has(creditIdStr) && (cashMasterAccIds.has(creditIdStr) || nonBankAccIds.has(creditIdStr))) {
-                        opposing.add(creditIdStr);
-                    }
-                }
-            } else {
-                if (isDebitBank && tx.Credit_Ac_Id) {
-                    const creditIdStr = String(tx.Credit_Ac_Id);
-                    if (cashMasterAccIds.has(creditIdStr) || nonBankAccIds.has(creditIdStr)) {
-                        opposing.add(creditIdStr);
-                    }
-                }
-                if (isCreditBank && tx.Debit_Ac_Id) {
-                    const debitIdStr = String(tx.Debit_Ac_Id);
-                    if (cashMasterAccIds.has(debitIdStr) || nonBankAccIds.has(debitIdStr)) {
-                        opposing.add(debitIdStr);
-                    }
-                }
-
-                // Also check if one side is generic bank "0" and the opposing side belongs to any non-bank group
-                const hasZeroCredit = !tx.Credit_Ac_Id || String(tx.Credit_Ac_Id) === "0";
-                const hasZeroDebit = !tx.Debit_Ac_Id || String(tx.Debit_Ac_Id) === "0";
-
-                if (hasZeroCredit && tx.Debit_Ac_Id && nonBankAccIds.has(String(tx.Debit_Ac_Id))) {
-                    opposing.add(String(tx.Debit_Ac_Id));
-                }
-                if (hasZeroDebit && tx.Credit_Ac_Id && nonBankAccIds.has(String(tx.Credit_Ac_Id))) {
-                    opposing.add(String(tx.Credit_Ac_Id));
-                }
-            }
-        });
-        return opposing;
-    }, [filteredTransactions, selectedBankAccIds, reportData]);
-
-    const allBankAccIdsSet = useMemo(() => {
-        return new Set(
-            (reportData?.Bank || []).map((acc) => String(acc.Acc_Id).trim())
-        );
+    // Get all Bank Account IDs
+    const allBankAccIds = useMemo(() => {
+        return new Set((reportData?.Bank || []).map((acc) => String(acc.Acc_Id).trim()));
     }, [reportData]);
 
-    // Calculate groups and balances
+    // Set of selected Bank Invoice Keys
+    const selectedBankInvoiceKeys = useMemo(() => {
+        const keys = new Set<string>();
+        (reportData?.Data1 || []).forEach((tx) => {
+            const key = getInvoiceKey(tx);
+            if (!key) return;
+            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id).trim() : "";
+            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id).trim() : "";
+            if (selectedBankAccIds.has(debitIdStr) || selectedBankAccIds.has(creditIdStr)) {
+                keys.add(key);
+            }
+        });
+        return keys;
+    }, [reportData, selectedBankAccIds]);
+
+    const invoiceKeysWithDebitSelectedBank = useMemo(() => {
+        const keys = new Set<string>();
+        (reportData?.Data1 || []).forEach((tx) => {
+            const key = getInvoiceKey(tx);
+            if (!key) return;
+            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id).trim() : "";
+            if (selectedBankAccIds.has(debitIdStr)) {
+                keys.add(key);
+            }
+        });
+        return keys;
+    }, [reportData, selectedBankAccIds]);
+
+    const invoiceKeysWithCreditSelectedBank = useMemo(() => {
+        const keys = new Set<string>();
+        (reportData?.Data1 || []).forEach((tx) => {
+            const key = getInvoiceKey(tx);
+            if (!key) return;
+            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id).trim() : "";
+            if (selectedBankAccIds.has(creditIdStr)) {
+                keys.add(key);
+            }
+        });
+        return keys;
+    }, [reportData, selectedBankAccIds]);
+
+    // Bank-to-Bank contra invoice keys
+    const bankToBankInvoiceKeys = useMemo(() => {
+        const keys = new Set<string>();
+        (reportData?.Data1 || []).forEach((tx) => {
+            const key = getInvoiceKey(tx);
+            if (!key) return;
+            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id).trim() : "";
+            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id).trim() : "";
+            if (debitIdStr && creditIdStr && allBankAccIds.has(debitIdStr) && allBankAccIds.has(creditIdStr)) {
+                keys.add(key);
+            }
+        });
+        return keys;
+    }, [reportData, allBankAccIds]);
+
+    // Filter transactions to bank-involved invoices
+    const filteredTransactions = useMemo(() => {
+        const allTx = reportData?.Data1 || [];
+        return allTx.filter((tx) => {
+            const key = getInvoiceKey(tx);
+            if (!key || !selectedBankInvoiceKeys.has(key)) return false;
+            return true;
+        });
+    }, [reportData, selectedBankInvoiceKeys]);
+
+    // Parse and group data for Abstract side
     const parsedData = useMemo(() => {
-        const obList = reportData?.OB || [];
-        const allBankAccIds = allBankAccIdsSet;
+        if (!reportData) {
+            return {
+                debitGroups: [],
+                creditGroups: [],
+                opening: 0,
+                closing: 0,
+                othersList: [],
+            };
+        }
 
-        const getInvoiceKey = (tx: any) => tx.invoice_no || tx.Trans_Id || "";
-        const bankToBankInvoiceKeys = new Set<string>();
-        const invoiceTxMap = new Map<string, any[]>();
-        filteredTransactions.forEach((tx) => {
-            const key = getInvoiceKey(tx);
-            if (key) {
-                if (!invoiceTxMap.has(key)) {
-                    invoiceTxMap.set(key, []);
-                }
-                const list = invoiceTxMap.get(key);
-                if (list) {
-                    list.push(tx);
-                }
-            }
+        const cashList = reportData.Cash || [];
+        const bankList = reportData.Bank || [];
+        const ledgerGrpList = reportData.LedgerGrp || [];
+        const dexList = reportData.DEX || [];
+        const idexList = reportData.IDEX || [];
+        const obList = reportData.OB || [];
+
+        const allDefinedAccIds = new Set<string>();
+        [cashList, bankList, ledgerGrpList, dexList, idexList].forEach((list) => {
+            list.forEach((acc) => {
+                if (acc.Acc_Id) allDefinedAccIds.add(String(acc.Acc_Id).trim());
+            });
         });
-
-        invoiceTxMap.forEach((txList, key) => {
-            const hasDebitBank = txList.some((tx) => tx.Debit_Ac_Id && allBankAccIds.has(String(tx.Debit_Ac_Id).trim()));
-            const hasCreditBank = txList.some((tx) => tx.Credit_Ac_Id && allBankAccIds.has(String(tx.Credit_Ac_Id).trim()));
-            if (hasDebitBank && hasCreditBank) {
-                bankToBankInvoiceKeys.add(key);
-            }
-        });
-
-        const invoiceKeysWithDebitSelectedBank = new Set<string>();
-        const invoiceKeysWithCreditSelectedBank = new Set<string>();
-        filteredTransactions.forEach((tx) => {
-            const key = getInvoiceKey(tx);
-            if (key) {
-                if (tx.Debit_Ac_Id && selectedBankAccIds.has(String(tx.Debit_Ac_Id).trim())) {
-                    invoiceKeysWithDebitSelectedBank.add(key);
-                }
-                if (tx.Credit_Ac_Id && selectedBankAccIds.has(String(tx.Credit_Ac_Id).trim())) {
-                    invoiceKeysWithCreditSelectedBank.add(key);
-                }
-            }
-        });
-
-        const cashList = (reportData?.Cash || []).filter(
-            (acc) => matchingOpposingAccIds.has(String(acc.Acc_Id)) && !allBankAccIds.has(String(acc.Acc_Id))
-        );
-        const bankList = (reportData?.Bank || []).filter(
-            (acc) => selectedBankAccIds.has(String(acc.Acc_Id))
-        );
-        const ledgerGrpList = (reportData?.LedgerGrp || []).filter(
-            (acc) => matchingOpposingAccIds.has(String(acc.Acc_Id)) && !allBankAccIds.has(String(acc.Acc_Id))
-        );
-        const dexList = (reportData?.DEX || []).filter(
-            (acc) => matchingOpposingAccIds.has(String(acc.Acc_Id)) && !allBankAccIds.has(String(acc.Acc_Id))
-        );
-        const idexList = (reportData?.IDEX || []).filter(
-            (acc) => matchingOpposingAccIds.has(String(acc.Acc_Id)) && !allBankAccIds.has(String(acc.Acc_Id))
-        );
-
-        const allDefinedAccIds = new Set<string>([
-            ...allBankAccIds,
-            ...(reportData?.Cash || []).map((acc) => String(acc.Acc_Id)),
-            ...(reportData?.LedgerGrp || []).map((acc) => String(acc.Acc_Id)),
-            ...(reportData?.DEX || []).map((acc) => String(acc.Acc_Id)),
-            ...(reportData?.IDEX || []).map((acc) => String(acc.Acc_Id))
-        ]);
 
         const othersMap = new Map<string, CashBoxMasterAccount>();
         filteredTransactions.forEach((tx) => {
-            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id) : "";
-            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id) : "";
+            const debitIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id).trim() : "";
+            const creditIdStr = tx.Credit_Ac_Id ? String(tx.Credit_Ac_Id).trim() : "";
 
             const isDebitBank = debitIdStr && selectedBankAccIds.has(debitIdStr);
             const isCreditBank = creditIdStr && selectedBankAccIds.has(creditIdStr);
@@ -648,7 +555,6 @@ const BankAbstractReport: React.FC = () => {
             Others: othersList,
         };
 
-        // Sum OB_Amount robustly for Bank focus based on selected group names and account IDs
         let opening = 0;
         if (obList.length > 0) {
             const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
@@ -658,7 +564,7 @@ const BankAbstractReport: React.FC = () => {
             obList.forEach((obItem: any) => {
                 const isSelected = isFiltered
                     ? (obItem.Acc_Id ? selectedBankAccIds.has(String(obItem.Acc_Id).trim()) : (obItem.Group_Name && selectedGroups.includes(obItem.Group_Name.trim())))
-                    : (obItem.Acc_Id ? allBankAccIdsSet.has(String(obItem.Acc_Id).trim()) : (obItem.Group_Name ? bankGroupNames.has(obItem.Group_Name.trim()) : true));
+                    : (obItem.Acc_Id ? allBankAccIds.has(String(obItem.Acc_Id).trim()) : (obItem.Group_Name ? bankGroupNames.has(obItem.Group_Name.trim()) : true));
 
                 if (isSelected) {
                     sum += Number(obItem.OB_Amount) || 0;
@@ -676,17 +582,13 @@ const BankAbstractReport: React.FC = () => {
                 const txDebitAcIdStr = tx.Debit_Ac_Id ? String(tx.Debit_Ac_Id).trim() : "";
                 const key = getInvoiceKey(tx);
 
-                // If it is the Bank group (contra Bank-to-Bank), BOTH sides of the transaction must be Bank accounts
                 if (config.masterKey === "Bank") {
-                    const key = getInvoiceKey(tx);
                     const isBankToBank = key && bankToBankInvoiceKeys.has(key);
                     if (!isBankToBank) return false;
 
                     if (config.side === "debit") {
-                        // Bank payments: selected bank account is credited
                         return tx.Credit_Ac_Id && selectedBankAccIds.has(txCreditAcIdStr);
                     } else {
-                        // Bank receipts: selected bank account is debited
                         return tx.Debit_Ac_Id && selectedBankAccIds.has(txDebitAcIdStr);
                     }
                 }
@@ -736,13 +638,9 @@ const BankAbstractReport: React.FC = () => {
                 subLedgerMap[accId].amount += amount;
             });
 
-            const subLedgers = Object.values(subLedgerMap)
-                .filter((sub) => sub.amount !== 0)
-                .sort((a, b) => b.amount - a.amount);
-
-            const total = subLedgers.reduce((sum, sub) => sum + sub.amount, 0);
-
-            return { subLedgers, total };
+            const subLedgers = Object.values(subLedgerMap);
+            const total = subLedgers.reduce((sum, s) => sum + s.amount, 0);
+            return { total, subLedgers };
         };
 
         const debitGroups = DEBIT_GROUPS.map((grp) => ({
@@ -758,7 +656,6 @@ const BankAbstractReport: React.FC = () => {
         const totalDebits = debitGroups.reduce((sum, g) => sum + g.total, 0);
         const totalCredits = creditGroups.reduce((sum, g) => sum + g.total, 0);
 
-        // Sum CL_Amount robustly based on selected group names and account IDs from Cls dataset
         let closing = 0;
         const clsList = reportData?.Cls || [];
         if (clsList.length > 0) {
@@ -769,7 +666,7 @@ const BankAbstractReport: React.FC = () => {
             clsList.forEach((clsItem: any) => {
                 const isSelected = isFiltered
                     ? (clsItem.Acc_Id ? selectedBankAccIds.has(String(clsItem.Acc_Id).trim()) : (clsItem.Group_Name && selectedGroups.includes(clsItem.Group_Name.trim())))
-                    : (clsItem.Acc_Id ? allBankAccIdsSet.has(String(clsItem.Acc_Id).trim()) : (clsItem.Group_Name ? bankGroupNames.has(clsItem.Group_Name.trim()) : true));
+                    : (clsItem.Acc_Id ? allBankAccIds.has(String(clsItem.Acc_Id).trim()) : (clsItem.Group_Name ? bankGroupNames.has(clsItem.Group_Name.trim()) : true));
 
                 if (isSelected) {
                     sum += Number(clsItem.CL_Amount) || 0;
@@ -777,7 +674,6 @@ const BankAbstractReport: React.FC = () => {
             });
             closing = opening + sum;
         } else {
-            // Fallback to manual calculation if Cls is empty/missing
             closing = opening + totalCredits - totalDebits;
         }
 
@@ -787,9 +683,146 @@ const BankAbstractReport: React.FC = () => {
             opening,
             closing,
             othersList,
-            bankToBankInvoiceKeys,
         };
-    }, [reportData, selectedBankAccIds, selectedGroupIds, filteredTransactions, matchingOpposingAccIds, selectedGroups, allBankAccIdsSet]);
+    }, [reportData, selectedBankAccIds, filteredTransactions, bankToBankInvoiceKeys, invoiceKeysWithCreditSelectedBank, invoiceKeysWithDebitSelectedBank, selectedGroups, allBankAccIds]);
+
+    // Group and calculate detailed data for Expanded side with pagination and chips
+    const detailedReportSummary = useMemo(() => {
+        if (!detailedData || !detailedData.Group || !detailedData.Data) {
+            return { groups: [], totalRows: 0 };
+        }
+
+        const { OB, Data, Group } = detailedData;
+
+        // Apply Column Header Filters first
+        let filteredTx = Data.filter((item: any) => {
+            const voucherFilter = columnFilters.voucher_name || [];
+            if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucher_name)) return false;
+
+            const nameFilter = columnFilters.Account_name || [];
+            if (nameFilter.length > 0 && !nameFilter.includes(item.Account_name)) return false;
+
+            const particularsFilter = columnFilters.Particulars || [];
+            if (particularsFilter.length > 0 && !particularsFilter.includes(item.Particulars)) return false;
+
+            return true;
+        });
+
+        // Apply Expanded view Group Chip filter
+        const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
+        if (isGroupFiltered) {
+            filteredTx = filteredTx.filter((item: any) =>
+                item.Group_Name && selectedDetailedGroups.includes(item.Group_Name.trim())
+            );
+        }
+
+        const totalRows = filteredTx.length;
+
+        // Paginate the flat filtered transactions
+        const paginatedTx = filteredTx.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+
+        // Group the paginated transactions
+        const assignedObIndices = new Set<number>();
+
+        const activeGroups = Group.filter((g: any) =>
+            !isGroupFiltered || (g.Group_Name && selectedDetailedGroups.includes(g.Group_Name.trim()))
+        );
+
+        const groups = activeGroups.map((groupItem: any) => {
+            const matchedTransactions = paginatedTx.filter((item: any) => {
+                if (!item.Acc_Id) return false;
+                const txAccIds = Array.isArray(item.Acc_Id) ? item.Acc_Id.map(String) : [String(item.Acc_Id)];
+                return txAccIds.includes(String(groupItem.Acc_Id));
+            });
+
+            const obIndex = OB.findIndex((ob, idx) => {
+                if (assignedObIndices.has(idx)) return false;
+                return (ob.Acc_Id && String(ob.Acc_Id) === String(groupItem.Acc_Id)) ||
+                    (ob.Account_name && String(ob.Account_name).toLowerCase() === String(groupItem.Account_name).toLowerCase()) ||
+                    (ob.Group_Name && String(ob.Group_Name).toLowerCase() === String(groupItem.Group_Name).toLowerCase());
+            });
+
+            let obAmount = 0;
+            if (obIndex !== -1) {
+                assignedObIndices.add(obIndex);
+                obAmount = Number(OB[obIndex].OB_Amount) || 0;
+            }
+
+            let txDebitSum = 0;
+            let txCreditSum = 0;
+            matchedTransactions.forEach((tx: any) => {
+                txDebitSum += Number(tx.Dr_Amount || 0);
+                txCreditSum += Number(tx.Cr_Amount || 0);
+            });
+
+            const totalDebit = txDebitSum;
+            const totalCredit = txCreditSum;
+            const closingBalance = totalDebit - totalCredit;
+
+            return {
+                ...groupItem,
+                obAmount,
+                transactions: matchedTransactions,
+                totalDebit,
+                totalCredit,
+                closingBalance
+            };
+        }).filter((g: any) => g.transactions.length > 0);
+
+        return { groups, totalRows };
+    }, [detailedData, columnFilters, selectedDetailedGroups, page, rowsPerPage]);
+
+    const totalOpeningBalance = useMemo(() => {
+        if (!detailedData || !detailedData.OB) return 0;
+        const { OB } = detailedData;
+        const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
+
+        let filteredOB = OB;
+        if (isGroupFiltered) {
+            filteredOB = OB.filter((ob: any) =>
+                ob.Group_Name && selectedDetailedGroups.includes(ob.Group_Name.trim())
+            );
+        }
+        return filteredOB.reduce((sum, item) => sum + (Number(item.OB_Amount) || 0), 0);
+    }, [detailedData, selectedDetailedGroups]);
+
+    const totalDetailedDebitsAndCredits = useMemo(() => {
+        if (!detailedData || !detailedData.Data) return { debit: 0, credit: 0 };
+        const { Data } = detailedData;
+
+        let filteredTx = Data.filter((item: any) => {
+            const voucherFilter = columnFilters.voucher_name || [];
+            if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucher_name)) return false;
+
+            const nameFilter = columnFilters.Account_name || [];
+            if (nameFilter.length > 0 && !nameFilter.includes(item.Account_name)) return false;
+
+            const particularsFilter = columnFilters.Particulars || [];
+            if (particularsFilter.length > 0 && !particularsFilter.includes(item.Particulars)) return false;
+
+            return true;
+        });
+
+        const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
+        if (isGroupFiltered) {
+            filteredTx = filteredTx.filter((item: any) =>
+                item.Group_Name && selectedDetailedGroups.includes(item.Group_Name.trim())
+            );
+        }
+
+        let debit = 0;
+        let credit = 0;
+        filteredTx.forEach((tx: any) => {
+            debit += Number(tx.Dr_Amount || 0);
+            credit += Number(tx.Cr_Amount || 0);
+        });
+
+        return { debit, credit };
+    }, [detailedData, columnFilters, selectedDetailedGroups]);
+
+    const finalClosing = useMemo(() => {
+        return totalOpeningBalance + totalDetailedDebitsAndCredits.debit - totalDetailedDebitsAndCredits.credit;
+    }, [totalOpeningBalance, totalDetailedDebitsAndCredits]);
 
     // Handle opening detail modal
     const handleLedgerClick = (accId: string, name: string, side: "debit" | "credit") => {
@@ -797,17 +830,15 @@ const BankAbstractReport: React.FC = () => {
         setDetailModalOpen(true);
     };
 
-    // Helper to get transactions for a specific ledger/account ID and side
     const getTransactionsForLedger = useCallback((accId: string, side: "debit" | "credit") => {
         if (!filteredTransactions) return [];
         const accIdTrim = String(accId).trim();
-        const isBank = allBankAccIdsSet.has(accIdTrim);
+        const isBank = allBankAccIds.has(accIdTrim);
 
         return filteredTransactions.filter((tx) => {
             if (isBank) {
-                // For Bank group, only bank-to-bank transactions should show
-                const key = tx.invoice_no || tx.Trans_Id || "";
-                const isBankToBank = key && parsedData.bankToBankInvoiceKeys.has(key);
+                const key = getInvoiceKey(tx);
+                const isBankToBank = key && bankToBankInvoiceKeys.has(key);
                 if (!isBankToBank) return false;
 
                 if (side === "debit") {
@@ -823,28 +854,24 @@ const BankAbstractReport: React.FC = () => {
                 }
             }
         });
-    }, [filteredTransactions, allBankAccIdsSet, parsedData.bankToBankInvoiceKeys]);
+    }, [filteredTransactions, allBankAccIds, bankToBankInvoiceKeys]);
 
-    // Filter transactions for clicked sub-ledger inside modal
     const modalTransactions = useMemo(() => {
         if (!selectedLedger) return [];
         return getTransactionsForLedger(selectedLedger.accId, selectedLedger.side);
     }, [selectedLedger, getTransactionsForLedger]);
 
-    // Helper to get transaction amount for a given side
     const getTransactionAmount = useCallback((tx: CashBoxTransaction, accId: string, side: "debit" | "credit") => {
         const accIdTrim = String(accId).trim();
-        const isBank = allBankAccIdsSet.has(accIdTrim);
+        const isBank = allBankAccIds.has(accIdTrim);
         if (isBank) {
             return String(tx.Debit_Ac_Id).trim() === accIdTrim ? tx.Dr_Amount : tx.Cr_Amount;
         } else {
             return side === "debit" ? tx.Dr_Amount : tx.Cr_Amount;
         }
-    }, [allBankAccIdsSet]);
+    }, [allBankAccIds]);
 
-    // Helper to get opposing ledger name for a transaction
     const getOpposingLedgerNameForExport = useCallback((tx: CashBoxTransaction, accId: string, side: "debit" | "credit") => {
-        // Match in Jnl dataset if present
         if (tx.invoice_no && reportData?.Jnl) {
             const jnlItem = reportData.Jnl.find(
                 (j) => j.invoice_no && String(j.invoice_no).trim() === String(tx.invoice_no).trim()
@@ -855,7 +882,7 @@ const BankAbstractReport: React.FC = () => {
         }
 
         const accIdTrim = String(accId).trim();
-        const isBank = allBankAccIdsSet.has(accIdTrim);
+        const isBank = allBankAccIds.has(accIdTrim);
 
         let opposingId;
         if (isBank) {
@@ -878,15 +905,13 @@ const BankAbstractReport: React.FC = () => {
         ];
         const acc = allLists.find((x) => String(x.Acc_Id).trim() === String(opposingId).trim());
         return acc ? acc.Account_name : (tx.Particulars || `Account (${opposingId})`);
-    }, [reportData, allBankAccIdsSet]);
+    }, [reportData, allBankAccIds]);
 
-    // Find opposing ledger name
     const getOpposingLedgerName = (tx: CashBoxTransaction) => {
         if (!selectedLedger) return "";
         return getOpposingLedgerNameForExport(tx, selectedLedger.accId, selectedLedger.side);
     };
 
-    // Sum total inside modal
     const modalTotal = useMemo(() => {
         if (!selectedLedger) return 0;
         return modalTransactions.reduce((sum, tx) => {
@@ -894,8 +919,63 @@ const BankAbstractReport: React.FC = () => {
         }, 0);
     }, [modalTransactions, selectedLedger, getTransactionAmount]);
 
+    const handleHeaderClick = (event: React.MouseEvent<HTMLElement>, key: keyof typeof columnFilters) => {
+        setActiveHeader(key);
+        setFilterAnchor(event.currentTarget);
+        setSearchText("");
+    };
+
+    const handleHeaderFilterClose = () => {
+        setActiveHeader(null);
+        setFilterAnchor(null);
+        setSearchText("");
+    };
+
+    const uniqueValuesForHeader = useMemo(() => {
+        if (!activeHeader || !detailedData || !detailedData.Data) return [];
+        const setVals = new Set<string>();
+        detailedData.Data.forEach((item: any) => {
+            const val = item[activeHeader];
+            if (val !== undefined && val !== null && val !== "") {
+                setVals.add(String(val));
+            }
+        });
+        return Array.from(setVals).sort();
+    }, [activeHeader, detailedData]);
+
+    const handleToggleColumnFilter = (val: string) => {
+        if (!activeHeader) return;
+        setColumnFilters((prev) => {
+            const currentList = prev[activeHeader as keyof typeof columnFilters] || [];
+            const isSelected = currentList.includes(val);
+            let updatedList: string[];
+            if (isSelected) {
+                updatedList = currentList.filter((item) => item !== val);
+            } else {
+                updatedList = [...currentList, val];
+            }
+            return {
+                ...prev,
+                [activeHeader]: updatedList,
+            };
+        });
+        setPage(1);
+    };
+
+    const handleSelectAllColumnFilter = () => {
+        if (!activeHeader) return;
+        const currentList = columnFilters[activeHeader as keyof typeof columnFilters] || [];
+        const isAllSelected = currentList.length === uniqueValuesForHeader.length;
+
+        setColumnFilters((prev) => ({
+            ...prev,
+            [activeHeader]: isAllSelected ? [] : [...uniqueValuesForHeader],
+        }));
+        setPage(1);
+    };
+
     // Excel Export
-    const handleExportExcel = (includeDetails: boolean = false) => {
+    const handleExportExcel = (includeDetails: boolean = false, stages = detailedExportStages) => {
         try {
             const excelData: any[][] = [];
             const dateStr =
@@ -906,123 +986,156 @@ const BankAbstractReport: React.FC = () => {
             excelData.push([`BANK ABSTRACT TRANSACTION - ${dateStr}`]);
             excelData.push([]);
 
-            // Headers
-            excelData.push([
-                "Particulars (Debit)",
-                "Debit Amt",
-                "Particulars (Credit)",
-                "Credit amt",
-            ]);
-
-            // Opening row
-            excelData.push(["", "", "Opening Balance", parsedData.opening]);
-
-            // Parallel Groups and Sub-ledgers
-            for (let idx = 0; idx < parsedData.debitGroups.length; idx++) {
-                const leftGroup = parsedData.debitGroups[idx];
-                const rightGroup = parsedData.creditGroups[idx];
-
+            if (toggleMode === "Abstract") {
                 excelData.push([
-                    leftGroup.label,
-                    leftGroup.total || "",
-                    rightGroup.label,
-                    rightGroup.total || "",
+                    "Particulars (Debit)",
+                    "Debit Amt",
+                    "Particulars (Credit)",
+                    "Credit amt",
                 ]);
 
-                const maxSubRows = Math.max(leftGroup.subLedgers.length, rightGroup.subLedgers.length);
-                for (let i = 0; i < maxSubRows; i++) {
-                    const leftSub = leftGroup.subLedgers[i];
-                    const rightSub = rightGroup.subLedgers[i];
+                excelData.push(["Opening Balance", parsedData.opening, "Opening Balance", ""]);
 
-                    // Sub-ledger row
+                for (let idx = 0; idx < parsedData.debitGroups.length; idx++) {
+                    const leftGroup = parsedData.debitGroups[idx];
+                    const rightGroup = parsedData.creditGroups[idx];
+
                     excelData.push([
-                        leftSub ? `  ${i + 1}. ${leftSub.name}` : "",
-                        leftSub ? leftSub.amount : "",
-                        rightSub ? `  ${i + 1}. ${rightSub.name}` : "",
-                        rightSub ? rightSub.amount : "",
+                        leftGroup.label,
+                        leftGroup.total || "",
+                        rightGroup.label,
+                        rightGroup.total || "",
                     ]);
 
-                    if (includeDetails) {
-                        // Gather nested transactions for these sub-ledgers
-                        const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
-                        const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
-                        const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
+                    const maxSubRows = Math.max(leftGroup.subLedgers.length, rightGroup.subLedgers.length);
+                    for (let i = 0; i < maxSubRows; i++) {
+                        const leftSub = leftGroup.subLedgers[i];
+                        const rightSub = rightGroup.subLedgers[i];
 
-                        for (let j = 0; j < maxTxRows; j++) {
-                            const txL = leftTxs[j];
-                            const txR = rightTxs[j];
+                        excelData.push([
+                            leftSub ? `  ${i + 1}. ${leftSub.name}` : "",
+                            leftSub ? leftSub.amount : "",
+                            rightSub ? `  ${i + 1}. ${rightSub.name}` : "",
+                            rightSub ? rightSub.amount : "",
+                        ]);
 
-                            let col0 = "";
-                            let col1: any = "";
-                            let narrationL = "";
-                            if (txL) {
-                                const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
-                                const timeStr = formatTime(txL.Created_Time);
-                                col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                                col1 = getTransactionAmount(txL, leftSub.accId, leftGroup.side);
-                                narrationL = (txL.Narration || txL.Line_Naration || "").trim();
-                            }
+                        if (includeDetails) {
+                            const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
+                            const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
+                            const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
 
-                            let col2 = "";
-                            let col3: any = "";
-                            let narrationR = "";
-                            if (txR) {
-                                const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
-                                const timeStr = formatTime(txR.Created_Time);
-                                col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                                col3 = getTransactionAmount(txR, rightSub.accId, rightGroup.side);
-                                narrationR = (txR.Narration || txR.Line_Naration || "").trim();
-                            }
+                            for (let j = 0; j < maxTxRows; j++) {
+                                const txL = leftTxs[j];
+                                const txR = rightTxs[j];
 
-                            excelData.push([col0, col1, col2, col3]);
-
-                            if (narrationL || narrationR) {
-                                excelData.push([
-                                    narrationL ? `        * ${narrationL}` : "",
-                                    "",
-                                    narrationR ? `        * ${narrationR}` : "",
-                                    ""
-                                ]);
-                            }
-
-                            // RecPay details below transaction
-                            const recPaysL = txL && txL.invoice_no && reportData?.RecPay
-                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
-                                : [];
-                            const recPaysR = txR && txR.invoice_no && reportData?.RecPay
-                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
-                                : [];
-
-                            const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
-                            for (let k = 0; k < maxRecPayRows; k++) {
-                                const rpL = recPaysL[k];
-                                const rpR = recPaysR[k];
-
-                                let rCol0 = "";
-                                let rCol1: any = "";
-                                if (rpL) {
-                                    const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
-                                    rCol0 = `        ${rpL.bill_name}${dateStr}`;
-                                    rCol1 = rpL.Amount;
+                                let col0 = "";
+                                let col1: any = "";
+                                let narrationL = "";
+                                if (txL) {
+                                    const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
+                                    const timeStr = formatTime(txL.Created_Time);
+                                    col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                    col1 = getTransactionAmount(txL, leftSub.accId, leftGroup.side);
+                                    if (stages.narration) {
+                                        narrationL = (txL.Narration || txL.Line_Naration || "").trim();
+                                    }
                                 }
 
-                                let rCol2 = "";
-                                let rCol3: any = "";
-                                if (rpR) {
-                                    const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
-                                    rCol2 = `        ${rpR.bill_name}${dateStr}`;
-                                    rCol3 = rpR.Amount;
+                                let col2 = "";
+                                let col3: any = "";
+                                let narrationR = "";
+                                if (txR) {
+                                    const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
+                                    const timeStr = formatTime(txR.Created_Time);
+                                    col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                    col3 = getTransactionAmount(txR, rightSub.accId, rightGroup.side);
+                                    if (stages.narration) {
+                                        narrationR = (txR.Narration || txR.Line_Naration || "").trim();
+                                    }
                                 }
 
-                                excelData.push([rCol0, rCol1, rCol2, rCol3]);
+                                if (stages.transactions) {
+                                    excelData.push([col0, col1, col2, col3]);
+                                }
+
+                                if (stages.narration && (narrationL || narrationR)) {
+                                    excelData.push([
+                                        narrationL ? `        * ${narrationL}` : "",
+                                        "",
+                                        narrationR ? `        * ${narrationR}` : "",
+                                        ""
+                                    ]);
+                                }
+
+                                if (stages.recPay) {
+                                    const recPaysL = txL && txL.invoice_no && reportData?.RecPay
+                                        ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
+                                        : [];
+                                    const recPaysR = txR && txR.invoice_no && reportData?.RecPay
+                                        ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
+                                        : [];
+
+                                    const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
+                                    for (let k = 0; k < maxRecPayRows; k++) {
+                                        const rpL = recPaysL[k];
+                                        const rpR = recPaysR[k];
+
+                                        let rCol0 = "";
+                                        let rCol1: any = "";
+                                        if (rpL) {
+                                            const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
+                                            rCol0 = `        ${rpL.bill_name}${dateStr}`;
+                                            rCol1 = rpL.Amount;
+                                        }
+
+                                        let rCol2 = "";
+                                        let rCol3: any = "";
+                                        if (rpR) {
+                                            const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
+                                            rCol2 = `        ${rpR.bill_name}${dateStr}`;
+                                            rCol3 = rpR.Amount;
+                                        }
+
+                                        excelData.push([rCol0, rCol1, rCol2, rCol3]);
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // Closing row
-            excelData.push(["", "", "Closing Balance", parsedData.closing]);
+                excelData.push(["", "", "Closing Balance", parsedData.closing]);
+            } else {
+                excelData.push([
+                    "S.No",
+                    "Date",
+                    "Ledger Name",
+                    "Particulars",
+                    "Narration",
+                    "Debit",
+                    "Credit"
+                ]);
+
+                excelData.push(["-", "-", "Opening Balance", "-", "-", "-", totalOpeningBalance]);
+
+                detailedReportSummary.groups.forEach((group: any) => {
+                    excelData.push([`${group.Account_name} (${group.Group_Name})`, "", "", "", "", "", ""]);
+                    group.transactions.forEach((tx: any, tIdx: number) => {
+                        excelData.push([
+                            tIdx + 1,
+                            tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : "",
+                            tx.Account_name || "",
+                            tx.Particulars || "",
+                            tx.Narration || tx.Line_Naration || "",
+                            Number(tx.Dr_Amount) > 0 ? Number(tx.Dr_Amount) : "",
+                            Number(tx.Cr_Amount) > 0 ? Number(tx.Cr_Amount) : ""
+                        ]);
+                    });
+                    excelData.push([`Sub Total (${group.Account_name})`, "", "", "", "", group.totalDebit, group.totalCredit]);
+                });
+
+                excelData.push(["-", "-", "Closing Balance", "-", "-", "-", finalClosing]);
+            }
 
             const ws = XLSX.utils.aoa_to_sheet(excelData);
             styleBankWorksheet(ws);
@@ -1036,8 +1149,8 @@ const BankAbstractReport: React.FC = () => {
                 { wch: 15 },
             ];
 
-            XLSX.utils.book_append_sheet(wb, ws, "BankAbstract Report");
-            XLSX.writeFile(wb, `BankAbstract_Report_${dayjs().format("YYYYMMDD_HHmmss")}.xlsx`);
+            XLSX.utils.book_append_sheet(wb, ws, "BankBox Report");
+            XLSX.writeFile(wb, `BankBox_Report_${dayjs().format("YYYYMMDD_HHmmss")}.xlsx`);
             toast.success("Excel Exported ✅");
         } catch (err) {
             console.error(err);
@@ -1046,7 +1159,7 @@ const BankAbstractReport: React.FC = () => {
     };
 
     // PDF Export
-    const handleExportPDF = (includeDetails: boolean = false) => {
+    const handleExportPDF = (includeDetails: boolean = false, stages = detailedExportStages) => {
         try {
             const doc = new jsPDF("landscape", "mm", "a4");
             const dateStr =
@@ -1058,167 +1171,205 @@ const BankAbstractReport: React.FC = () => {
             doc.setFont("helvetica", "bold");
             doc.text(`BANK ABSTRACT TRANSACTION - ${dateStr}`, 148, 12, { align: "center" });
 
-            const pdfBody: any[][] = [];
-            pdfBody.push(["", "", "Opening Balance", formatNum(parsedData.opening)]);
+            if (toggleMode === "Abstract") {
+                const pdfBody: any[][] = [];
+                pdfBody.push(["Opening Balance", formatNum(parsedData.opening), "Opening Balance", ""]);
 
-            for (let idx = 0; idx < parsedData.debitGroups.length; idx++) {
-                const leftGroup = parsedData.debitGroups[idx];
-                const rightGroup = parsedData.creditGroups[idx];
-
-                pdfBody.push([
-                    leftGroup.label,
-                    leftGroup.total ? formatNum(leftGroup.total) : "-",
-                    rightGroup.label,
-                    rightGroup.total ? formatNum(rightGroup.total) : "-",
-                ]);
-
-                const maxSubRows = Math.max(leftGroup.subLedgers.length, rightGroup.subLedgers.length);
-                for (let i = 0; i < maxSubRows; i++) {
-                    const leftSub = leftGroup.subLedgers[i];
-                    const rightSub = rightGroup.subLedgers[i];
+                for (let idx = 0; idx < parsedData.debitGroups.length; idx++) {
+                    const leftGroup = parsedData.debitGroups[idx];
+                    const rightGroup = parsedData.creditGroups[idx];
 
                     pdfBody.push([
-                        leftSub ? `  ${i + 1}. ${leftSub.name}` : "",
-                        leftSub ? formatNum(leftSub.amount) : "",
-                        rightSub ? `  ${i + 1}. ${rightSub.name}` : "",
-                        rightSub ? formatNum(rightSub.amount) : "",
+                        leftGroup.label,
+                        leftGroup.total ? formatNum(leftGroup.total) : "-",
+                        rightGroup.label,
+                        rightGroup.total ? formatNum(rightGroup.total) : "-",
                     ]);
 
-                    if (includeDetails) {
-                        // Gather nested transactions for these sub-ledgers for PDF
-                        const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
-                        const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
-                        const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
+                    const maxSubRows = Math.max(leftGroup.subLedgers.length, rightGroup.subLedgers.length);
+                    for (let i = 0; i < maxSubRows; i++) {
+                        const leftSub = leftGroup.subLedgers[i];
+                        const rightSub = rightGroup.subLedgers[i];
 
-                        for (let j = 0; j < maxTxRows; j++) {
-                            const txL = leftTxs[j];
-                            const txR = rightTxs[j];
+                        pdfBody.push([
+                            leftSub ? `  ${i + 1}. ${leftSub.name}` : "",
+                            leftSub ? formatNum(leftSub.amount) : "",
+                            rightSub ? `  ${i + 1}. ${rightSub.name}` : "",
+                            rightSub ? formatNum(rightSub.amount) : "",
+                        ]);
 
-                            let col0 = "";
-                            let col1 = "";
-                            let narrationL = "";
-                            if (txL) {
-                                const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
-                                const timeStr = formatTime(txL.Created_Time);
-                                col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                                col1 = formatNum(getTransactionAmount(txL, leftSub.accId, leftGroup.side));
-                                narrationL = (txL.Narration || txL.Line_Naration || "").trim();
-                            }
+                        if (includeDetails) {
+                            const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
+                            const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
+                            const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
 
-                            let col2 = "";
-                            let col3 = "";
-                            let narrationR = "";
-                            if (txR) {
-                                const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
-                                const timeStr = formatTime(txR.Created_Time);
-                                col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                                col3 = formatNum(getTransactionAmount(txR, rightSub.accId, rightGroup.side));
-                                narrationR = (txR.Narration || txR.Line_Naration || "").trim();
-                            }
+                            for (let j = 0; j < maxTxRows; j++) {
+                                const txL = leftTxs[j];
+                                const txR = rightTxs[j];
 
-                            pdfBody.push([col0, col1, col2, col3]);
-
-                            if (narrationL || narrationR) {
-                                pdfBody.push([
-                                    narrationL ? `        * ${narrationL}` : "",
-                                    "",
-                                    narrationR ? `        * ${narrationR}` : "",
-                                    ""
-                                ]);
-                            }
-
-                            // RecPay details below transaction for PDF
-                            const recPaysL = txL && txL.invoice_no && reportData?.RecPay
-                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
-                                : [];
-                            const recPaysR = txR && txR.invoice_no && reportData?.RecPay
-                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
-                                : [];
-
-                            const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
-                            for (let k = 0; k < maxRecPayRows; k++) {
-                                const rpL = recPaysL[k];
-                                const rpR = recPaysR[k];
-
-                                let rCol0 = "";
-                                let rCol1 = "";
-                                if (rpL) {
-                                    const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
-                                    rCol0 = `        ${rpL.bill_name}${dateStr}`;
-                                    rCol1 = formatNum(rpL.Amount);
+                                let col0 = "";
+                                let col1 = "";
+                                let narrationL = "";
+                                if (txL) {
+                                    const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
+                                    const timeStr = formatTime(txL.Created_Time);
+                                    col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                    col1 = formatNum(getTransactionAmount(txL, leftSub.accId, leftGroup.side));
+                                    if (stages.narration) {
+                                        narrationL = (txL.Narration || txL.Line_Naration || "").trim();
+                                    }
                                 }
 
-                                let rCol2 = "";
-                                let rCol3 = "";
-                                if (rpR) {
-                                    const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
-                                    rCol2 = `        ${rpR.bill_name}${dateStr}`;
-                                    rCol3 = formatNum(rpR.Amount);
+                                let col2 = "";
+                                let col3 = "";
+                                let narrationR = "";
+                                if (txR) {
+                                    const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
+                                    const timeStr = formatTime(txR.Created_Time);
+                                    col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                    col3 = formatNum(getTransactionAmount(txR, rightSub.accId, rightGroup.side));
+                                    if (stages.narration) {
+                                        narrationR = (txR.Narration || txR.Line_Naration || "").trim();
+                                    }
                                 }
 
-                                pdfBody.push([rCol0, rCol1, rCol2, rCol3]);
+                                if (stages.transactions) {
+                                    pdfBody.push([col0, col1, col2, col3]);
+                                }
+
+                                if (stages.narration && (narrationL || narrationR)) {
+                                    pdfBody.push([
+                                        narrationL ? `        * ${narrationL}` : "",
+                                        "",
+                                        narrationR ? `        * ${narrationR}` : "",
+                                        ""
+                                    ]);
+                                }
+
+                                if (stages.recPay) {
+                                    const recPaysL = txL && txL.invoice_no && reportData?.RecPay
+                                        ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
+                                        : [];
+                                    const recPaysR = txR && txR.invoice_no && reportData?.RecPay
+                                        ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
+                                        : [];
+
+                                    const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
+                                    for (let k = 0; k < maxRecPayRows; k++) {
+                                        const rpL = recPaysL[k];
+                                        const rpR = recPaysR[k];
+
+                                        let rCol0 = "";
+                                        let rCol1 = "";
+                                        if (rpL) {
+                                            const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
+                                            rCol0 = `        ${rpL.bill_name}${dateStr}`;
+                                            rCol1 = formatNum(rpL.Amount);
+                                        }
+
+                                        let rCol2 = "";
+                                        let rCol3 = "";
+                                        if (rpR) {
+                                            const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
+                                            rCol2 = `        ${rpR.bill_name}${dateStr}`;
+                                            rCol3 = formatNum(rpR.Amount);
+                                        }
+
+                                        pdfBody.push([rCol0, rCol1, rCol2, rCol3]);
+                                    }
+                                }
                             }
                         }
                     }
                 }
+
+                pdfBody.push(["", "", "Closing Balance", formatNum(parsedData.closing)]);
+
+                autoTable(doc, {
+                    startY: 20,
+                    head: [["Particulars (Debit)", "Debit Amt", "Particulars (Credit)", "Credit amt"]],
+                    body: pdfBody,
+                    styles: { fontSize: 7.5, cellPadding: 1 },
+                    headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
+                    theme: "grid",
+                    didParseCell: (data) => {
+                        const valL = data.row.cells[0]?.text?.[0] || "";
+                        const valR = data.row.cells[2]?.text?.[0] || "";
+
+                        const isOpeningOrClosing = valL === "Opening Balance" || valR === "Opening Balance" ||
+                            valL === "Closing Balance" || valR === "Closing Balance";
+
+                        const isGroupHeader = DEBIT_GROUPS.some(g => g.label === valL) ||
+                            CREDIT_GROUPS.some(g => g.label === valR);
+
+                        const isSubledger = (valL && /^\s*\d+\./.test(valL)) || (valR && /^\s*\d+\./.test(valR));
+
+                        const isNestedTx = (valL && (valL.includes(" - ")) && !/^\s*\d+\./.test(valL)) ||
+                            (valR && (valR.includes(" - ")) && !/^\s*\d+\./.test(valR));
+
+                        const isNarration = (valL && valL.includes("* ")) || (valR && valR.includes("* "));
+
+                        const isRecPay = (valL && valL.startsWith("        ") && !valL.includes("* ")) ||
+                            (valR && valR.startsWith("        ") && !valR.includes("* "));
+
+                        if (isOpeningOrClosing) {
+                            data.cell.styles.fillColor = [238, 238, 238]; // EEEEEE
+                            data.cell.styles.fontStyle = "bold";
+                            data.cell.styles.textColor = [180, 83, 9]; // B45309
+                        } else if (isGroupHeader) {
+                            data.cell.styles.fillColor = [226, 232, 240]; // E2E8F0
+                            data.cell.styles.fontStyle = "bold";
+                            data.cell.styles.textColor = [30, 58, 138]; // 1E3A8A
+                        } else if (isSubledger) {
+                            data.cell.styles.fillColor = [248, 250, 252]; // F8FAFC
+                            data.cell.styles.textColor = [0, 0, 0];
+                        } else if (isNarration) {
+                            data.cell.styles.textColor = [79, 70, 229]; // Indigo: #4f46e5
+                            data.cell.styles.fontStyle = "italic";
+                            data.cell.styles.fontSize = 7;
+                        } else if (isRecPay) {
+                            data.cell.styles.textColor = [100, 116, 139]; // Slate: #64748B
+                            data.cell.styles.fontSize = 7;
+                        } else if (isNestedTx) {
+                            data.cell.styles.textColor = [85, 85, 85];
+                            data.cell.styles.fontStyle = "italic";
+                            data.cell.styles.fontSize = 7.5;
+                        }
+                    }
+                });
+            } else {
+                const pdfBody: any[][] = [];
+                pdfBody.push(["-", "-", "Opening Balance", "-", "-", "-", formatNum(totalOpeningBalance)]);
+
+                detailedReportSummary.groups.forEach((group: any) => {
+                    pdfBody.push([`${group.Account_name} (${group.Group_Name})`, "", "", "", "", "", ""]);
+                    group.transactions.forEach((tx: any, tIdx: number) => {
+                        pdfBody.push([
+                            tIdx + 1,
+                            tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : "",
+                            tx.Account_name || "",
+                            tx.Particulars || "",
+                            tx.Narration || tx.Line_Naration || "",
+                            Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-",
+                            Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-"
+                        ]);
+                    });
+                    pdfBody.push([`Sub Total (${group.Account_name})`, "", "", "", "", formatNum(group.totalDebit), formatNum(group.totalCredit)]);
+                });
+
+                pdfBody.push(["-", "-", "Closing Balance", "-", "-", "-", finalClosing]);
+
+                autoTable(doc, {
+                    startY: 20,
+                    head: [["S.No", "Date", "Ledger Name", "Particulars", "Narration", "Debit", "Credit"]],
+                    body: pdfBody,
+                    styles: { fontSize: 7, cellPadding: 1 },
+                    headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
+                    theme: "grid"
+                });
             }
 
-            pdfBody.push(["", "", "Closing Balance", formatNum(parsedData.closing)]);
-
-            autoTable(doc, {
-                startY: 20,
-                head: [["Particulars (Debit)", "Debit Amt", "Particulars (Credit)", "Credit amt"]],
-                body: pdfBody,
-                styles: { fontSize: 7.5, cellPadding: 1 },
-                headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
-                theme: "grid",
-                didParseCell: (data) => {
-                    const valL = data.row.cells[0]?.text?.[0] || "";
-                    const valR = data.row.cells[2]?.text?.[0] || "";
-
-                    const isOpeningOrClosing = valL === "Opening Balance" || valR === "Opening Balance" ||
-                        valL === "Closing Balance" || valR === "Closing Balance";
-
-                    const isGroupHeader = DEBIT_GROUPS.some(g => g.label === valL) ||
-                        CREDIT_GROUPS.some(g => g.label === valR);
-
-                    const isSubledger = (valL && /^\s*\d+\./.test(valL)) || (valR && /^\s*\d+\./.test(valR));
-
-                    const isNestedTx = (valL && valL.includes(" - ") && !/^\s*\d+\./.test(valL)) ||
-                        (valR && valR.includes(" - ") && !/^\s*\d+\./.test(valR));
-
-                    const isNarration = (valL && valL.includes("* ")) || (valR && valR.includes("* "));
-
-                    const isRecPay = (valL && valL.startsWith("        ") && !valL.includes("* ")) ||
-                        (valR && valR.startsWith("        ") && !valR.includes("* "));
-
-                    if (isOpeningOrClosing) {
-                        data.cell.styles.fillColor = [238, 238, 238]; // EEEEEE
-                        data.cell.styles.fontStyle = "bold";
-                        data.cell.styles.textColor = [180, 83, 9]; // B45309
-                    } else if (isGroupHeader) {
-                        data.cell.styles.fillColor = [226, 232, 240]; // E2E8F0
-                        data.cell.styles.fontStyle = "bold";
-                        data.cell.styles.textColor = [30, 58, 138]; // 1E3A8A
-                    } else if (isSubledger) {
-                        data.cell.styles.fillColor = [248, 250, 252]; // F8FAFC
-                        data.cell.styles.textColor = [0, 0, 0];
-                    } else if (isNarration) {
-                        data.cell.styles.textColor = [79, 70, 229]; // Indigo: #4f46e5
-                        data.cell.styles.fontStyle = "italic";
-                        data.cell.styles.fontSize = 7;
-                    } else if (isRecPay) {
-                        data.cell.styles.textColor = [100, 116, 139]; // Slate: #64748B
-                        data.cell.styles.fontSize = 7;
-                    } else if (isNestedTx) {
-                        data.cell.styles.textColor = [85, 85, 85];
-                        data.cell.styles.fontStyle = "italic";
-                        data.cell.styles.fontSize = 7.5;
-                    }
-                }
-            });
-
-            doc.save(`BankAbstract_Report_${dayjs().format("YYYYMMDD_HHmmss")}.pdf`);
+            doc.save(`BankBox_Report_${dayjs().format("YYYYMMDD_HHmmss")}.pdf`);
             toast.success("PDF Exported ✅");
         } catch (err) {
             console.error(err);
@@ -1227,7 +1378,7 @@ const BankAbstractReport: React.FC = () => {
     };
 
     return (
-        <Box sx={{ width: "100%", overflowX: "hidden", minHeight: "100vh", bgcolor: "#f1f5f9" }}>
+        <Box sx={{ width: "100%", minHeight: "100vh", bgcolor: "#f8fafc", overflowX: "hidden" }}>
             <PageHeader
                 onExportExcel={() => {
                     setExportType("excel");
@@ -1237,10 +1388,11 @@ const BankAbstractReport: React.FC = () => {
                     setExportType("pdf");
                     setExportModalOpen(true);
                 }}
+                toggleMode={toggleMode}
+                onToggleChange={(mode) => setToggleMode(mode)}
                 showPages={true}
             />
 
-            {/* Filter Drawer Toggle */}
             <ReportFilterDrawer
                 open={drawerOpen}
                 onClose={() => setDrawerOpen(false)}
@@ -1251,243 +1403,552 @@ const BankAbstractReport: React.FC = () => {
                 onToDateChange={setToDate}
                 onApply={() => {
                     setFilters({ Date: { from: fromDate, to: toDate } });
+                    setPage(1);
+                    setDrawerOpen(false);
                 }}
             />
 
             <Box px={2} pb={4} pt={2}>
-                {/* Chip Filters for Groups */}
-                {!loading && reportData && (
-                    <Box mb={2} display="flex" flexWrap="wrap" gap={1}>
-                        {["All", ...allGroupNames].map((name) => {
-                            const isSelected = selectedGroups.includes(name);
-                            return (
-                                <Button
-                                    key={name}
-                                    variant={isSelected ? "contained" : "outlined"}
-                                    onClick={() => handleGroupChipClick(name)}
-                                    sx={{
-                                        borderRadius: "20px",
-                                        textTransform: "none",
-                                        px: 2.5,
-                                        py: 0.5,
-                                        fontSize: "0.8rem",
-                                        fontWeight: 600,
-                                        borderColor: isSelected ? "#1E3A8A" : "#cbd5e1",
-                                        color: isSelected ? "#fff" : "#475569",
-                                        backgroundColor: isSelected ? "#1E3A8A" : "#fff",
-                                        "&:hover": {
-                                            backgroundColor: isSelected ? "#1e40af" : "#f1f5f9",
-                                            borderColor: isSelected ? "#1e40af" : "#94a3b8",
-                                        },
-                                    }}
-                                >
-                                    {name}
-                                </Button>
-                            );
-                        })}
+
+                {/* Header Filter Popup Menu */}
+                <Menu
+                    anchorEl={filterAnchor}
+                    open={Boolean(filterAnchor)}
+                    onClose={handleHeaderFilterClose}
+                    PaperProps={{
+                        sx: { width: 250, maxHeight: 350, p: 1 }
+                    }}
+                >
+                    <Box sx={{ p: 1 }}>
+                        <TextField
+                            size="small"
+                            placeholder="Search..."
+                            fullWidth
+                            value={searchText}
+                            onChange={(e) => setSearchText(e.target.value)}
+                            sx={{ mb: 1 }}
+                        />
+                        <MenuItem
+                            dense
+                            onClick={handleSelectAllColumnFilter}
+                            sx={{ fontWeight: 700, borderRadius: 1 }}
+                        >
+                            <Checkbox
+                                size="small"
+                                checked={
+                                    activeHeader
+                                        ? (columnFilters[activeHeader as keyof typeof columnFilters] || []).length === uniqueValuesForHeader.length
+                                        : false
+                                }
+                                indeterminate={
+                                    activeHeader
+                                        ? (columnFilters[activeHeader as keyof typeof columnFilters] || []).length > 0 &&
+                                        (columnFilters[activeHeader as keyof typeof columnFilters] || []).length < uniqueValuesForHeader.length
+                                        : false
+                                }
+                            />
+                            (Select All)
+                        </MenuItem>
+                        <Box sx={{ maxHeight: 200, overflowY: "auto" }}>
+                            {uniqueValuesForHeader
+                                .filter((val) => val.toLowerCase().includes(searchText.toLowerCase()))
+                                .map((val) => {
+                                    const isChecked = activeHeader
+                                        ? (columnFilters[activeHeader as keyof typeof columnFilters] || []).includes(val)
+                                        : false;
+                                    return (
+                                        <MenuItem
+                                            key={val}
+                                            dense
+                                            onClick={() => handleToggleColumnFilter(val)}
+                                            sx={{ borderRadius: 1 }}
+                                        >
+                                            <Checkbox size="small" checked={isChecked} />
+                                            <Typography variant="body2" noWrap>
+                                                {val}
+                                            </Typography>
+                                        </MenuItem>
+                                    );
+                                })}
+                        </Box>
                     </Box>
+                </Menu>
+
+                {/* Filter Chips Bar */}
+                {toggleMode === "Abstract" ? (
+                    reportData && allGroupNames.length > 0 && (
+                        <Box
+                            display="flex"
+                            gap={1}
+                            flexWrap="wrap"
+                            mb={2}
+                            alignItems="center"
+                        >
+                            <Box
+                                onClick={() => handleGroupChipClick("All")}
+                                sx={{
+                                    px: 1.5,
+                                    py: 0.5,
+                                    borderRadius: "16px",
+                                    fontSize: "0.78rem",
+                                    fontWeight: "bold",
+                                    cursor: "pointer",
+                                    border: "1px solid",
+                                    transition: "all 0.2s",
+                                    backgroundColor: selectedGroups.includes("All") ? "#1e3a8a" : "#f1f5f9",
+                                    color: selectedGroups.includes("All") ? "#ffffff" : "#475569",
+                                    borderColor: selectedGroups.includes("All") ? "#1e3a8a" : "#cbd5e1",
+                                    "&:hover": {
+                                        backgroundColor: selectedGroups.includes("All") ? "#1e3a8a" : "#e2e8f0",
+                                    },
+                                }}
+                            >
+                                All
+                            </Box>
+                            {allGroupNames.map((gName) => {
+                                const isSelected = selectedGroups.includes(gName);
+                                return (
+                                    <Box
+                                        key={gName}
+                                        onClick={() => handleGroupChipClick(gName)}
+                                        sx={{
+                                            px: 1.5,
+                                            py: 0.5,
+                                            borderRadius: "16px",
+                                            fontSize: "0.78rem",
+                                            fontWeight: "bold",
+                                            cursor: "pointer",
+                                            border: "1px solid",
+                                            transition: "all 0.2s",
+                                            backgroundColor: isSelected ? "#1e3a8a" : "#f1f5f9",
+                                            color: isSelected ? "#ffffff" : "#475569",
+                                            borderColor: isSelected ? "#1e3a8a" : "#cbd5e1",
+                                            "&:hover": {
+                                                backgroundColor: isSelected ? "#1e3a8a" : "#e2e8f0",
+                                            },
+                                        }}
+                                    >
+                                        {gName}
+                                    </Box>
+                                );
+                            })}
+                        </Box>
+                    )
+                ) : (
+                    detailedData && detailedGroupNames.length > 0 && (
+                        <Box
+                            display="flex"
+                            gap={1}
+                            flexWrap="wrap"
+                            mb={2}
+                            alignItems="center"
+                        >
+                            <Box
+                                onClick={() => handleDetailedGroupChipClick("All")}
+                                sx={{
+                                    px: 1.5,
+                                    py: 0.5,
+                                    borderRadius: "16px",
+                                    fontSize: "0.78rem",
+                                    fontWeight: "bold",
+                                    cursor: "pointer",
+                                    border: "1px solid",
+                                    transition: "all 0.2s",
+                                    backgroundColor: selectedDetailedGroups.includes("All") ? "#1e3a8a" : "#f1f5f9",
+                                    color: selectedDetailedGroups.includes("All") ? "#ffffff" : "#475569",
+                                    borderColor: selectedDetailedGroups.includes("All") ? "#1e3a8a" : "#cbd5e1",
+                                    "&:hover": {
+                                        backgroundColor: selectedDetailedGroups.includes("All") ? "#1e3a8a" : "#e2e8f0",
+                                    },
+                                }}
+                            >
+                                All
+                            </Box>
+                            {detailedGroupNames.map((gName) => {
+                                const isSelected = selectedDetailedGroups.includes(gName);
+                                return (
+                                    <Box
+                                        key={gName}
+                                        onClick={() => handleDetailedGroupChipClick(gName)}
+                                        sx={{
+                                            px: 1.5,
+                                            py: 0.5,
+                                            borderRadius: "16px",
+                                            fontSize: "0.78rem",
+                                            fontWeight: "bold",
+                                            cursor: "pointer",
+                                            border: "1px solid",
+                                            transition: "all 0.2s",
+                                            backgroundColor: isSelected ? "#1e3a8a" : "#f1f5f9",
+                                            color: isSelected ? "#ffffff" : "#475569",
+                                            borderColor: isSelected ? "#1e3a8a" : "#cbd5e1",
+                                            "&:hover": {
+                                                backgroundColor: isSelected ? "#1e3a8a" : "#e2e8f0",
+                                            },
+                                        }}
+                                    >
+                                        {gName}
+                                    </Box>
+                                );
+                            })}
+                        </Box>
+                    )
                 )}
 
+                {/* Main Content */}
                 {loading ? (
-                    <Box display="flex" justifyContent="center" py={10}>
-                        <CircularProgress size={40} sx={{ color: "#1E3A8A" }} />
+                    <Box display="flex" justifyContent="center" p={5}>
+                        <CircularProgress />
                     </Box>
                 ) : (
                     <>
-                        {reportData && (
-                            <>
-                                {/* Transaction Header Banner */}
-                                <Box
-                                    sx={{
-                                        border: "1px solid #cbd5e1",
-                                        borderRadius: 1.5,
-                                        py: 1.2,
-                                        textAlign: "center",
-                                        mb: 3,
-                                        background: "#fff",
-                                        boxShadow: 1,
-                                    }}
-                                >
-                                    <Typography variant="body1" fontWeight={700} sx={{ letterSpacing: 0.5, color: "#1e293b" }}>
-                                        BANK ABSTRACT  {" "}
-                                        {filters.Date.from === filters.Date.to
-                                            ? dayjs(filters.Date.from).format("DD-MM-YYYY")
-                                            : `${dayjs(filters.Date.from).format("DD-MM-YYYY")} - ${dayjs(filters.Date.to).format("DD-MM-YYYY")}`}
-                                    </Typography>
-                                </Box>
+                        {/* Header Banner */}
+                        <Box
+                            sx={{
+                                border: "1px solid #cbd5e1",
+                                borderRadius: 2,
+                                py: 1.2,
+                                textAlign: "center",
+                                mb: 3,
+                                background: "#fff",
+                                boxShadow: 1,
+                            }}
+                        >
+                            <Typography variant="body1" fontWeight={700} sx={{ letterSpacing: 0.5, color: "#1e293b" }}>
+                                BANK BOX TRANSACTION {" "}
+                                {filters.Date.from === filters.Date.to
+                                    ? dayjs(filters.Date.from).format("DD-MM-YYYY")
+                                    : `${dayjs(filters.Date.from).format("DD-MM-YYYY")} - ${dayjs(filters.Date.to).format("DD-MM-YYYY")}`}
+                            </Typography>
+                        </Box>
+                        {toggleMode === "Abstract" ? (
+                            <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", width: "100%", overflowX: "hidden" }}>
+                                <Table size="small" sx={{ width: "100%", tableLayout: "fixed", "& .MuiTableCell-root": { fontSize: "0.78rem", py: 0.8, px: 1.5 } }}>
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.2, fontSize: "0.82rem", border: "1px solid #cbd5e1", width: "25%" }}>
+                                                Particulars
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.2, fontSize: "0.82rem", border: "1px solid #cbd5e1", width: "25%" }}>
+                                                Debit Amt
+                                            </TableCell>
+                                            <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.2, fontSize: "0.82rem", border: "1px solid #cbd5e1", width: "25%" }}>
+                                                Particulars
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.2, fontSize: "0.82rem", border: "1px solid #cbd5e1", width: "25%" }}>
+                                                Credit amt
+                                            </TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {/* OPENING ROW */}
+                                        <TableRow>
+                                            <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                            <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                            <TableCell sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1" }}>
+                                                Opening Balance
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1", color: "#b45309" }}>
+                                                {formatNum(parsedData.opening)}
+                                            </TableCell>
+                                        </TableRow>
 
-                                {/* Parallel Grid Table */}
-                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflowX: "auto" }}>
-                                    <Table size="small" sx={{ minWidth: 800 }} stickyHeader>
+                                        {/* GROUPS AND SUBLEDGERS */}
+                                        {DEBIT_GROUPS.map((_, idx) => {
+                                            const leftGroup = parsedData.debitGroups?.[idx];
+                                            const rightGroup = parsedData.creditGroups?.[idx];
+
+                                            if (!leftGroup || !rightGroup) return null;
+
+                                            const isExpandedLeft = Boolean(expanded[leftGroup.key]);
+                                            const isExpandedRight = Boolean(expanded[rightGroup.key]);
+
+                                            return (
+                                                <React.Fragment key={`group-row-${idx}`}>
+                                                    {/* Group Summary Row */}
+                                                    <TableRow sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
+                                                        <TableCell
+                                                            onClick={() => toggleGroup(leftGroup.key)}
+                                                            sx={{
+                                                                cursor: "pointer",
+                                                                fontWeight: 700,
+                                                                border: "1px solid #cbd5e1",
+                                                                userSelect: "none",
+                                                                py: 1.2,
+                                                                "&:hover": { backgroundColor: "#f1f5f9" }
+                                                            }}
+                                                        >
+                                                            <Box display="flex" alignItems="center" gap={1}>
+                                                                {leftGroup.label}
+                                                            </Box>
+                                                        </TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 700, border: "1px solid #cbd5e1" }}>
+                                                            {formatNum(leftGroup.total)}
+                                                        </TableCell>
+
+                                                        <TableCell
+                                                            onClick={() => toggleGroup(rightGroup.key)}
+                                                            sx={{
+                                                                cursor: "pointer",
+                                                                fontWeight: 700,
+                                                                border: "1px solid #cbd5e1",
+                                                                userSelect: "none",
+                                                                py: 1.2,
+                                                                "&:hover": { backgroundColor: "#f1f5f9" }
+                                                            }}
+                                                        >
+                                                            <Box display="flex" alignItems="center" gap={1}>
+                                                                {rightGroup.label}
+                                                            </Box>
+                                                        </TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 700, border: "1px solid #cbd5e1" }}>
+                                                            {formatNum(rightGroup.total)}
+                                                        </TableCell>
+                                                    </TableRow>
+
+                                                    {/* Expanded Sub-Ledgers Rows */}
+                                                    {(isExpandedLeft || isExpandedRight) &&
+                                                        Array.from({
+                                                            length: Math.max(
+                                                                isExpandedLeft ? leftGroup.subLedgers.length : 0,
+                                                                isExpandedRight ? rightGroup.subLedgers.length : 0
+                                                            ),
+                                                        }).map((_, i) => {
+                                                            const leftSub = isExpandedLeft ? leftGroup.subLedgers[i] : null;
+                                                            const rightSub = isExpandedRight ? rightGroup.subLedgers[i] : null;
+
+                                                            return (
+                                                                <TableRow key={`sub-${idx}-${i}`} sx={{ backgroundColor: "#f8fafc" }}>
+                                                                    {/* Left Subledger */}
+                                                                    {leftSub ? (
+                                                                        <>
+                                                                            <TableCell
+                                                                                onClick={() => handleLedgerClick(leftSub.accId, leftSub.name, "debit")}
+                                                                                sx={{
+                                                                                    pl: 5,
+                                                                                    border: "1px solid #cbd5e1",
+                                                                                    cursor: "pointer",
+                                                                                    color: "#000000",
+                                                                                    fontWeight: 600,
+                                                                                    "&:hover": { color: "#000000" }
+                                                                                }}
+                                                                            >
+                                                                                {i + 1}. {leftSub.name}
+                                                                            </TableCell>
+                                                                            <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
+                                                                                {formatNum(leftSub.amount)}
+                                                                            </TableCell>
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                                            <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                                        </>
+                                                                    )}
+
+                                                                    {/* Right Subledger */}
+                                                                    {rightSub ? (
+                                                                        <>
+                                                                            <TableCell
+                                                                                onClick={() => handleLedgerClick(rightSub.accId, rightSub.name, "credit")}
+                                                                                sx={{
+                                                                                    pl: 5,
+                                                                                    border: "1px solid #cbd5e1",
+                                                                                    cursor: "pointer",
+                                                                                    color: "#000000",
+                                                                                    fontWeight: 600,
+                                                                                    "&:hover": { color: "#000000" }
+                                                                                }}
+                                                                            >
+                                                                                {i + 1}. {rightSub.name}
+                                                                            </TableCell>
+                                                                            <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
+                                                                                {formatNum(rightSub.amount)}
+                                                                            </TableCell>
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                                            <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                                                        </>
+                                                                    )}
+                                                                </TableRow>
+                                                            );
+                                                        })}
+                                                </React.Fragment>
+                                            );
+                                        })}
+
+                                        {/* CLOSING ROW */}
+                                        <TableRow>
+                                            <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                            <TableCell sx={{ border: "1px solid #cbd5e1" }} />
+                                            <TableCell sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1" }}>
+                                                Closing Balance
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1", color: "#15803d" }}>
+                                                {formatNum(parsedData.closing)}
+                                            </TableCell>
+                                        </TableRow>
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        ) : (
+                            <>
+                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", width: "100%", overflowX: "hidden", maxHeight: "calc(100vh - 230px)" }}>
+                                    <Table size="small" sx={{ width: "100%", tableLayout: "fixed", "& .MuiTableCell-root": { fontSize: "0.72rem", py: 0.5, overflow: "hidden", textOverflow: "ellipsis" } }} stickyHeader>
                                         <TableHead>
                                             <TableRow>
-                                                <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
-                                                    Particulars
+                                                <TableCell align="center" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "4%", border: "1px solid #cbd5e1" }}>
+                                                    S.No
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 180, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
-                                                    Debit Amt
+                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "11%", border: "1px solid #cbd5e1" }}>
+                                                    Date
                                                 </TableCell>
-                                                <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
-                                                    Particulars
+                                                <TableCell
+                                                    onClick={(e) => handleHeaderClick(e, "Account_name")}
+                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "18%", border: "1px solid #cbd5e1", cursor: "pointer" }}
+                                                >
+                                                    <Box display="flex" alignItems="center" gap={0.5}>
+                                                        Ledger Name
+                                                        {columnFilters.Account_name.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffff" }} />}
+                                                    </Box>
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 180, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
-                                                    Credit amt
+                                                <TableCell
+                                                    onClick={(e) => handleHeaderClick(e, "Particulars")}
+                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "18%", border: "1px solid #cbd5e1", cursor: "pointer" }}
+                                                >
+                                                    <Box display="flex" alignItems="center" gap={0.5}>
+                                                        Particulars
+                                                        {columnFilters.Particulars.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffff" }} />}
+                                                    </Box>
+                                                </TableCell>
+                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "25%", border: "1px solid #cbd5e1" }}>
+                                                    Narration
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "12%", border: "1px solid #cbd5e1" }}>
+                                                    Debit
+                                                </TableCell>
+                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "12%", border: "1px solid #cbd5e1" }}>
+                                                    Credit
                                                 </TableCell>
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
-                                            {/* Opening row */}
-                                            <TableRow>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                <TableCell sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1" }}>
-                                                    Opening Balance
+                                            {/* ONE SINGLE OPENING BALANCE ROW AT THE TOP */}
+                                            <TableRow hover>
+                                                <TableCell align="center" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>-</TableCell>
+                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
+                                                <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }}>Opening Balance</TableCell>
+                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
+                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
+                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }}>
+                                                    -
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1", color: "#b45309" }}>
-                                                    {formatNum(parsedData.opening)}
+                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }}>
+                                                    {formatNum(totalOpeningBalance)}
                                                 </TableCell>
                                             </TableRow>
 
-                                            {/* Parallel Groups and Sub-ledgers */}
-                                            {parsedData.debitGroups.map((leftGroup, idx) => {
-                                                const rightGroup = parsedData.creditGroups[idx];
-                                                const isLeftExpanded = expanded[leftGroup.key];
-                                                const isRightExpanded = expanded[rightGroup.key];
-                                                const maxSubRows = Math.max(
-                                                    isLeftExpanded ? leftGroup.subLedgers.length : 0,
-                                                    isRightExpanded ? rightGroup.subLedgers.length : 0
-                                                );
+                                            {detailedReportSummary.groups.length === 0 ? (
+                                                <TableRow>
+                                                    <TableCell colSpan={7} align="center" sx={{ py: 6, color: "#94a3b8" }}>
+                                                        No detailed bank transactions match your filter criteria.
+                                                    </TableCell>
+                                                </TableRow>
+                                            ) : (
+                                                detailedReportSummary.groups.map((group: any, gIdx: number) => {
+                                                    const hasTransactions = group.transactions.length > 0;
 
-                                                return (
-                                                    <React.Fragment key={`${leftGroup.key}-${rightGroup.key}`}>
-                                                        <TableRow>
-                                                            {/* Left Group Header */}
-                                                            <TableCell
-                                                                onClick={() => toggleGroup(leftGroup.key)}
-                                                                sx={{
-                                                                    cursor: "pointer",
-                                                                    fontWeight: 700,
-                                                                    border: "1px solid #cbd5e1",
-                                                                    userSelect: "none",
-                                                                    py: 1.2,
-                                                                    "&:hover": { backgroundColor: "#f1f5f9" }
-                                                                }}
-                                                            >
-                                                                <Box display="flex" alignItems="center" gap={1}>
-                                                                    {leftGroup.label}
-                                                                </Box>
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 700, border: "1px solid #cbd5e1" }}>
-                                                                {formatNum(leftGroup.total)}
-                                                            </TableCell>
+                                                    return (
+                                                        <React.Fragment key={`detailed-group-${group.Acc_Id}-${gIdx}`}>
+                                                            {/* Group Name Header Row */}
+                                                            <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
+                                                                <TableCell colSpan={7} sx={{ fontWeight: 800, color: "#1e3a8a", py: 1, border: "1px solid #cbd5e1" }}>
+                                                                    {group.Account_name} ({group.Group_Name})
+                                                                </TableCell>
+                                                            </TableRow>
 
-                                                            {/* Right Group Header */}
-                                                            <TableCell
-                                                                onClick={() => toggleGroup(rightGroup.key)}
-                                                                sx={{
-                                                                    cursor: "pointer",
-                                                                    fontWeight: 700,
-                                                                    border: "1px solid #cbd5e1",
-                                                                    userSelect: "none",
-                                                                    py: 1.2,
-                                                                    "&:hover": { backgroundColor: "#f1f5f9" }
-                                                                }}
-                                                            >
-                                                                <Box display="flex" alignItems="center" gap={1}>
-                                                                    {rightGroup.label}
-                                                                </Box>
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 700, border: "1px solid #cbd5e1" }}>
-                                                                {formatNum(rightGroup.total)}
-                                                            </TableCell>
-                                                        </TableRow>
-
-                                                        {/* Sub-ledgers Parallel Rows */}
-                                                        {maxSubRows > 0 &&
-                                                            Array.from({ length: maxSubRows }).map((_, i) => {
-                                                                const leftSub = isLeftExpanded ? leftGroup.subLedgers[i] : null;
-                                                                const rightSub = isRightExpanded ? rightGroup.subLedgers[i] : null;
-
-                                                                return (
-                                                                    <TableRow key={`sub-${leftGroup.key}-${rightGroup.key}-${i}`} sx={{ bgcolor: "#fafafa" }}>
-                                                                        {/* Left Subledger */}
-                                                                        {leftSub ? (
-                                                                            <>
-                                                                                <TableCell
-                                                                                    onClick={() => handleLedgerClick(leftSub.accId, leftSub.name, "debit")}
-                                                                                    sx={{
-                                                                                        pl: 5,
-                                                                                        border: "1px solid #cbd5e1",
-                                                                                        cursor: "pointer",
-                                                                                        color: "#000000",
-                                                                                        fontWeight: 600,
-                                                                                        "&:hover": { color: "#000000" }
-                                                                                    }}
-                                                                                >
-                                                                                    {i + 1}. {leftSub.name}
-                                                                                </TableCell>
-                                                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
-                                                                                    {formatNum(leftSub.amount)}
-                                                                                </TableCell>
-                                                                            </>
-                                                                        ) : (
-                                                                            <>
-                                                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                                            </>
-                                                                        )}
-
-                                                                        {/* Right Subledger */}
-                                                                        {rightSub ? (
-                                                                            <>
-                                                                                <TableCell
-                                                                                    onClick={() => handleLedgerClick(rightSub.accId, rightSub.name, "credit")}
-                                                                                    sx={{
-                                                                                        pl: 5,
-                                                                                        border: "1px solid #cbd5e1",
-                                                                                        cursor: "pointer",
-                                                                                        color: "#000000",
-                                                                                        fontWeight: 600,
-                                                                                        "&:hover": { color: "#000000" }
-                                                                                    }}
-                                                                                >
-                                                                                    {i + 1}. {rightSub.name}
-                                                                                </TableCell>
-                                                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
-                                                                                    {formatNum(rightSub.amount)}
-                                                                                </TableCell>
-                                                                            </>
-                                                                        ) : (
-                                                                            <>
-                                                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                                            </>
-                                                                        )}
+                                                            {/* Transactions List */}
+                                                            {hasTransactions && group.transactions.map((tx: any, tIdx: number) => (
+                                                                <React.Fragment key={`tx-${tx.Trans_Id}-${tIdx}`}>
+                                                                    <TableRow hover>
+                                                                        <TableCell align="center" sx={{ border: "1px solid #cbd5e1" }}>
+                                                                            {(page - 1) * rowsPerPage + tIdx + 1}
+                                                                        </TableCell>
+                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }}>
+                                                                            {tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : ""}
+                                                                        </TableCell>
+                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }}>{tx.Account_name}</TableCell>
+                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }}>{tx.Particulars}</TableCell>
+                                                                        <TableCell sx={{ border: "1px solid #cbd5e1", maxWidth: 250, whiteSpace: "normal" }}>
+                                                                            <Box
+                                                                                sx={{
+                                                                                    display: "-webkit-box",
+                                                                                    WebkitLineClamp: 2,
+                                                                                    WebkitBoxOrient: "vertical",
+                                                                                    overflow: "hidden",
+                                                                                    textOverflow: "ellipsis",
+                                                                                    whiteSpace: "normal",
+                                                                                    wordBreak: "break-all"
+                                                                                }}
+                                                                            >
+                                                                                {tx.Narration || tx.Line_Naration || ""}
+                                                                            </Box>
+                                                                        </TableCell>
+                                                                        <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
+                                                                            {Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-"}
+                                                                        </TableCell>
+                                                                        <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
+                                                                            {Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-"}
+                                                                        </TableCell>
                                                                     </TableRow>
-                                                                );
-                                                            })}
-                                                    </React.Fragment>
-                                                );
-                                            })}
+                                                                </React.Fragment>
+                                                            ))}
 
-                                            {/* CLOSING ROW */}
-                                            <TableRow>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }} />
-                                                <TableCell sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1" }}>
-                                                    Closing Balance
+                                                            {/* Sub-Total Row */}
+                                                            <TableRow sx={{ backgroundColor: "#f8fafc" }}>
+                                                                <TableCell colSpan={5} align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1" }}>
+                                                                    Sub Total ({group.Account_name})
+                                                                </TableCell>
+                                                                <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }}>
+                                                                    {formatNum(group.totalDebit)}
+                                                                </TableCell>
+                                                                <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }}>
+                                                                    {formatNum(group.totalCredit)}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        </React.Fragment>
+                                                    );
+                                                })
+                                            )}
+
+                                            {/* ONE SINGLE CLOSING BALANCE ROW AT THE BOTTOM */}
+                                            <TableRow sx={{ backgroundColor: "#f8fafc" }}>
+                                                <TableCell align="center" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>-</TableCell>
+                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
+                                                <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }}>Closing Balance</TableCell>
+                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
+                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
+                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }}>
+                                                    -
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ py: 1, backgroundColor: "#eeeeeeff", fontWeight: 700, border: "1px solid #cbd5e1", color: "#15803d" }}>
-                                                    {formatNum(parsedData.closing)}
+                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }}>
+                                                    {formatNum(finalClosing)}
                                                 </TableCell>
                                             </TableRow>
                                         </TableBody>
                                     </Table>
                                 </TableContainer>
+                                <CommonPagination
+                                    totalRows={detailedReportSummary.totalRows}
+                                    page={page}
+                                    rowsPerPage={rowsPerPage}
+                                    onPageChange={setPage}
+                                    onRowsPerPageChange={setRowsPerPage}
+                                />
                             </>
                         )}
-
-
                     </>
                 )}
             </Box>
@@ -1526,14 +1987,12 @@ const BankAbstractReport: React.FC = () => {
                                 <TableRow sx={{ height: "33px" }}>
                                     <TableCell sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", height: "33px", py: 0 }}>Date</TableCell>
                                     <TableCell sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", height: "33px", py: 0 }}>Time</TableCell>
-                                    <TableCell sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", height: "33px", py: 0 }}>Voucher Type</TableCell>
-                                    <TableCell sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", height: "33px", py: 0 }}>Voucher No</TableCell>
                                     <TableCell sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", height: "33px", py: 0 }}>Ledgers</TableCell>
                                     <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", pr: 2, height: "33px", py: 0 }}>Amount</TableCell>
                                 </TableRow>
                                 {modalTransactions.length > 0 && (
                                     <TableRow>
-                                        <TableCell colSpan={5} sx={{ position: "sticky", top: "33px", zIndex: 2, fontWeight: 700, backgroundColor: "#f8fafc" }} align="right">Total</TableCell>
+                                        <TableCell colSpan={3} sx={{ position: "sticky", top: "33px", zIndex: 2, fontWeight: 700, backgroundColor: "#f8fafc" }} align="right">Total</TableCell>
                                         <TableCell align="right" sx={{ position: "sticky", top: "33px", zIndex: 2, fontWeight: 700, color: selectedLedger?.side === "debit" ? "#0f766e" : "#be123c", backgroundColor: "#f8fafc", pr: 2 }}>
                                             {formatNum(modalTotal)}
                                         </TableCell>
@@ -1543,7 +2002,7 @@ const BankAbstractReport: React.FC = () => {
                             <TableBody>
                                 {modalTransactions.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={6} align="center" sx={{ py: 4, color: "#94a3b8" }}>
+                                        <TableCell colSpan={4} align="center" sx={{ py: 4, color: "#94a3b8" }}>
                                             No transactions found.
                                         </TableCell>
                                     </TableRow>
@@ -1555,12 +2014,10 @@ const BankAbstractReport: React.FC = () => {
                                                 <TableRow hover>
                                                     <TableCell>{dayjs(tx.Ledger_Date).format("DD-MM-YYYY")}</TableCell>
                                                     <TableCell>{formatTime(tx.Created_Time)}</TableCell>
-                                                    <TableCell>{tx.voucher_name}</TableCell>
-                                                    <TableCell>{tx.invoice_no}</TableCell>
                                                     <TableCell>{getOpposingLedgerName(tx)}</TableCell>
                                                     <TableCell align="right" sx={{ fontWeight: 600, pr: 2 }}>
                                                         {formatNum(
-                                                            selectedLedger && allBankAccIdsSet.has(String(selectedLedger.accId).trim())
+                                                            selectedLedger && allBankAccIds.has(String(selectedLedger.accId).trim())
                                                                 ? (String(tx.Debit_Ac_Id).trim() === String(selectedLedger.accId).trim() ? tx.Dr_Amount : tx.Cr_Amount)
                                                                 : (selectedLedger?.side === "debit" ? tx.Dr_Amount : tx.Cr_Amount)
                                                         )}
@@ -1568,7 +2025,7 @@ const BankAbstractReport: React.FC = () => {
                                                 </TableRow>
                                                 {narration && (
                                                     <TableRow>
-                                                        <TableCell colSpan={6} sx={{ py: 0.5, borderTop: "none", color: "#4f46e5", fontWeight: 600, fontStyle: "italic", fontSize: "0.8rem", pl: 4 }}>
+                                                        <TableCell colSpan={4} sx={{ py: 0.5, borderTop: "none", color: "#4f46e5", fontWeight: 600, fontStyle: "italic", fontSize: "0.8rem", pl: 4 }}>
                                                             * {narration}
                                                         </TableCell>
                                                     </TableRow>
@@ -1583,11 +2040,9 @@ const BankAbstractReport: React.FC = () => {
                 </DialogContent>
             </Dialog>
 
-
-
             {/* Export Dialog Modal */}
-            <Dialog 
-                open={exportModalOpen} 
+            <Dialog
+                open={exportModalOpen}
                 onClose={() => setExportModalOpen(false)}
                 PaperProps={{
                     sx: {
@@ -1607,12 +2062,12 @@ const BankAbstractReport: React.FC = () => {
                         <CloseIcon />
                     </IconButton>
                 </DialogTitle>
-                
+
                 <DialogContent sx={{ p: 3, pt: 3 }}>
                     <Typography variant="body2" color="text.secondary" mb={3}>
                         Select how you would like to export your Bank Abstract report.
                     </Typography>
-                    
+
                     <Box display="flex" flexDirection="column" gap={2}>
                         {/* Option 1: Summary */}
                         <Box
@@ -1637,7 +2092,7 @@ const BankAbstractReport: React.FC = () => {
                                 Exports Group totals and Sub-ledger balances.
                             </Typography>
                         </Box>
-                        
+
                         {/* Option 2: Detailed */}
                         <Box
                             onClick={() => setExportDetails(true)}
@@ -1658,16 +2113,78 @@ const BankAbstractReport: React.FC = () => {
                                 Detailed Report
                             </Typography>
                             <Typography variant="body2" color="text.secondary" mt={0.5}>
-                                Includes individual transactions, timestamps, and narration.
+                                Includes individual transactions, timestamps, voucher details, narration, and RecPay breakdown.
                             </Typography>
+
+                            {exportDetails && (
+                                <Box
+                                    sx={{
+                                        mt: 2,
+                                        pt: 1.5,
+                                        borderTop: "1px dashed #94a3b8"
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <Typography variant="caption" fontWeight="bold" color="#1e40af" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                        Detailed Export Stages (Select options to include):
+                                    </Typography>
+                                    <Box display="flex" flexDirection="column" gap={0.5} mt={1}>
+                                        <FormControlLabel
+                                            control={
+                                                <Checkbox
+                                                    size="small"
+                                                    checked={detailedExportStages.transactions}
+                                                    onChange={(e) => setDetailedExportStages(prev => ({ ...prev, transactions: e.target.checked }))}
+                                                    sx={{ color: "#2563eb", "&.Mui-checked": { color: "#2563eb" } }}
+                                                />
+                                            }
+                                            label={
+                                                <Typography variant="body2" fontSize="0.82rem" color="#334155" fontWeight={500}>
+                                                    Stage 1: Basic Transactions & Timestamps
+                                                </Typography>
+                                            }
+                                        />
+                                        <FormControlLabel
+                                            control={
+                                                <Checkbox
+                                                    size="small"
+                                                    checked={detailedExportStages.narration}
+                                                    onChange={(e) => setDetailedExportStages(prev => ({ ...prev, narration: e.target.checked }))}
+                                                    sx={{ color: "#2563eb", "&.Mui-checked": { color: "#2563eb" } }}
+                                                />
+                                            }
+                                            label={
+                                                <Typography variant="body2" fontSize="0.82rem" color="#334155" fontWeight={500}>
+                                                    Stage 2: Narration (Voucher & Line Narration)
+                                                </Typography>
+                                            }
+                                        />
+                                        <FormControlLabel
+                                            control={
+                                                <Checkbox
+                                                    size="small"
+                                                    checked={detailedExportStages.recPay}
+                                                    onChange={(e) => setDetailedExportStages(prev => ({ ...prev, recPay: e.target.checked }))}
+                                                    sx={{ color: "#2563eb", "&.Mui-checked": { color: "#2563eb" } }}
+                                                />
+                                            }
+                                            label={
+                                                <Typography variant="body2" fontSize="0.82rem" color="#334155" fontWeight={500}>
+                                                    Stage 3: Receipt Payment Breakdown (Bill Settlement Details)
+                                                </Typography>
+                                            }
+                                        />
+                                    </Box>
+                                </Box>
+                            )}
                         </Box>
                     </Box>
-                    
+
                     <Box display="flex" justifyContent="flex-end" gap={1.5} mt={4}>
-                        <Button 
+                        <Button
                             onClick={() => setExportModalOpen(false)}
-                            sx={{ 
-                                color: '#64748b', 
+                            sx={{
+                                color: '#64748b',
                                 textTransform: 'none',
                                 fontWeight: 'semibold',
                                 borderRadius: '8px'
@@ -1675,17 +2192,17 @@ const BankAbstractReport: React.FC = () => {
                         >
                             Cancel
                         </Button>
-                        <Button 
+                        <Button
                             variant="contained"
                             onClick={() => {
                                 setExportModalOpen(false);
                                 if (exportType === "excel") {
-                                    handleExportExcel(exportDetails);
+                                    handleExportExcel(exportDetails, detailedExportStages);
                                 } else if (exportType === "pdf") {
-                                    handleExportPDF(exportDetails);
+                                    handleExportPDF(exportDetails, detailedExportStages);
                                 }
                             }}
-                            sx={{ 
+                            sx={{
                                 bgcolor: '#2563eb',
                                 '&:hover': { bgcolor: '#1d4ed8' },
                                 textTransform: 'none',

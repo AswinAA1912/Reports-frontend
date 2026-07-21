@@ -18,6 +18,8 @@ import {
     Menu,
     MenuItem,
     TextField,
+    Checkbox,
+    FormControlLabel,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import FilterAltIcon from "@mui/icons-material/FilterAlt";
@@ -176,6 +178,12 @@ const CashBoxReport: React.FC = () => {
     const [exportModalOpen, setExportModalOpen] = useState(false);
     const [exportType, setExportType] = useState<"excel" | "pdf" | null>(null);
     const [exportDetails, setExportDetails] = useState(false);
+    const [detailedExportStages, setDetailedExportStages] = useState({
+        transactions: true,
+        voucherDetails: true,
+        narration: true,
+        recPay: true,
+    });
     const [fromDate, setFromDate] = useState(today);
     const [toDate, setToDate] = useState(today);
     const [filters, setFilters] = useState({
@@ -970,7 +978,7 @@ const CashBoxReport: React.FC = () => {
         if (!detailedData || !detailedData.OB) return 0;
         const { OB } = detailedData;
         const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
-        
+
         let filteredOB = OB;
         if (isGroupFiltered) {
             filteredOB = OB.filter((ob: any) =>
@@ -1124,7 +1132,7 @@ const CashBoxReport: React.FC = () => {
     }, [modalTransactions, selectedLedger, getTransactionAmount]);
 
     // Excel Export
-    const handleExportExcel = (includeDetails: boolean = false) => {
+    const handleExportExcel = (includeDetails: boolean = false, stages = detailedExportStages) => {
         try {
             const excelData: any[][] = [];
             const dateStr =
@@ -1135,123 +1143,163 @@ const CashBoxReport: React.FC = () => {
             excelData.push([`CASH BOX TRANSACTION - ${dateStr}`]);
             excelData.push([]);
 
-            // Headers
-            excelData.push([
-                "Particulars (Debit)",
-                "Debit Amt",
-                "Particulars (Credit)",
-                "Credit amt",
-            ]);
-
-            // Opening row
-            excelData.push(["", "", "Opening Balance", parsedData.opening]);
-
-            // Parallel Groups and Sub-ledgers
-            for (let idx = 0; idx < parsedData.debitGroups.length; idx++) {
-                const leftGroup = parsedData.debitGroups[idx];
-                const rightGroup = parsedData.creditGroups[idx];
-
+            if (toggleMode === "Abstract") {
+                // Headers
                 excelData.push([
-                    leftGroup.label,
-                    leftGroup.total || "",
-                    rightGroup.label,
-                    rightGroup.total || "",
+                    "Particulars (Debit)",
+                    "Debit Amt",
+                    "Particulars (Credit)",
+                    "Credit amt",
                 ]);
 
-                const maxSubRows = Math.max(leftGroup.subLedgers.length, rightGroup.subLedgers.length);
-                for (let i = 0; i < maxSubRows; i++) {
-                    const leftSub = leftGroup.subLedgers[i];
-                    const rightSub = rightGroup.subLedgers[i];
+                // Opening row
+                excelData.push(["", "", "Opening Balance", parsedData.opening]);
 
-                    // Sub-ledger row
+                // Parallel Groups and Sub-ledgers
+                for (let idx = 0; idx < parsedData.debitGroups.length; idx++) {
+                    const leftGroup = parsedData.debitGroups[idx];
+                    const rightGroup = parsedData.creditGroups[idx];
+
                     excelData.push([
-                        leftSub ? `  ${i + 1}. ${leftSub.name}` : "",
-                        leftSub ? leftSub.amount : "",
-                        rightSub ? `  ${i + 1}. ${rightSub.name}` : "",
-                        rightSub ? rightSub.amount : "",
+                        leftGroup.label,
+                        leftGroup.total || "",
+                        rightGroup.label,
+                        rightGroup.total || "",
                     ]);
 
-                    if (includeDetails) {
-                        // Gather nested transactions for these sub-ledgers
-                        const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
-                        const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
-                        const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
+                    const maxSubRows = Math.max(leftGroup.subLedgers.length, rightGroup.subLedgers.length);
+                    for (let i = 0; i < maxSubRows; i++) {
+                        const leftSub = leftGroup.subLedgers[i];
+                        const rightSub = rightGroup.subLedgers[i];
 
-                        for (let j = 0; j < maxTxRows; j++) {
-                            const txL = leftTxs[j];
-                            const txR = rightTxs[j];
+                        // Sub-ledger row
+                        excelData.push([
+                            leftSub ? `  ${i + 1}. ${leftSub.name}` : "",
+                            leftSub ? leftSub.amount : "",
+                            rightSub ? `  ${i + 1}. ${rightSub.name}` : "",
+                            rightSub ? rightSub.amount : "",
+                        ]);
 
-                            let col0 = "";
-                            let col1: any = "";
-                            let narrationL = "";
-                            if (txL) {
-                                const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
-                                const timeStr = formatTime(txL.Created_Time);
-                                col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                                col1 = getTransactionAmount(txL, leftSub.accId, leftGroup.side);
-                                narrationL = (txL.Narration || txL.Line_Naration || "").trim();
-                            }
+                        if (includeDetails) {
+                            // Gather nested transactions for these sub-ledgers
+                            const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
+                            const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
+                            const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
 
-                            let col2 = "";
-                            let col3: any = "";
-                            let narrationR = "";
-                            if (txR) {
-                                const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
-                                const timeStr = formatTime(txR.Created_Time);
-                                col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                                col3 = getTransactionAmount(txR, rightSub.accId, rightGroup.side);
-                                narrationR = (txR.Narration || txR.Line_Naration || "").trim();
-                            }
+                            for (let j = 0; j < maxTxRows; j++) {
+                                const txL = leftTxs[j];
+                                const txR = rightTxs[j];
 
-                            excelData.push([col0, col1, col2, col3]);
-
-                            if (narrationL || narrationR) {
-                                excelData.push([
-                                    narrationL ? `        * ${narrationL}` : "",
-                                    "",
-                                    narrationR ? `        * ${narrationR}` : "",
-                                    ""
-                                ]);
-                            }
-
-                            // RecPay details below transaction
-                            const recPaysL = txL && txL.invoice_no && reportData?.RecPay
-                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
-                                : [];
-                            const recPaysR = txR && txR.invoice_no && reportData?.RecPay
-                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
-                                : [];
-
-                            const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
-                            for (let k = 0; k < maxRecPayRows; k++) {
-                                const rpL = recPaysL[k];
-                                const rpR = recPaysR[k];
-
-                                let rCol0 = "";
-                                let rCol1: any = "";
-                                if (rpL) {
-                                    const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
-                                    rCol0 = `        ${rpL.bill_name}${dateStr}`;
-                                    rCol1 = rpL.Amount;
+                                let col0 = "";
+                                let col1: any = "";
+                                let narrationL = "";
+                                if (txL) {
+                                    const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
+                                    const timeStr = formatTime(txL.Created_Time);
+                                    col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                    col1 = getTransactionAmount(txL, leftSub.accId, leftGroup.side);
+                                    if (stages.narration) {
+                                        narrationL = (txL.Narration || txL.Line_Naration || "").trim();
+                                    }
                                 }
 
-                                let rCol2 = "";
-                                let rCol3: any = "";
-                                if (rpR) {
-                                    const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
-                                    rCol2 = `        ${rpR.bill_name}${dateStr}`;
-                                    rCol3 = rpR.Amount;
+                                let col2 = "";
+                                let col3: any = "";
+                                let narrationR = "";
+                                if (txR) {
+                                    const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
+                                    const timeStr = formatTime(txR.Created_Time);
+                                    col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                    col3 = getTransactionAmount(txR, rightSub.accId, rightGroup.side);
+                                    if (stages.narration) {
+                                        narrationR = (txR.Narration || txR.Line_Naration || "").trim();
+                                    }
                                 }
 
-                                excelData.push([rCol0, rCol1, rCol2, rCol3]);
+                                if (stages.transactions) {
+                                    excelData.push([col0, col1, col2, col3]);
+                                }
+
+                                if (stages.narration && (narrationL || narrationR)) {
+                                    excelData.push([
+                                        narrationL ? `        * ${narrationL}` : "",
+                                        "",
+                                        narrationR ? `        * ${narrationR}` : "",
+                                        ""
+                                    ]);
+                                }
+
+                                // RecPay details below transaction
+                                if (stages.recPay) {
+                                    const recPaysL = txL && txL.invoice_no && reportData?.RecPay
+                                        ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
+                                        : [];
+                                    const recPaysR = txR && txR.invoice_no && reportData?.RecPay
+                                        ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
+                                        : [];
+
+                                    const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
+                                    for (let k = 0; k < maxRecPayRows; k++) {
+                                        const rpL = recPaysL[k];
+                                        const rpR = recPaysR[k];
+
+                                        let rCol0 = "";
+                                        let rCol1: any = "";
+                                        if (rpL) {
+                                            const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
+                                            rCol0 = `        ${rpL.bill_name}${dateStr}`;
+                                            rCol1 = rpL.Amount;
+                                        }
+
+                                        let rCol2 = "";
+                                        let rCol3: any = "";
+                                        if (rpR) {
+                                            const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
+                                            rCol2 = `        ${rpR.bill_name}${dateStr}`;
+                                            rCol3 = rpR.Amount;
+                                        }
+
+                                        excelData.push([rCol0, rCol1, rCol2, rCol3]);
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // Closing row
-            excelData.push(["", "", "Closing Balance", parsedData.closing]);
+                // Closing row
+                excelData.push(["", "", "Closing Balance", parsedData.closing]);
+            } else {
+                excelData.push([
+                    "S.No",
+                    "Date",
+                    "Ledger Name",
+                    "Particulars",
+                    "Narration",
+                    "Debit",
+                    "Credit"
+                ]);
+
+                excelData.push(["-", "-", "Opening Balance", "-", "-", "-", totalOpeningBalance]);
+
+                detailedReportSummary.groups.forEach((group: any) => {
+                    excelData.push([`${group.Account_name} (${group.Group_Name})`, "", "", "", "", "", ""]);
+                    group.transactions.forEach((tx: any, tIdx: number) => {
+                        excelData.push([
+                            tIdx + 1,
+                            tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : "",
+                            tx.Account_name || "",
+                            tx.Particulars || "",
+                            tx.Narration || tx.Line_Naration || "",
+                            Number(tx.Dr_Amount) > 0 ? Number(tx.Dr_Amount) : "",
+                            Number(tx.Cr_Amount) > 0 ? Number(tx.Cr_Amount) : ""
+                        ]);
+                    });
+                    excelData.push([`Sub Total (${group.Account_name})`, "", "", "", "", group.totalDebit, group.totalCredit]);
+                });
+
+                excelData.push(["-", "-", "Closing Balance", "-", "-", "-", finalClosing]);
+            }
 
             const ws = XLSX.utils.aoa_to_sheet(excelData);
             styleCashBoxWorksheet(ws);
@@ -1275,7 +1323,7 @@ const CashBoxReport: React.FC = () => {
     };
 
     // PDF Export
-    const handleExportPDF = (includeDetails: boolean = false) => {
+    const handleExportPDF = (includeDetails: boolean = false, stages = detailedExportStages) => {
         try {
             const doc = new jsPDF("landscape", "mm", "a4");
             const dateStr =
@@ -1287,165 +1335,205 @@ const CashBoxReport: React.FC = () => {
             doc.setFont("helvetica", "bold");
             doc.text(`CASH BOX TRANSACTION - ${dateStr}`, 148, 12, { align: "center" });
 
-            const pdfBody: any[][] = [];
-            pdfBody.push(["", "", "Opening Balance", formatNum(parsedData.opening)]);
+            if (toggleMode === "Abstract") {
+                const pdfBody: any[][] = [];
+                pdfBody.push(["", "", "Opening Balance", formatNum(parsedData.opening)]);
 
-            for (let idx = 0; idx < parsedData.debitGroups.length; idx++) {
-                const leftGroup = parsedData.debitGroups[idx];
-                const rightGroup = parsedData.creditGroups[idx];
-
-                pdfBody.push([
-                    leftGroup.label,
-                    leftGroup.total ? formatNum(leftGroup.total) : "-",
-                    rightGroup.label,
-                    rightGroup.total ? formatNum(rightGroup.total) : "-",
-                ]);
-
-                const maxSubRows = Math.max(leftGroup.subLedgers.length, rightGroup.subLedgers.length);
-                for (let i = 0; i < maxSubRows; i++) {
-                    const leftSub = leftGroup.subLedgers[i];
-                    const rightSub = rightGroup.subLedgers[i];
+                for (let idx = 0; idx < parsedData.debitGroups.length; idx++) {
+                    const leftGroup = parsedData.debitGroups[idx];
+                    const rightGroup = parsedData.creditGroups[idx];
 
                     pdfBody.push([
-                        leftSub ? `  ${i + 1}. ${leftSub.name}` : "",
-                        leftSub ? formatNum(leftSub.amount) : "",
-                        rightSub ? `  ${i + 1}. ${rightSub.name}` : "",
-                        rightSub ? formatNum(rightSub.amount) : "",
+                        leftGroup.label,
+                        leftGroup.total ? formatNum(leftGroup.total) : "-",
+                        rightGroup.label,
+                        rightGroup.total ? formatNum(rightGroup.total) : "-",
                     ]);
 
-                    if (includeDetails) {
-                        // Gather nested transactions for these sub-ledgers for PDF
-                        const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
-                        const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
-                        const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
+                    const maxSubRows = Math.max(leftGroup.subLedgers.length, rightGroup.subLedgers.length);
+                    for (let i = 0; i < maxSubRows; i++) {
+                        const leftSub = leftGroup.subLedgers[i];
+                        const rightSub = rightGroup.subLedgers[i];
 
-                        for (let j = 0; j < maxTxRows; j++) {
-                            const txL = leftTxs[j];
-                            const txR = rightTxs[j];
+                        pdfBody.push([
+                            leftSub ? `  ${i + 1}. ${leftSub.name}` : "",
+                            leftSub ? formatNum(leftSub.amount) : "",
+                            rightSub ? `  ${i + 1}. ${rightSub.name}` : "",
+                            rightSub ? formatNum(rightSub.amount) : "",
+                        ]);
 
-                            let col0 = "";
-                            let col1 = "";
-                            let narrationL = "";
-                            if (txL) {
-                                const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
-                                const timeStr = formatTime(txL.Created_Time);
-                                col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                                col1 = formatNum(getTransactionAmount(txL, leftSub.accId, leftGroup.side));
-                                narrationL = (txL.Narration || txL.Line_Naration || "").trim();
-                            }
+                        if (includeDetails) {
+                            // Gather nested transactions for these sub-ledgers for PDF
+                            const leftTxs = leftSub ? getTransactionsForLedger(leftSub.accId, leftGroup.side) : [];
+                            const rightTxs = rightSub ? getTransactionsForLedger(rightSub.accId, rightGroup.side) : [];
+                            const maxTxRows = Math.max(leftTxs.length, rightTxs.length);
 
-                            let col2 = "";
-                            let col3 = "";
-                            let narrationR = "";
-                            if (txR) {
-                                const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
-                                const timeStr = formatTime(txR.Created_Time);
-                                col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
-                                col3 = formatNum(getTransactionAmount(txR, rightSub.accId, rightGroup.side));
-                                narrationR = (txR.Narration || txR.Line_Naration || "").trim();
-                            }
+                            for (let j = 0; j < maxTxRows; j++) {
+                                const txL = leftTxs[j];
+                                const txR = rightTxs[j];
 
-                            pdfBody.push([col0, col1, col2, col3]);
-
-                            if (narrationL || narrationR) {
-                                pdfBody.push([
-                                    narrationL ? `        * ${narrationL}` : "",
-                                    "",
-                                    narrationR ? `        * ${narrationR}` : "",
-                                    ""
-                                ]);
-                            }
-
-                            // RecPay details below transaction for PDF
-                            const recPaysL = txL && txL.invoice_no && reportData?.RecPay
-                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
-                                : [];
-                            const recPaysR = txR && txR.invoice_no && reportData?.RecPay
-                                ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
-                                : [];
-
-                            const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
-                            for (let k = 0; k < maxRecPayRows; k++) {
-                                const rpL = recPaysL[k];
-                                const rpR = recPaysR[k];
-
-                                let rCol0 = "";
-                                let rCol1 = "";
-                                if (rpL) {
-                                    const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
-                                    rCol0 = `        ${rpL.bill_name}${dateStr}`;
-                                    rCol1 = formatNum(rpL.Amount);
+                                let col0 = "";
+                                let col1 = "";
+                                let narrationL = "";
+                                if (txL) {
+                                    const opposingName = getOpposingLedgerNameForExport(txL, leftSub.accId, leftGroup.side);
+                                    const timeStr = formatTime(txL.Created_Time);
+                                    col0 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                    col1 = formatNum(getTransactionAmount(txL, leftSub.accId, leftGroup.side));
+                                    if (stages.narration) {
+                                        narrationL = (txL.Narration || txL.Line_Naration || "").trim();
+                                    }
                                 }
 
-                                let rCol2 = "";
-                                let rCol3 = "";
-                                if (rpR) {
-                                    const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
-                                    rCol2 = `        ${rpR.bill_name}${dateStr}`;
-                                    rCol3 = formatNum(rpR.Amount);
+                                let col2 = "";
+                                let col3 = "";
+                                let narrationR = "";
+                                if (txR) {
+                                    const opposingName = getOpposingLedgerNameForExport(txR, rightSub.accId, rightGroup.side);
+                                    const timeStr = formatTime(txR.Created_Time);
+                                    col2 = `      ${opposingName}${timeStr && timeStr !== "-" ? ` - ${timeStr}` : ""}`;
+                                    col3 = formatNum(getTransactionAmount(txR, rightSub.accId, rightGroup.side));
+                                    if (stages.narration) {
+                                        narrationR = (txR.Narration || txR.Line_Naration || "").trim();
+                                    }
                                 }
 
-                                pdfBody.push([rCol0, rCol1, rCol2, rCol3]);
+                                if (stages.transactions) {
+                                    pdfBody.push([col0, col1, col2, col3]);
+                                }
+
+                                if (stages.narration && (narrationL || narrationR)) {
+                                    pdfBody.push([
+                                        narrationL ? `        * ${narrationL}` : "",
+                                        "",
+                                        narrationR ? `        * ${narrationR}` : "",
+                                        ""
+                                    ]);
+                                }
+
+                                // RecPay details below transaction for PDF
+                                if (stages.recPay) {
+                                    const recPaysL = txL && txL.invoice_no && reportData?.RecPay
+                                        ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txL.invoice_no).trim())
+                                        : [];
+                                    const recPaysR = txR && txR.invoice_no && reportData?.RecPay
+                                        ? reportData.RecPay.filter(r => r.invoice_no && String(r.invoice_no).trim() === String(txR.invoice_no).trim())
+                                        : [];
+
+                                    const maxRecPayRows = Math.max(recPaysL.length, recPaysR.length);
+                                    for (let k = 0; k < maxRecPayRows; k++) {
+                                        const rpL = recPaysL[k];
+                                        const rpR = recPaysR[k];
+
+                                        let rCol0 = "";
+                                        let rCol1 = "";
+                                        if (rpL) {
+                                            const dateStr = rpL.INV_Date ? ` (${dayjs(rpL.INV_Date).format("DD-MM-YYYY")})` : "";
+                                            rCol0 = `        ${rpL.bill_name}${dateStr}`;
+                                            rCol1 = formatNum(rpL.Amount);
+                                        }
+
+                                        let rCol2 = "";
+                                        let rCol3 = "";
+                                        if (rpR) {
+                                            const dateStr = rpR.INV_Date ? ` (${dayjs(rpR.INV_Date).format("DD-MM-YYYY")})` : "";
+                                            rCol2 = `        ${rpR.bill_name}${dateStr}`;
+                                            rCol3 = formatNum(rpR.Amount);
+                                        }
+
+                                        pdfBody.push([rCol0, rCol1, rCol2, rCol3]);
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            pdfBody.push(["", "", "Closing Balance", formatNum(parsedData.closing)]);
+                pdfBody.push(["", "", "Closing Balance", formatNum(parsedData.closing)]);
 
-            autoTable(doc, {
-                startY: 20,
-                head: [["Particulars (Debit)", "Debit Amt", "Particulars (Credit)", "Credit amt"]],
-                body: pdfBody,
-                styles: { fontSize: 7.5, cellPadding: 1 },
-                headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
-                theme: "grid",
-                didParseCell: (data) => {
-                    const valL = data.row.cells[0]?.text?.[0] || "";
-                    const valR = data.row.cells[2]?.text?.[0] || "";
+                autoTable(doc, {
+                    startY: 20,
+                    head: [["Particulars (Debit)", "Debit Amt", "Particulars (Credit)", "Credit amt"]],
+                    body: pdfBody,
+                    styles: { fontSize: 7.5, cellPadding: 1 },
+                    headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
+                    theme: "grid",
+                    didParseCell: (data) => {
+                        const valL = data.row.cells[0]?.text?.[0] || "";
+                        const valR = data.row.cells[2]?.text?.[0] || "";
 
-                    const isOpeningOrClosing = valL === "Opening Balance" || valR === "Opening Balance" ||
-                        valL === "Closing Balance" || valR === "Closing Balance";
+                        const isOpeningOrClosing = valL === "Opening Balance" || valR === "Opening Balance" ||
+                            valL === "Closing Balance" || valR === "Closing Balance";
 
-                    const isGroupHeader = DEBIT_GROUPS.some(g => g.label === valL) ||
-                        CREDIT_GROUPS.some(g => g.label === valR);
+                        const isGroupHeader = DEBIT_GROUPS.some(g => g.label === valL) ||
+                            CREDIT_GROUPS.some(g => g.label === valR);
 
-                    const isSubledger = (valL && /^\s*\d+\./.test(valL)) || (valR && /^\s*\d+\./.test(valR));
+                        const isSubledger = (valL && /^\s*\d+\./.test(valL)) || (valR && /^\s*\d+\./.test(valR));
 
-                    const isNestedTx = (valL && valL.includes(" - ") && !/^\s*\d+\./.test(valL)) ||
-                        (valR && valR.includes(" - ") && !/^\s*\d+\./.test(valR));
+                        const isNestedTx = (valL && (valL.includes(" - ") || valL.includes("[")) && !/^\s*\d+\./.test(valL)) ||
+                            (valR && (valR.includes(" - ") || valR.includes("[")) && !/^\s*\d+\./.test(valR));
 
-                    const isNarration = (valL && valL.includes("* ")) || (valR && valR.includes("* "));
+                        const isNarration = (valL && valL.includes("* ")) || (valR && valR.includes("* "));
 
-                    const isRecPay = (valL && valL.startsWith("        ") && !valL.includes("* ")) ||
-                        (valR && valR.startsWith("        ") && !valR.includes("* "));
+                        const isRecPay = (valL && valL.startsWith("        ") && !valL.includes("* ")) ||
+                            (valR && valR.startsWith("        ") && !valR.includes("* "));
 
-                    if (isOpeningOrClosing) {
-                        data.cell.styles.fillColor = [238, 238, 238]; // EEEEEE
-                        data.cell.styles.fontStyle = "bold";
-                        data.cell.styles.textColor = [180, 83, 9]; // B45309
-                    } else if (isGroupHeader) {
-                        data.cell.styles.fillColor = [226, 232, 240]; // E2E8F0
-                        data.cell.styles.fontStyle = "bold";
-                        data.cell.styles.textColor = [30, 58, 138]; // 1E3A8A
-                    } else if (isSubledger) {
-                        data.cell.styles.fillColor = [248, 250, 252]; // F8FAFC
-                        data.cell.styles.textColor = [0, 0, 0];
-                    } else if (isNarration) {
-                        data.cell.styles.textColor = [79, 70, 229]; // Indigo: #4f46e5
-                        data.cell.styles.fontStyle = "italic";
-                        data.cell.styles.fontSize = 7;
-                    } else if (isRecPay) {
-                        data.cell.styles.textColor = [100, 116, 139]; // Slate: #64748B
-                        data.cell.styles.fontSize = 7;
-                    } else if (isNestedTx) {
-                        data.cell.styles.textColor = [85, 85, 85];
-                        data.cell.styles.fontStyle = "italic";
-                        data.cell.styles.fontSize = 7.5;
+                        if (isOpeningOrClosing) {
+                            data.cell.styles.fillColor = [238, 238, 238]; // EEEEEE
+                            data.cell.styles.fontStyle = "bold";
+                            data.cell.styles.textColor = [180, 83, 9]; // B45309
+                        } else if (isGroupHeader) {
+                            data.cell.styles.fillColor = [226, 232, 240]; // E2E8F0
+                            data.cell.styles.fontStyle = "bold";
+                            data.cell.styles.textColor = [30, 58, 138]; // 1E3A8A
+                        } else if (isSubledger) {
+                            data.cell.styles.fillColor = [248, 250, 252]; // F8FAFC
+                            data.cell.styles.textColor = [0, 0, 0];
+                        } else if (isNarration) {
+                            data.cell.styles.textColor = [79, 70, 229]; // Indigo: #4f46e5
+                            data.cell.styles.fontStyle = "italic";
+                            data.cell.styles.fontSize = 7;
+                        } else if (isRecPay) {
+                            data.cell.styles.textColor = [100, 116, 139]; // Slate: #64748B
+                            data.cell.styles.fontSize = 7;
+                        } else if (isNestedTx) {
+                            data.cell.styles.textColor = [85, 85, 85];
+                            data.cell.styles.fontStyle = "italic";
+                            data.cell.styles.fontSize = 7.5;
+                        }
                     }
-                }
-            });
+                });
+            } else {
+                const pdfBody: any[][] = [];
+                pdfBody.push(["-", "-", "Opening Balance", "-", "-", "-", formatNum(totalOpeningBalance)]);
+
+                detailedReportSummary.groups.forEach((group: any) => {
+                    pdfBody.push([`${group.Account_name} (${group.Group_Name})`, "", "", "", "", "", ""]);
+                    group.transactions.forEach((tx: any, tIdx: number) => {
+                        pdfBody.push([
+                            tIdx + 1,
+                            tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : "",
+                            tx.Account_name || "",
+                            tx.Particulars || "",
+                            tx.Narration || tx.Line_Naration || "",
+                            Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-",
+                            Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-"
+                        ]);
+                    });
+                    pdfBody.push([`Sub Total (${group.Account_name})`, "", "", "", "", formatNum(group.totalDebit), formatNum(group.totalCredit)]);
+                });
+
+                pdfBody.push(["-", "-", "Closing Balance", "-", "-", "-", formatNum(finalClosing)]);
+
+                autoTable(doc, {
+                    startY: 20,
+                    head: [["S.No", "Date", "Ledger Name", "Particulars", "Narration", "Debit", "Credit"]],
+                    body: pdfBody,
+                    styles: { fontSize: 7, cellPadding: 1 },
+                    headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
+                    theme: "grid"
+                });
+            }
 
             doc.save(`CashBox_Report_${dayjs().format("YYYYMMDD_HHmmss")}.pdf`);
             toast.success("PDF Exported ✅");
@@ -1578,20 +1666,20 @@ const CashBoxReport: React.FC = () => {
 
                         {/* Parallel Grid Table */}
                         {toggleMode === "Abstract" ? (
-                            <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflowX: "auto" }}>
-                                <Table size="small" sx={{ minWidth: 800 }}>
+                            <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", width: "100%", overflow: "hidden" }}>
+                                <Table size="small" sx={{ width: "100%", tableLayout: "fixed", "& .MuiTableCell-root": { fontSize: "0.78rem", py: 0.8, px: 1.5 } }}>
                                     <TableHead>
                                         <TableRow>
-                                            <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
+                                            <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.2, fontSize: "0.82rem", border: "1px solid #cbd5e1", width: "30%" }}>
                                                 Particulars
                                             </TableCell>
-                                            <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 180, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
+                                            <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.2, fontSize: "0.82rem", border: "1px solid #cbd5e1", width: "20%" }}>
                                                 Debit Amt
                                             </TableCell>
-                                            <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
+                                            <TableCell align="left" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.2, fontSize: "0.82rem", border: "1px solid #cbd5e1", width: "30%" }}>
                                                 Particulars
                                             </TableCell>
-                                            <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: 180, fontSize: "0.9rem", border: "1px solid #cbd5e1" }}>
+                                            <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.2, fontSize: "0.82rem", border: "1px solid #cbd5e1", width: "20%" }}>
                                                 Credit amt
                                             </TableCell>
                                         </TableRow>
@@ -1761,18 +1849,6 @@ const CashBoxReport: React.FC = () => {
                                                 <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>
                                                     Date
                                                 </TableCell>
-                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>
-                                                    Voucher No
-                                                </TableCell>
-                                                <TableCell
-                                                    onClick={(e) => handleHeaderClick(e, "voucher_name")}
-                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
-                                                >
-                                                    <Box display="flex" alignItems="center" gap={0.5}>
-                                                        VchType
-                                                        {columnFilters.voucher_name.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffff" }} />}
-                                                    </Box>
-                                                </TableCell>
                                                 <TableCell
                                                     onClick={(e) => handleHeaderClick(e, "Account_name")}
                                                     sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
@@ -1807,8 +1883,6 @@ const CashBoxReport: React.FC = () => {
                                             <TableRow hover>
                                                 <TableCell align="center" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>-</TableCell>
                                                 <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
                                                 <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }}>Opening Balance</TableCell>
                                                 <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
                                                 <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
@@ -1822,7 +1896,7 @@ const CashBoxReport: React.FC = () => {
 
                                             {detailedReportSummary.groups.length === 0 ? (
                                                 <TableRow>
-                                                    <TableCell colSpan={9} align="center" sx={{ py: 6, color: "#94a3b8" }}>
+                                                    <TableCell colSpan={7} align="center" sx={{ py: 6, color: "#94a3b8" }}>
                                                         No detailed cash transactions match your filter criteria.
                                                     </TableCell>
                                                 </TableRow>
@@ -1834,7 +1908,7 @@ const CashBoxReport: React.FC = () => {
                                                         <React.Fragment key={`detailed-group-${group.Acc_Id}-${gIdx}`}>
                                                             {/* Group Name Header Row */}
                                                             <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
-                                                                <TableCell colSpan={9} sx={{ fontWeight: 800, color: "#1e3a8a", py: 1, border: "1px solid #cbd5e1" }}>
+                                                                <TableCell colSpan={7} sx={{ fontWeight: 800, color: "#1e3a8a", py: 1, border: "1px solid #cbd5e1" }}>
                                                                     {group.Account_name} ({group.Group_Name})
                                                                 </TableCell>
                                                             </TableRow>
@@ -1849,8 +1923,6 @@ const CashBoxReport: React.FC = () => {
                                                                         <TableCell sx={{ border: "1px solid #cbd5e1" }}>
                                                                             {tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : ""}
                                                                         </TableCell>
-                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }}>{tx.invoice_no}</TableCell>
-                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }}>{tx.voucher_name}</TableCell>
                                                                         <TableCell sx={{ border: "1px solid #cbd5e1" }}>{tx.Account_name}</TableCell>
                                                                         <TableCell sx={{ border: "1px solid #cbd5e1" }}>{tx.Particulars}</TableCell>
                                                                         <TableCell sx={{ border: "1px solid #cbd5e1", maxWidth: 250, whiteSpace: "normal" }}>
@@ -1880,7 +1952,7 @@ const CashBoxReport: React.FC = () => {
 
                                                             {/* Sub-Total Row */}
                                                             <TableRow sx={{ backgroundColor: "#f8fafc" }}>
-                                                                <TableCell colSpan={7} align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1" }}>
+                                                                <TableCell colSpan={5} align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1" }}>
                                                                     Sub Total ({group.Account_name})
                                                                 </TableCell>
                                                                 <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }}>
@@ -1898,8 +1970,6 @@ const CashBoxReport: React.FC = () => {
                                             {/* ONE SINGLE CLOSING BALANCE ROW AT THE BOTTOM */}
                                             <TableRow sx={{ backgroundColor: "#f8fafc" }}>
                                                 <TableCell align="center" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>-</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
                                                 <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
                                                 <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }}>Closing Balance</TableCell>
                                                 <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
@@ -1961,14 +2031,12 @@ const CashBoxReport: React.FC = () => {
                                 <TableRow sx={{ height: "33px" }}>
                                     <TableCell sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", height: "33px", py: 0 }}>Date</TableCell>
                                     <TableCell sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", height: "33px", py: 0 }}>Time</TableCell>
-                                    <TableCell sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", height: "33px", py: 0 }}>Voucher Type</TableCell>
-                                    <TableCell sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", height: "33px", py: 0 }}>Voucher No</TableCell>
                                     <TableCell sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", height: "33px", py: 0 }}>Ledgers</TableCell>
                                     <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: "#f1f5f9", pr: 2, height: "33px", py: 0 }}>Amount</TableCell>
                                 </TableRow>
                                 {modalTransactions.length > 0 && (
                                     <TableRow>
-                                        <TableCell colSpan={5} sx={{ position: "sticky", top: "33px", zIndex: 2, fontWeight: 700, backgroundColor: "#f8fafc" }} align="right">Total</TableCell>
+                                        <TableCell colSpan={3} sx={{ position: "sticky", top: "33px", zIndex: 2, fontWeight: 700, backgroundColor: "#f8fafc" }} align="right">Total</TableCell>
                                         <TableCell align="right" sx={{ position: "sticky", top: "33px", zIndex: 2, fontWeight: 700, color: selectedLedger?.side === "debit" ? "#0f766e" : "#be123c", backgroundColor: "#f8fafc", pr: 2 }}>
                                             {formatNum(modalTotal)}
                                         </TableCell>
@@ -1978,7 +2046,7 @@ const CashBoxReport: React.FC = () => {
                             <TableBody>
                                 {modalTransactions.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={6} align="center" sx={{ py: 4, color: "#94a3b8" }}>
+                                        <TableCell colSpan={4} align="center" sx={{ py: 4, color: "#94a3b8" }}>
                                             No transactions found.
                                         </TableCell>
                                     </TableRow>
@@ -1990,8 +2058,6 @@ const CashBoxReport: React.FC = () => {
                                                 <TableRow hover>
                                                     <TableCell>{dayjs(tx.Ledger_Date).format("DD-MM-YYYY")}</TableCell>
                                                     <TableCell>{formatTime(tx.Created_Time)}</TableCell>
-                                                    <TableCell>{tx.voucher_name}</TableCell>
-                                                    <TableCell>{tx.invoice_no}</TableCell>
                                                     <TableCell>{getOpposingLedgerName(tx)}</TableCell>
                                                     <TableCell align="right" sx={{ fontWeight: 600, pr: 2 }}>
                                                         {formatNum(
@@ -2003,7 +2069,7 @@ const CashBoxReport: React.FC = () => {
                                                 </TableRow>
                                                 {narration && (
                                                     <TableRow>
-                                                        <TableCell colSpan={6} sx={{ py: 0.5, borderTop: "none", color: "#4f46e5", fontWeight: 600, fontStyle: "italic", fontSize: "0.8rem", pl: 4 }}>
+                                                        <TableCell colSpan={4} sx={{ py: 0.5, borderTop: "none", color: "#4f46e5", fontWeight: 600, fontStyle: "italic", fontSize: "0.8rem", pl: 4 }}>
                                                             * {narration}
                                                         </TableCell>
                                                     </TableRow>
@@ -2092,8 +2158,70 @@ const CashBoxReport: React.FC = () => {
                                 Detailed Report
                             </Typography>
                             <Typography variant="body2" color="text.secondary" mt={0.5}>
-                                Includes individual transactions, timestamps, and narration.
+                                Includes individual transactions, timestamps, voucher details, narration, and RecPay breakdown.
                             </Typography>
+
+                            {exportDetails && (
+                                <Box
+                                    sx={{
+                                        mt: 2,
+                                        pt: 1.5,
+                                        borderTop: "1px dashed #94a3b8"
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <Typography variant="caption" fontWeight="bold" color="#1e40af" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                        Detailed Export Stages (Select options to include):
+                                    </Typography>
+                                    <Box display="flex" flexDirection="column" gap={0.5} mt={1}>
+                                        <FormControlLabel
+                                            control={
+                                                <Checkbox
+                                                    size="small"
+                                                    checked={detailedExportStages.transactions}
+                                                    onChange={(e) => setDetailedExportStages(prev => ({ ...prev, transactions: e.target.checked }))}
+                                                    sx={{ color: "#2563eb", "&.Mui-checked": { color: "#2563eb" } }}
+                                                />
+                                            }
+                                            label={
+                                                <Typography variant="body2" fontSize="0.82rem" color="#334155" fontWeight={500}>
+                                                    Stage 1: Basic Transactions & Timestamps
+                                                </Typography>
+                                            }
+                                        />
+                                        <FormControlLabel
+                                            control={
+                                                <Checkbox
+                                                    size="small"
+                                                    checked={detailedExportStages.narration}
+                                                    onChange={(e) => setDetailedExportStages(prev => ({ ...prev, narration: e.target.checked }))}
+                                                    sx={{ color: "#2563eb", "&.Mui-checked": { color: "#2563eb" } }}
+                                                />
+                                            }
+                                            label={
+                                                <Typography variant="body2" fontSize="0.82rem" color="#334155" fontWeight={500}>
+                                                    Stage 2: Narration (Voucher & Line Narration)
+                                                </Typography>
+                                            }
+                                        />
+                                        <FormControlLabel
+                                            control={
+                                                <Checkbox
+                                                    size="small"
+                                                    checked={detailedExportStages.recPay}
+                                                    onChange={(e) => setDetailedExportStages(prev => ({ ...prev, recPay: e.target.checked }))}
+                                                    sx={{ color: "#2563eb", "&.Mui-checked": { color: "#2563eb" } }}
+                                                />
+                                            }
+                                            label={
+                                                <Typography variant="body2" fontSize="0.82rem" color="#334155" fontWeight={500}>
+                                                    Stage 3: Receipt Payment Breakdown (Bill Settlement Details)
+                                                </Typography>
+                                            }
+                                        />
+                                    </Box>
+                                </Box>
+                            )}
                         </Box>
                     </Box>
 
@@ -2114,9 +2242,9 @@ const CashBoxReport: React.FC = () => {
                             onClick={() => {
                                 setExportModalOpen(false);
                                 if (exportType === "excel") {
-                                    handleExportExcel(exportDetails);
+                                    handleExportExcel(exportDetails, detailedExportStages);
                                 } else if (exportType === "pdf") {
-                                    handleExportPDF(exportDetails);
+                                    handleExportPDF(exportDetails, detailedExportStages);
                                 }
                             }}
                             sx={{

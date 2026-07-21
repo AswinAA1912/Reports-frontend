@@ -57,14 +57,14 @@ const styleWorksheet = (ws: XLSX.WorkSheet) => {
             }
 
             const isSectionHeader = val && (
-                val === "SALES VOUCHER" || 
-                val === "PURCHASE VOUCHER" || 
-                val === "STOCK SUMMARY" || 
-                val === "GODOWN TABLE" || 
-                val === "STOCK JOURNAL" || 
-                val === "OUTWARD SUMMARY 1" || 
-                val === "OUTWARD SUMMARY 2" || 
-                val === "INWARD SUMMARY 1" || 
+                val === "SALES VOUCHER" ||
+                val === "PURCHASE VOUCHER" ||
+                val === "STOCK SUMMARY" ||
+                val === "GODOWN TABLE" ||
+                val === "STOCK JOURNAL" ||
+                val === "OUTWARD SUMMARY 1" ||
+                val === "OUTWARD SUMMARY 2" ||
+                val === "INWARD SUMMARY 1" ||
                 val === "INWARD SUMMARY 2" ||
                 val === "DATA 1" ||
                 val === "DATA 2" ||
@@ -186,19 +186,19 @@ const styleWorksheet = (ws: XLSX.WorkSheet) => {
                 const firstVal = String(firstCellOfRow.v).trim();
                 const firstValUpper = firstVal.toUpperCase();
                 const isNumber = !isNaN(Number(firstVal));
-                const isSpecial = isRowTotal || 
-                    firstValUpper === "S.NO" || 
-                    firstValUpper === "S NO" || 
-                    firstValUpper === "S.NO." || 
-                    firstValUpper === "S NO." || 
-                    firstValUpper.startsWith("STOCK ABSTRACT REPORT") || 
-                    firstValUpper === "SALES VOUCHER" || 
-                    firstValUpper === "PURCHASE VOUCHER" || 
-                    firstValUpper === "STOCK SUMMARY" || 
-                    firstValUpper === "GODOWN TABLE" || 
-                    firstValUpper === "STOCK JOURNAL" || 
-                    firstValUpper.startsWith("OUTWARD SUMMARY") || 
-                    firstValUpper.startsWith("INWARD SUMMARY") || 
+                const isSpecial = isRowTotal ||
+                    firstValUpper === "S.NO" ||
+                    firstValUpper === "S NO" ||
+                    firstValUpper === "S.NO." ||
+                    firstValUpper === "S NO." ||
+                    firstValUpper.startsWith("STOCK ABSTRACT REPORT") ||
+                    firstValUpper === "SALES VOUCHER" ||
+                    firstValUpper === "PURCHASE VOUCHER" ||
+                    firstValUpper === "STOCK SUMMARY" ||
+                    firstValUpper === "GODOWN TABLE" ||
+                    firstValUpper === "STOCK JOURNAL" ||
+                    firstValUpper.startsWith("OUTWARD SUMMARY") ||
+                    firstValUpper.startsWith("INWARD SUMMARY") ||
                     firstValUpper.startsWith("DATA ");
                 if (!isNumber && !isSpecial && firstVal !== "") {
                     isGroupRow = true;
@@ -252,7 +252,7 @@ const StockAbstractReport: React.FC = () => {
         if (!rawReportData) return null;
         return {
             ...rawReportData,
-            Data4: (rawReportData.Data4 || []).filter(row => 
+            Data4: (rawReportData.Data4 || []).filter(row =>
                 Number(row.OB_Qty || 0) !== 0 ||
                 Number(row.IN_Qty || 0) !== 0 ||
                 Number(row.ACt_OB_Qty || 0) !== 0 ||
@@ -472,16 +472,7 @@ const StockAbstractReport: React.FC = () => {
             return line;
         });
 
-        const data9Total: any[] = ["TOTAL", ""];
-        if (unitMode === "All" || unitMode === "Kg") {
-            const totalBalQty = (reportData.Data9 || []).reduce((sum, r) => sum + Number(r.Bal_Qty || 0), 0);
-            data9Total.push(totalBalQty);
-        }
-        if (unitMode === "All" || unitMode === "Chippam") {
-            const totalBalActQty = (reportData.Data9 || []).reduce((sum, r) => sum + Number(r.Bal_Act_Qty || 0), 0);
-            data9Total.push(totalBalActQty);
-        }
-        data9Rows.push(data9Total);
+
 
         XLSX.utils.sheet_add_json(ws, data9Rows, { origin: `A${row}`, skipHeader: true });
         row += data9Rows.length + 2;
@@ -619,7 +610,20 @@ const StockAbstractReport: React.FC = () => {
         let sno = 1;
 
         Object.entries(groups).forEach(([groupName, vouchers]: [string, any]) => {
-            data3Rows.push([groupName, "", "", "", "", ""]);
+            const groupIn = vouchers.reduce((sum: number, r: any) => sum + Number(r.IN_Qty || 0), 0);
+            const groupOut = vouchers.reduce((sum: number, r: any) => sum + Number(r.Out_Qty || 0), 0);
+            const groupActIn = vouchers.reduce((sum: number, r: any) => sum + Number(r.ACt_In_Qty || 0), 0);
+            const groupActOut = vouchers.reduce((sum: number, r: any) => sum + Number(r.ACt_Out_Qty || 0), 0);
+
+            const groupHeaderLine: any[] = ["", groupName];
+            if (unitMode === "All" || unitMode === "Chippam") {
+                groupHeaderLine.push(groupActIn, groupActOut);
+            }
+            if (unitMode === "All" || unitMode === "Kg") {
+                groupHeaderLine.push(groupIn, groupOut);
+            }
+            data3Rows.push(groupHeaderLine);
+
             vouchers.forEach((r: any) => {
                 const line = [sno++, r.voucher_name];
                 if (unitMode === "All" || unitMode === "Chippam") {
@@ -980,16 +984,7 @@ const StockAbstractReport: React.FC = () => {
             return line;
         });
 
-        const data9TotalPDF: any[] = ["TOTAL", ""];
-        if (unitMode === "All" || unitMode === "Kg") {
-            const totalBalQty = (reportData.Data9 || []).reduce((sum, r) => sum + Number(r.Bal_Qty || 0), 0);
-            data9TotalPDF.push(totalBalQty);
-        }
-        if (unitMode === "All" || unitMode === "Chippam") {
-            const totalBalActQty = (reportData.Data9 || []).reduce((sum, r) => sum + Number(r.Bal_Act_Qty || 0), 0);
-            data9TotalPDF.push(totalBalActQty);
-        }
-        data9Body.push(data9TotalPDF);
+
 
         const data9HeadersPDF = ["S.No", "Trans Type"];
         if (unitMode === "All" || unitMode === "Kg") {
@@ -1146,7 +1141,20 @@ const StockAbstractReport: React.FC = () => {
         let sno2 = 1;
 
         Object.entries(groups2).forEach(([groupName, vouchers]: [string, any]) => {
-            data3Body.push([groupName, "", "", "", "", ""]);
+            const groupIn = vouchers.reduce((sum: number, r: any) => sum + Number(r.IN_Qty || 0), 0);
+            const groupOut = vouchers.reduce((sum: number, r: any) => sum + Number(r.Out_Qty || 0), 0);
+            const groupActIn = vouchers.reduce((sum: number, r: any) => sum + Number(r.ACt_In_Qty || 0), 0);
+            const groupActOut = vouchers.reduce((sum: number, r: any) => sum + Number(r.ACt_Out_Qty || 0), 0);
+
+            const groupHeaderLine: any[] = [groupName, ""];
+            if (unitMode === "All" || unitMode === "Chippam") {
+                groupHeaderLine.push(groupActIn, groupActOut);
+            }
+            if (unitMode === "All" || unitMode === "Kg") {
+                groupHeaderLine.push(groupIn, groupOut);
+            }
+            data3Body.push(groupHeaderLine);
+
             vouchers.forEach((r: any) => {
                 const line = [sno2++, r.voucher_name];
                 if (unitMode === "All" || unitMode === "Chippam") {
@@ -1397,9 +1405,6 @@ const StockAbstractReport: React.FC = () => {
             );
         }
 
-        const totalBalQty = reportData.Data9.reduce((sum, r) => sum + Number(r.Bal_Qty || 0), 0);
-        const totalBalActQty = reportData.Data9.reduce((sum, r) => sum + Number(r.Bal_Act_Qty || 0), 0);
-
         return (
             <Paper sx={{ mb: 2, width: "fit-content", minWidth: "100%" }}>
                 <TableContainer sx={{ overflow: "visible" }}>
@@ -1429,16 +1434,6 @@ const StockAbstractReport: React.FC = () => {
                                     )}
                                 </TableRow>
                             ))}
-                            <TableRow sx={{ backgroundColor: "#F8FAFC" }}>
-                                <TableCell sx={{ fontWeight: 700 }}>TOTAL</TableCell>
-                                <TableCell />
-                                {(unitMode === "All" || unitMode === "Kg") && (
-                                    <TableCell align="right" sx={{ fontWeight: 700 }}>{formatQty(totalBalQty)}</TableCell>
-                                )}
-                                {(unitMode === "All" || unitMode === "Chippam") && (
-                                    <TableCell align="right" sx={{ fontWeight: 700 }}>{formatQty(totalBalActQty)}</TableCell>
-                                )}
-                            </TableRow>
                         </TableBody>
                     </Table>
                 </TableContainer>
@@ -1651,33 +1646,53 @@ const StockAbstractReport: React.FC = () => {
                             </TableRow>
                         </TableHead>
                         <TableBody>
-                            {Object.entries(groups).map(([groupName, vouchers]: [string, any]) => (
-                                <React.Fragment key={groupName}>
-                                    <TableRow sx={{ backgroundColor: "#e9eff5ff" }}>
-                                        <TableCell colSpan={unitMode === "All" ? 6 : 4} sx={{ fontWeight: 700, color: "#1E3A8A" }}>
-                                            {groupName}
-                                        </TableCell>
-                                    </TableRow>
-                                    {vouchers.map((row: any, i: number) => (
-                                        <TableRow key={i} sx={{ "&:hover": { backgroundColor: "#f8fafc" } }}>
-                                            <TableCell>{sno++}</TableCell>
-                                            <TableCell>{row.voucher_name}</TableCell>
+                            {Object.entries(groups).map(([groupName, vouchers]: [string, any]) => {
+                                const groupIn = vouchers.reduce((sum: number, r: any) => sum + Number(r.IN_Qty || 0), 0);
+                                const groupOut = vouchers.reduce((sum: number, r: any) => sum + Number(r.Out_Qty || 0), 0);
+                                const groupActIn = vouchers.reduce((sum: number, r: any) => sum + Number(r.ACt_In_Qty || 0), 0);
+                                const groupActOut = vouchers.reduce((sum: number, r: any) => sum + Number(r.ACt_Out_Qty || 0), 0);
+
+                                return (
+                                    <React.Fragment key={groupName}>
+                                        <TableRow sx={{ backgroundColor: "#e2e8f0" }}>
+                                            <TableCell />
+                                            <TableCell sx={{ fontWeight: 700, color: "#1E3A8A" }}>
+                                                {groupName}
+                                            </TableCell>
                                             {(unitMode === "All" || unitMode === "Chippam") && (
                                                 <>
-                                                    <TableCell align="right">{formatQty(row.ACt_In_Qty)}</TableCell>
-                                                    <TableCell align="right">{formatQty(row.ACt_Out_Qty)}</TableCell>
+                                                    <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A" }}>{formatQty(groupActIn)}</TableCell>
+                                                    <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A" }}>{formatQty(groupActOut)}</TableCell>
                                                 </>
                                             )}
                                             {(unitMode === "All" || unitMode === "Kg") && (
                                                 <>
-                                                    <TableCell align="right">{formatQty(row.IN_Qty)}</TableCell>
-                                                    <TableCell align="right">{formatQty(row.Out_Qty)}</TableCell>
+                                                    <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A" }}>{formatQty(groupIn)}</TableCell>
+                                                    <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A" }}>{formatQty(groupOut)}</TableCell>
                                                 </>
                                             )}
                                         </TableRow>
-                                    ))}
-                                </React.Fragment>
-                            ))}
+                                        {vouchers.map((row: any, i: number) => (
+                                            <TableRow key={i} sx={{ "&:hover": { backgroundColor: "#f8fafc" } }}>
+                                                <TableCell>{sno++}</TableCell>
+                                                <TableCell>{row.voucher_name}</TableCell>
+                                                {(unitMode === "All" || unitMode === "Chippam") && (
+                                                    <>
+                                                        <TableCell align="right">{formatQty(row.ACt_In_Qty)}</TableCell>
+                                                        <TableCell align="right">{formatQty(row.ACt_Out_Qty)}</TableCell>
+                                                    </>
+                                                )}
+                                                {(unitMode === "All" || unitMode === "Kg") && (
+                                                    <>
+                                                        <TableCell align="right">{formatQty(row.IN_Qty)}</TableCell>
+                                                        <TableCell align="right">{formatQty(row.Out_Qty)}</TableCell>
+                                                    </>
+                                                )}
+                                            </TableRow>
+                                        ))}
+                                    </React.Fragment>
+                                );
+                            })}
                             <TableRow sx={{ backgroundColor: "#F8FAFC" }}>
                                 <TableCell sx={{ fontWeight: 700 }}>TOTAL</TableCell>
                                 <TableCell />
@@ -1766,7 +1781,7 @@ const StockAbstractReport: React.FC = () => {
                             <TableRow sx={{ backgroundColor: "#F1F5F9", fontWeight: 700 }}>
                                 <TableCell sx={{ fontWeight: 700 }}>TOTAL</TableCell>
                                 <TableCell />
-                                 {(unitMode === "All" || unitMode === "Kg") && (
+                                {(unitMode === "All" || unitMode === "Kg") && (
                                     <>
                                         <TableCell align="right" sx={{ fontWeight: 700 }}>{formatQty(totalOB)}</TableCell>
                                         <TableCell align="right" sx={{ fontWeight: 700 }}>{formatQty(totalIn)}</TableCell>
@@ -1840,7 +1855,7 @@ const StockAbstractReport: React.FC = () => {
                                             <TableRow key={idx} sx={{ "&:hover": { backgroundColor: "#f8fafc" } }}>
                                                 <TableCell>{sno++}</TableCell>
                                                 <TableCell>{row.godown_name}</TableCell>
-                                                 {(unitMode === "All" || unitMode === "Kg") && (
+                                                {(unitMode === "All" || unitMode === "Kg") && (
                                                     <>
                                                         <TableCell align="right">{formatQty(row.OB_Qty)}</TableCell>
                                                         <TableCell align="right">{formatQty(row.IN_Qty)}</TableCell>
@@ -2365,7 +2380,7 @@ const StockAbstractReport: React.FC = () => {
                                 }
                             }}
                         >
-                            Save Snapshot
+                            Save
                         </Button>
                     </Box>
 

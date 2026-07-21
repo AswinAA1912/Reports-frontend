@@ -51,14 +51,14 @@ const styleWorksheet = (ws: XLSX.WorkSheet) => {
             }
 
             const isSectionHeader = val && (
-                val === "SALES VOUCHER" || 
-                val === "PURCHASE VOUCHER" || 
-                val === "STOCK SUMMARY" || 
-                val === "GODOWN TABLE" || 
-                val === "STOCK JOURNAL" || 
-                val === "OUTWARD SUMMARY 1" || 
-                val === "OUTWARD SUMMARY 2" || 
-                val === "INWARD SUMMARY 1" || 
+                val === "SALES VOUCHER" ||
+                val === "PURCHASE VOUCHER" ||
+                val === "STOCK SUMMARY" ||
+                val === "GODOWN TABLE" ||
+                val === "STOCK JOURNAL" ||
+                val === "OUTWARD SUMMARY 1" ||
+                val === "OUTWARD SUMMARY 2" ||
+                val === "INWARD SUMMARY 1" ||
                 val === "INWARD SUMMARY 2" ||
                 val === "DATA 1" ||
                 val === "DATA 2" ||
@@ -320,8 +320,26 @@ const DayAbstractReport: React.FC = () => {
             r.Trans_Type,
             r.Trans_Amount
         ]);
-        const data1Total = (reportData.Data1 || []).reduce((sum, r) => sum + Number(r.Trans_Amount || 0), 0);
-        data1Rows.push(["TOTAL", "", data1Total]);
+        const data1Closing = (reportData.Data1 || []).reduce((sum, r) => {
+            const type = String(r.Trans_Type || "").toLowerCase().trim();
+            const amt = Number(r.Trans_Amount || 0);
+            if (type.includes("cold storage")) {
+                return sum + amt;
+            }
+            if (
+                type.includes("payment") ||
+                type.includes("purchase") ||
+                type.includes("shortage") ||
+                type.includes("debit") ||
+                type.includes("expense") ||
+                type.includes("outflow") ||
+                type.includes("dr")
+            ) {
+                return sum - amt;
+            }
+            return sum + amt;
+        }, 0);
+        data1Rows.push(["CLOSING", "", data1Closing]);
         XLSX.utils.sheet_add_json(ws, data1Rows, { origin: `A${row}`, skipHeader: true });
         row += data1Rows.length + 2;
 
@@ -420,7 +438,7 @@ const DayAbstractReport: React.FC = () => {
         row += 1;
         XLSX.utils.sheet_add_aoa(ws, [["S No", "Expenses", "Credit", "Debit"]], { origin: `A${row}` });
         row += 1;
-        
+
         const data3Rows: any[] = [];
         const groups = getLedgerGroups();
         let sno = 1;
@@ -459,7 +477,7 @@ const DayAbstractReport: React.FC = () => {
         const data56Rows = [
             ["Receivable", creditors?.Cr_Amount || 0, "Receivable", debtors?.Cr_Amount || 0],
             ["Payable", creditors?.Dr_Amount || 0, "Payable", debtors?.Dr_Amount || 0],
-            ["Exp", creditors?.OPB_Amount || 0, "Exp", debtors?.OPB_Amount || 0]
+            ["", (Number(creditors?.Cr_Amount) || 0) - (Number(creditors?.Dr_Amount) || 0), "", (Number(debtors?.Cr_Amount) || 0) - (Number(debtors?.Dr_Amount) || 0)]
         ];
         XLSX.utils.sheet_add_json(ws, data56Rows, { origin: `A${row}`, skipHeader: true });
         row += data56Rows.length + 2;
@@ -525,13 +543,36 @@ const DayAbstractReport: React.FC = () => {
 
         addTitle("DATA 1");
 
+        const data1ClosingPDF = (reportData.Data1 || []).reduce((sum, r) => {
+            const type = String(r.Trans_Type || "").toLowerCase().trim();
+            const amt = Number(r.Trans_Amount || 0);
+            if (type.includes("cold storage")) {
+                return sum + amt;
+            }
+            if (
+                type.includes("payment") ||
+                type.includes("purchase") ||
+                type.includes("shortage") ||
+                type.includes("debit") ||
+                type.includes("expense") ||
+                type.includes("outflow") ||
+                type.includes("dr")
+            ) {
+                return sum - amt;
+            }
+            return sum + amt;
+        }, 0);
+
+        const data1BodyPDF = (reportData.Data1 || []).map((r) => [
+            r.Trans_Type,
+            formatAmount(r.Trans_Amount),
+        ]);
+        data1BodyPDF.push(["CLOSING", formatAmount(data1ClosingPDF)]);
+
         autoTable(doc, {
             startY: currentY,
             head: [["Type", "Amount"]],
-            body: (reportData.Data1 || []).map((r) => [
-                r.Trans_Type,
-                formatAmount(r.Trans_Amount),
-            ]),
+            body: data1BodyPDF,
             styles: { fontSize: 8 },
         });
 
@@ -656,7 +697,7 @@ const DayAbstractReport: React.FC = () => {
             body: [
                 ["Receivable", formatAmount(reportData.Data5?.[0]?.Cr_Amount)],
                 ["Payable", formatAmount(reportData.Data5?.[0]?.Dr_Amount)],
-                ["Exp", formatAmount(reportData.Data5?.[0]?.OPB_Amount)],
+                ["", formatAmount((Number(reportData.Data5?.[0]?.Cr_Amount) || 0) - (Number(reportData.Data5?.[0]?.Dr_Amount) || 0))],
             ],
             styles: { fontSize: 8 },
         });
@@ -762,12 +803,26 @@ const DayAbstractReport: React.FC = () => {
             );
         }
 
-        const totalAmount =
-            reportData.Data1.reduce(
-                (sum, row) =>
-                    sum + Number(row.Trans_Amount || 0),
-                0
-            );
+        const closingAmount =
+            reportData.Data1.reduce((sum, row) => {
+                const type = String(row.Trans_Type || "").toLowerCase().trim();
+                const amt = Number(row.Trans_Amount || 0);
+                if (type.includes("cold storage")) {
+                    return sum + amt;
+                }
+                if (
+                    type.includes("payment") ||
+                    type.includes("purchase") ||
+                    type.includes("shortage") ||
+                    type.includes("debit") ||
+                    type.includes("expense") ||
+                    type.includes("outflow") ||
+                    type.includes("dr")
+                ) {
+                    return sum - amt;
+                }
+                return sum + amt;
+            }, 0);
 
         return (
             <Paper
@@ -847,7 +902,7 @@ const DayAbstractReport: React.FC = () => {
                                         fontWeight: 700,
                                     }}
                                 >
-                                    TOTAL
+                                    CLOSING
                                 </TableCell>
 
                                 <TableCell />
@@ -856,10 +911,11 @@ const DayAbstractReport: React.FC = () => {
                                     align="right"
                                     sx={{
                                         fontWeight: 700,
+                                        color: closingAmount >= 0 ? "#15803D" : "#B91C1C"
                                     }}
                                 >
                                     {formatAmount(
-                                        totalAmount
+                                        closingAmount
                                     )}
                                 </TableCell>
                             </TableRow>
@@ -1734,23 +1790,19 @@ const DayAbstractReport: React.FC = () => {
                             <TableRow sx={{
                                 backgroundColor: "#F8FAFC",
                             }}>
-                                <TableCell>
-                                    Exp
-                                </TableCell>
+                                <TableCell />
 
                                 <TableCell align="right">
                                     {formatAmount(
-                                        creditors?.OPB_Amount
+                                        (Number(creditors?.Cr_Amount) || 0) - (Number(creditors?.Dr_Amount) || 0)
                                     )}
                                 </TableCell>
 
-                                <TableCell>
-                                    Exp
-                                </TableCell>
+                                <TableCell />
 
                                 <TableCell align="right">
                                     {formatAmount(
-                                        debtors?.OPB_Amount
+                                        (Number(debtors?.Cr_Amount) || 0) - (Number(debtors?.Dr_Amount) || 0)
                                     )}
                                 </TableCell>
                             </TableRow>

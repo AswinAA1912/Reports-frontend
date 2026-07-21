@@ -22,6 +22,20 @@ export const bankboxService = {
         return res.data.data;
     },
 
+    getBankBoxDetailedReport: async (params?: {
+        Fromdate?: string;
+        Todate?: string;
+    }): Promise<{ OB: any[]; Data: any[]; Group: any[] }> => {
+        const res = await axios.get<{
+            success: boolean;
+            data: { OB: any[]; Data: any[]; Group: any[] };
+        }>(
+            `${getBaseURL()}api/reports/externalAPI/bankListDetailed`,
+            { params }
+        );
+        return res.data.data;
+    },
+
     getChequeAccounts: async (): Promise<ChequeAccountOption[]> => {
         const res = await axios.get<{
             success: boolean;

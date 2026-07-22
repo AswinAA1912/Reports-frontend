@@ -25,7 +25,10 @@ import {
     OutlinedInput,
     Checkbox,
     ListItemText,
-    SelectChangeEvent
+    SelectChangeEvent,
+    Dialog,
+    DialogTitle,
+    DialogContent
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
@@ -52,7 +55,8 @@ import {
 import {
     godownwisestockreportservice,
     stockWiseReport,
-    stockInOutProcessService
+    stockInOutProcessService,
+    godownItemTransactionService
 } from "../../services/stockWiseReport.service";
 
 export interface ColumnConfig {
@@ -248,6 +252,173 @@ const InStockReport: React.FC = () => {
     const [godownListData, setGodownListData] = useState<StockAbstractData4[]>([]);
     const [detailedStockData, setDetailedStockData] = useState<stockWiseReport[]>([]);
     const [processApiData, setProcessApiData] = useState<any[]>([]);
+
+    // Map stockinoutprocess API data by item_id and godown_name
+    const mappedProcessData = useMemo(() => {
+        const mapByProductAndGodown: Record<string, any[]> = {};
+        const mapByProductIdOnly: Record<string, any[]> = {};
+        const mapByProductNameAndGodown: Record<string, any[]> = {};
+
+        processApiData.forEach((record) => {
+            const pId = String(record.item_id || record.product_id || record.Product_Id || "").trim();
+            const gName = String(record.godown_name || "").toLowerCase().trim();
+            const pName = String(record.stock_item_name || record.item_name || record.product_name || "").toLowerCase().trim();
+
+            if (pId) {
+                const key1 = `${pId}_${gName}`;
+                if (!mapByProductAndGodown[key1]) mapByProductAndGodown[key1] = [];
+                mapByProductAndGodown[key1].push(record);
+
+                if (!mapByProductIdOnly[pId]) mapByProductIdOnly[pId] = [];
+                mapByProductIdOnly[pId].push(record);
+            }
+
+            if (pName) {
+                const key2 = `${pName}_${gName}`;
+                if (!mapByProductNameAndGodown[key2]) mapByProductNameAndGodown[key2] = [];
+                mapByProductNameAndGodown[key2].push(record);
+            }
+        });
+
+        return { mapByProductAndGodown, mapByProductIdOnly, mapByProductNameAndGodown };
+    }, [processApiData]);
+
+    // Detailed transaction popup states
+    const [popupOpen, setPopupOpen] = useState(false);
+    const [popupLoading, setPopupLoading] = useState(false);
+    const [popupRows, setPopupRows] = useState<any[]>([]);
+    const [popupProductInfo, setPopupProductInfo] = useState<{ productId: number; productName: string; godownId: number; godownName: string } | null>(null);
+    const [popupFilterType, setPopupFilterType] = useState<string>('ALL');
+
+    const handleQuantityClick = async (productId: number | string | undefined, productName: string, filterType: string = 'ALL') => {
+        if (!productId || !selectedGodown) return;
+        const gId = Number(selectedGodown.godown_id);
+        const pId = Number(productId);
+        setPopupProductInfo({
+            productId: pId,
+            productName,
+            godownId: gId,
+            godownName: selectedGodown.godown_name
+        });
+        setPopupFilterType(filterType);
+        setPopupOpen(true);
+        setPopupLoading(true);
+        try {
+            const res = await godownItemTransactionService.getGodownItemTransactions({
+                fromDate,
+                toDate,
+                Product_Id: pId,
+                Godown_Id: gId
+            });
+            setPopupRows(res.data?.data || []);
+        } catch (err) {
+            console.error("Failed to load popup transactions:", err);
+            toast.error("Failed to load transaction details");
+            setPopupRows([]);
+        } finally {
+            setPopupLoading(false);
+        }
+    };
+
+    const ledgerRows = useMemo(() => {
+        let running = 0;
+        const sorted = [...popupRows].sort(
+            (a, b) => new Date(a.Ledger_Date).getTime() - new Date(b.Ledger_Date).getTime()
+        );
+        return sorted.map((row) => {
+            running += Number(row.In_Qty || 0) - Number(row.Out_Qty || 0);
+            return {
+                ...row,
+                runningBalance: running
+            };
+        });
+    }, [popupRows]);
+
+    const filteredPopupRows = useMemo(() => {
+        return ledgerRows.filter((r) => {
+            const isOB = r.invoice_no === "OB" || String(r.Particulars || "").toLowerCase() === "opening balance";
+            const isSJ = String(r.Particulars || "").toLowerCase() === "stock journal";
+
+            if (popupFilterType === "OB") {
+                return isOB;
+            }
+            if (popupFilterType === "IN") {
+                return Number(r.In_Qty || 0) > 0 && !isOB && !isSJ;
+            }
+            if (popupFilterType === "OUT") {
+                return Number(r.Out_Qty || 0) > 0 && !isSJ;
+            }
+            if (popupFilterType === "PROCESS") {
+                return isSJ;
+            }
+            if (popupFilterType === "PROCESS_IN") {
+                return isSJ && Number(r.In_Qty || 0) > 0;
+            }
+            if (popupFilterType === "PROCESS_OUT") {
+                return isSJ && Number(r.Out_Qty || 0) > 0;
+            }
+
+            // Lookup corresponding raw record from processApiData for trip / return / delivery filtering
+            if (popupProductInfo) {
+                const godownName = String(popupProductInfo.godownName || "").toLowerCase().trim();
+                const productIdStr = String(popupProductInfo.productId).trim();
+                const key1 = `${productIdStr}_${godownName}`;
+                let recs = mappedProcessData.mapByProductAndGodown[key1] || [];
+                if (recs.length === 0) {
+                    const rawRecs = mappedProcessData.mapByProductIdOnly[productIdStr];
+                    if (rawRecs) {
+                        recs = rawRecs.filter((pr: any) => {
+                            const rGodown = String(pr.godown_name || "").toLowerCase().trim();
+                            return !rGodown || rGodown === godownName;
+                        });
+                    }
+                }
+                const matchingRawRecord = recs.find(x => x.module_voucher_number === r.invoice_no);
+                if (matchingRawRecord) {
+                    const isTrip = (pr: any) => {
+                        return (
+                            pr.trip_voucher_number !== null ||
+                            pr.trip_id !== null ||
+                            (pr.Trip_No !== null && pr.Trip_No !== undefined && String(pr.Trip_No).trim() !== "") ||
+                            (pr.trip_no !== null && pr.trip_no !== undefined && String(pr.trip_no).trim() !== "")
+                        );
+                    };
+                    const getTripLabel = (pr: any): string => {
+                        const rawVal = pr.Trip_No || pr.trip_no || pr.trip_voucher_number || pr.trip_id;
+                        if (!rawVal) return "N/A";
+                        const str = String(rawVal).trim();
+                        if (str.toLowerCase().startsWith("trip")) {
+                            return str;
+                        }
+                        return `Trip - ${str}`;
+                    };
+
+                    if (popupFilterType === "RETURN") {
+                        return matchingRawRecord.stock_direction?.toUpperCase() === "IN" && !isTrip(matchingRawRecord);
+                    }
+                    if (popupFilterType === "PENDING DELIVERY") {
+                        return matchingRawRecord.stock_direction?.toUpperCase() === "OUT" && !isTrip(matchingRawRecord);
+                    }
+                    if (popupFilterType.startsWith("Trip")) {
+                        return isTrip(matchingRawRecord) && getTripLabel(matchingRawRecord) === popupFilterType;
+                    }
+                }
+            }
+
+            return true;
+        });
+    }, [ledgerRows, popupFilterType, popupProductInfo, mappedProcessData]);
+
+    const popupTotals = useMemo(() => {
+        let totalIn = 0;
+        let totalOut = 0;
+        filteredPopupRows.forEach(r => {
+            totalIn += Number(r.In_Qty || 0);
+            totalOut += Number(r.Out_Qty || 0);
+        });
+        const finalBalance = filteredPopupRows.length > 0 ? filteredPopupRows[filteredPopupRows.length - 1].runningBalance : 0;
+        return { totalIn, totalOut, finalBalance };
+    }, [filteredPopupRows]);
 
     const handleSetInwardMode = (val: boolean) => {
         setInwardMode(val);
@@ -448,42 +619,12 @@ const InStockReport: React.FC = () => {
         return { opening, stockIn, process, stockOut, closing };
     }, [godownListData, qtyMode]);
 
-    // Map stockinoutprocess API data by item_id and godown_name
-    const mappedProcessData = useMemo(() => {
-        const mapByProductAndGodown: Record<string, any[]> = {};
-        const mapByProductIdOnly: Record<string, any[]> = {};
-        const mapByProductNameAndGodown: Record<string, any[]> = {};
-
-        processApiData.forEach((record) => {
-            const pId = String(record.item_id || record.product_id || record.Product_Id || "").trim();
-            const gName = String(record.godown_name || "").toLowerCase().trim();
-            const pName = String(record.stock_item_name || record.item_name || record.product_name || "").toLowerCase().trim();
-
-            if (pId) {
-                const key1 = `${pId}_${gName}`;
-                if (!mapByProductAndGodown[key1]) mapByProductAndGodown[key1] = [];
-                mapByProductAndGodown[key1].push(record);
-
-                if (!mapByProductIdOnly[pId]) mapByProductIdOnly[pId] = [];
-                mapByProductIdOnly[pId].push(record);
-            }
-
-            if (pName) {
-                const key2 = `${pName}_${gName}`;
-                if (!mapByProductNameAndGodown[key2]) mapByProductNameAndGodown[key2] = [];
-                mapByProductNameAndGodown[key2].push(record);
-            }
-        });
-
-        return { mapByProductAndGodown, mapByProductIdOnly, mapByProductNameAndGodown };
-    }, [processApiData]);
-
     // Helper to get mapped details for a product
     const getProductDetails = useMemo(() => {
         return (item: stockWiseReport) => {
             const godownName = String(item.Godown_Name || selectedGodown?.godown_name || "").toLowerCase().trim();
             const productName = String(item.stock_item_name || item.Stock_Item || "").toLowerCase().trim();
-            
+
             let records: any[] = [];
             const productIds = (item as any).Product_Ids;
             const pIdsToSearch = Array.isArray(productIds) && productIds.length > 0 ? productIds : [item.Product_Id];
@@ -494,7 +635,13 @@ const InStockReport: React.FC = () => {
                 const key1 = `${strId}_${godownName}`;
                 let recs = mappedProcessData.mapByProductAndGodown[key1];
                 if (!recs || recs.length === 0) {
-                    recs = mappedProcessData.mapByProductIdOnly[strId];
+                    const rawRecs = mappedProcessData.mapByProductIdOnly[strId];
+                    if (rawRecs) {
+                        recs = rawRecs.filter((r: any) => {
+                            const rGodown = String(r.godown_name || "").toLowerCase().trim();
+                            return !rGodown || rGodown === godownName;
+                        });
+                    }
                 }
                 if (recs && recs.length > 0) {
                     records = [...records, ...recs];
@@ -623,11 +770,11 @@ const InStockReport: React.FC = () => {
 
         filteredDetailedData.forEach(item => {
             const groupKeyParts: string[] = [];
-            
+
             // Always group by Brand
             const brandVal = item.Brand || item.Group_Name || "Others";
             groupKeyParts.push(brandVal);
-            
+
             // Add other enabled columns that are NOT product-specific identifiers
             const excludedKeys = ["stock_item_name", "Stock_Item", "Product_Id", "POS_Item_Name", "Item_Name_Modified"];
             enabledConfigColumns.forEach(col => {
@@ -807,7 +954,7 @@ const InStockReport: React.FC = () => {
             }
         };
         window.addEventListener("resize", handleResize);
-        
+
         handleResize();
         const t = setTimeout(handleResize, 100);
 
@@ -964,7 +1111,7 @@ const InStockReport: React.FC = () => {
         const { procInQty, procOutQty } = getProductDetails(item);
         let pIn = procInQty > 0 ? procInQty : getProcIn(item);
         let pOut = procOutQty > 0 ? procOutQty : getProcOut(item);
-        
+
         let sum = 0;
         if (!hiddenProcessColumns.includes("PROCESS IN")) {
             sum += pIn;
@@ -1030,7 +1177,7 @@ const InStockReport: React.FC = () => {
                 if (inwardMode) {
                     const visibleTrips = inwardTripHeaders.filter(t => !hiddenInwardColumns.includes(t));
                     const isReturnVisible = !hiddenInwardColumns.includes("RETURN");
-                    
+
                     const inwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
                     if (isReturnVisible) inwardHeaderRow.push("Return");
                     inwardHeaderRow.push("Total Stock In");
@@ -1040,7 +1187,7 @@ const InStockReport: React.FC = () => {
                         const { trips, returnQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        
+
                         visibleTrips.forEach(tripLabel => {
                             const qty = getQtyForTrip(trips, tripLabel);
                             row.push(qty === 0 ? "-" : fmt(qty));
@@ -1055,7 +1202,7 @@ const InStockReport: React.FC = () => {
                 } else if (outwardMode) {
                     const visibleTrips = outwardTripHeaders.filter(t => !hiddenOutwardColumns.includes(t));
                     const isPendingVisible = !hiddenOutwardColumns.includes("PENDING DELIVERY");
-                    
+
                     const outwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
                     if (isPendingVisible) outwardHeaderRow.push("Pending Delivery");
                     outwardHeaderRow.push("Total Outward");
@@ -1065,7 +1212,7 @@ const InStockReport: React.FC = () => {
                         const { outTrips, deliveryQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        
+
                         visibleTrips.forEach(tripLabel => {
                             const qty = getQtyForTrip(outTrips, tripLabel);
                             row.push(qty === 0 ? "-" : fmt(qty));
@@ -1091,7 +1238,7 @@ const InStockReport: React.FC = () => {
                         const { procInQty, procOutQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
-                        
+
                         if (isProcessInVisible) row.push(fmt(procInQty));
                         if (isProcessOutVisible) row.push(fmt(procOutQty));
                         row.push(fmt(getRecalculatedProcessQty(item)));
@@ -1190,7 +1337,7 @@ const InStockReport: React.FC = () => {
                 if (inwardMode) {
                     const visibleTrips = inwardTripHeaders.filter(t => !hiddenInwardColumns.includes(t));
                     const isReturnVisible = !hiddenInwardColumns.includes("RETURN");
-                    
+
                     const inwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
                     if (isReturnVisible) inwardHeaderRow.push("Return");
                     inwardHeaderRow.push("Total Stock In");
@@ -2271,17 +2418,26 @@ const InStockReport: React.FC = () => {
                                                         const val = item[col.key] ?? "-";
                                                         const isProduct = col.key === "stock_item_name" || col.key === "Stock_Item";
                                                         const w = isProduct ? 280 : 150;
+                                                        const pId = item.Product_Id || (item as any).Product_Ids?.[0];
                                                         return (
                                                             <TableCell
                                                                 key={col.key}
+                                                                onClick={() => {
+                                                                    if (isProduct && pId) {
+                                                                        handleQuantityClick(pId, String(item.stock_item_name || item.Stock_Item || val), 'ALL');
+                                                                    }
+                                                                }}
                                                                 sx={{
                                                                     borderRight: "1px solid #e2e8f0",
                                                                     fontWeight: isProduct ? 700 : 600,
-                                                                    color: isProduct ? "#1e293b" : "#475569",
+                                                                    color: isProduct ? "#2563eb" : "#475569",
+                                                                    cursor: (isProduct && pId) ? "pointer" : "default",
+                                                                    textDecoration: (isProduct && pId) ? "underline" : "none",
                                                                     wordBreak: "break-word",
                                                                     whiteSpace: "normal",
                                                                     width: w,
-                                                                    minWidth: w
+                                                                    minWidth: w,
+                                                                    "&:hover": (isProduct && pId) ? { color: "#1d4ed8" } : {}
                                                                 }}
                                                             >
                                                                 {val}
@@ -2289,14 +2445,51 @@ const InStockReport: React.FC = () => {
                                                         );
                                                     })}
                                                     {!inwardMode && !outwardMode && !processMode && (
-                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
+                                                        <TableCell
+                                                            align="right"
+                                                            onClick={() => {
+                                                                if (openingStock !== 0) {
+                                                                    handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'OB');
+                                                                }
+                                                            }}
+                                                            sx={{
+                                                                borderRight: "1px solid #e2e8f0",
+                                                                fontWeight: 600,
+                                                                pr: 2,
+                                                                color: openingStock !== 0 ? "#2563eb" : "#475569",
+                                                                cursor: openingStock !== 0 ? "pointer" : "default",
+                                                                textDecoration: openingStock !== 0 ? "underline" : "none",
+                                                                width: 120,
+                                                                minWidth: 120,
+                                                                "&:hover": openingStock !== 0 ? { color: "#1d4ed8" } : {}
+                                                            }}
+                                                        >
                                                             {formatQtyVal(openingStock)}
                                                         </TableCell>
                                                     )}
 
                                                     {/* Inward Mode or Normal Mode: Render Stock In */}
                                                     {!inwardMode && !outwardMode && !processMode && (
-                                                        <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: getRecalculatedStockInQty(item) > 0 ? "#2563eb" : "#475569", width: 120, minWidth: 120 }}>
+                                                        <TableCell
+                                                            align="right"
+                                                            onClick={() => {
+                                                                const qtyVal = getRecalculatedStockInQty(item);
+                                                                if (qtyVal !== 0) {
+                                                                    handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'IN');
+                                                                }
+                                                            }}
+                                                            sx={{
+                                                                borderRight: "1px solid #e2e8f0",
+                                                                fontWeight: 600,
+                                                                pr: 2,
+                                                                color: getRecalculatedStockInQty(item) > 0 ? "#2563eb" : "#475569",
+                                                                cursor: getRecalculatedStockInQty(item) !== 0 ? "pointer" : "default",
+                                                                textDecoration: getRecalculatedStockInQty(item) !== 0 ? "underline" : "none",
+                                                                width: 120,
+                                                                minWidth: 120,
+                                                                "&:hover": getRecalculatedStockInQty(item) !== 0 ? { color: "#1d4ed8" } : {}
+                                                            }}
+                                                        >
                                                             {formatQtyVal(getRecalculatedStockInQty(item))}
                                                         </TableCell>
                                                     )}
@@ -2308,99 +2501,303 @@ const InStockReport: React.FC = () => {
                                                                 if (hiddenInwardColumns.includes(tripLabel)) return null;
                                                                 const qty = getQtyForTrip(trips, tripLabel);
                                                                 return (
-                                                                    <TableCell key={tripLabel} align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: qty > 0 ? "#1e293b" : "#94a3b8", width: 110, minWidth: 110 }}>
+                                                                    <TableCell
+                                                                        key={tripLabel}
+                                                                        align="right"
+                                                                        onClick={() => {
+                                                                            if (qty !== 0) {
+                                                                                handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, tripLabel);
+                                                                            }
+                                                                        }}
+                                                                        sx={{
+                                                                            borderRight: "1px solid #e2e8f0",
+                                                                            fontWeight: 600,
+                                                                            pr: 2,
+                                                                            color: qty > 0 ? "#2563eb" : "#94a3b8",
+                                                                            cursor: qty !== 0 ? "pointer" : "default",
+                                                                            textDecoration: qty !== 0 ? "underline" : "none",
+                                                                            width: 110,
+                                                                            minWidth: 110,
+                                                                            "&:hover": qty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                        }}
+                                                                    >
                                                                         {formatQtyVal(qty)}
                                                                     </TableCell>
                                                                 );
                                                             })}
                                                             {!hiddenInwardColumns.includes("RETURN") && (
-                                                                <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: returnQty > 0 ? "#475569" : "#475569", width: 120, minWidth: 120 }}>
+                                                                <TableCell
+                                                                    align="right"
+                                                                    onClick={() => {
+                                                                        if (returnQty !== 0) {
+                                                                            handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'RETURN');
+                                                                        }
+                                                                    }}
+                                                                    sx={{
+                                                                        borderRight: "1px solid #e2e8f0",
+                                                                        fontWeight: 600,
+                                                                        pr: 2,
+                                                                        color: returnQty > 0 ? "#2563eb" : "#475569",
+                                                                        cursor: returnQty !== 0 ? "pointer" : "default",
+                                                                        textDecoration: returnQty !== 0 ? "underline" : "none",
+                                                                        width: 120,
+                                                                        minWidth: 120,
+                                                                        "&:hover": returnQty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                    }}
+                                                                >
                                                                     {formatQtyVal(returnQty)}
                                                                 </TableCell>
                                                             )}
-                                                            <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af", width: 140, minWidth: 140 }}>
+                                                            <TableCell
+                                                                align="right"
+                                                                onClick={() => {
+                                                                    const qtyVal = getRecalculatedStockInQty(item);
+                                                                    if (qtyVal !== 0) {
+                                                                        handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'IN');
+                                                                    }
+                                                                }}
+                                                                sx={{
+                                                                    fontWeight: 700,
+                                                                    pr: 2,
+                                                                    backgroundColor: "#eff6ff",
+                                                                    color: getRecalculatedStockInQty(item) > 0 ? "#2563eb" : "#1e40af",
+                                                                    cursor: getRecalculatedStockInQty(item) !== 0 ? "pointer" : "default",
+                                                                    textDecoration: getRecalculatedStockInQty(item) !== 0 ? "underline" : "none",
+                                                                    width: 140,
+                                                                    minWidth: 140,
+                                                                    "&:hover": getRecalculatedStockInQty(item) !== 0 ? { color: "#1d4ed8" } : {}
+                                                                }}
+                                                            >
                                                                 {formatQtyVal(getRecalculatedStockInQty(item))}
-                                                             </TableCell>
-                                                         </>
-                                                     )}
+                                                            </TableCell>
+                                                        </>
+                                                    )}
 
-                                                     {/* Normal Mode: Render Process */}
-                                                     {!inwardMode && !outwardMode && !processMode && (
-                                                         <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
-                                                             {formatQtyVal(getRecalculatedProcessQty(item))}
-                                                         </TableCell>
-                                                     )}
+                                                    {/* Normal Mode: Render Process */}
+                                                    {!inwardMode && !outwardMode && !processMode && (
+                                                        <TableCell
+                                                            align="right"
+                                                            onClick={() => {
+                                                                const qtyVal = getRecalculatedProcessQty(item);
+                                                                if (qtyVal !== 0) {
+                                                                    handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'PROCESS');
+                                                                }
+                                                            }}
+                                                            sx={{
+                                                                borderRight: "1px solid #e2e8f0",
+                                                                fontWeight: 600,
+                                                                pr: 2,
+                                                                color: getRecalculatedProcessQty(item) !== 0 ? "#2563eb" : "#475569",
+                                                                cursor: getRecalculatedProcessQty(item) !== 0 ? "pointer" : "default",
+                                                                textDecoration: getRecalculatedProcessQty(item) !== 0 ? "underline" : "none",
+                                                                width: 120,
+                                                                minWidth: 120,
+                                                                "&:hover": getRecalculatedProcessQty(item) !== 0 ? { color: "#1d4ed8" } : {}
+                                                            }}
+                                                        >
+                                                            {formatQtyVal(getRecalculatedProcessQty(item))}
+                                                        </TableCell>
+                                                    )}
 
-                                                     {/* Process Mode: Render PROCESS IN, PROCESS OUT, and TOTAL PROCESS */}
-                                                     {processMode && (
-                                                         <>
-                                                             {!hiddenProcessColumns.includes("PROCESS IN") && (
-                                                                 <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
-                                                                     {formatQtyVal(procInQty)}
-                                                                 </TableCell>
-                                                             )}
-                                                             {!hiddenProcessColumns.includes("PROCESS OUT") && (
-                                                                 <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 120, minWidth: 120 }}>
-                                                                     {formatQtyVal(procOutQty)}
-                                                                 </TableCell>
-                                                             )}
-                                                             <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#eff6ff", color: "#1e40af", width: 140, minWidth: 140 }}>
-                                                                 {formatQtyVal(getRecalculatedProcessQty(item))}
-                                                             </TableCell>
-                                                         </>
-                                                     )}
+                                                    {/* Process Mode: Render PROCESS IN, PROCESS OUT, and TOTAL PROCESS */}
+                                                    {processMode && (
+                                                        <>
+                                                            {!hiddenProcessColumns.includes("PROCESS IN") && (
+                                                                <TableCell
+                                                                    align="right"
+                                                                    onClick={() => {
+                                                                        if (procInQty !== 0) {
+                                                                            handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'PROCESS_IN');
+                                                                        }
+                                                                    }}
+                                                                    sx={{
+                                                                        borderRight: "1px solid #e2e8f0",
+                                                                        fontWeight: 600,
+                                                                        pr: 2,
+                                                                        color: procInQty > 0 ? "#2563eb" : "#475569",
+                                                                        cursor: procInQty !== 0 ? "pointer" : "default",
+                                                                        textDecoration: procInQty !== 0 ? "underline" : "none",
+                                                                        width: 120,
+                                                                        minWidth: 120,
+                                                                        "&:hover": procInQty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                    }}
+                                                                >
+                                                                    {formatQtyVal(procInQty)}
+                                                                </TableCell>
+                                                            )}
+                                                            {!hiddenProcessColumns.includes("PROCESS OUT") && (
+                                                                <TableCell
+                                                                    align="right"
+                                                                    onClick={() => {
+                                                                        if (procOutQty !== 0) {
+                                                                            handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'PROCESS_OUT');
+                                                                        }
+                                                                    }}
+                                                                    sx={{
+                                                                        borderRight: "1px solid #e2e8f0",
+                                                                        fontWeight: 600,
+                                                                        pr: 2,
+                                                                        color: procOutQty > 0 ? "#2563eb" : "#475569",
+                                                                        cursor: procOutQty !== 0 ? "pointer" : "default",
+                                                                        textDecoration: procOutQty !== 0 ? "underline" : "none",
+                                                                        width: 120,
+                                                                        minWidth: 120,
+                                                                        "&:hover": procOutQty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                    }}
+                                                                >
+                                                                    {formatQtyVal(procOutQty)}
+                                                                </TableCell>
+                                                            )}
+                                                            <TableCell
+                                                                align="right"
+                                                                onClick={() => {
+                                                                    const qtyVal = getRecalculatedProcessQty(item);
+                                                                    if (qtyVal !== 0) {
+                                                                        handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'PROCESS');
+                                                                    }
+                                                                }}
+                                                                sx={{
+                                                                    fontWeight: 700,
+                                                                    pr: 2,
+                                                                    backgroundColor: "#eff6ff",
+                                                                    color: getRecalculatedProcessQty(item) !== 0 ? "#2563eb" : "#1e40af",
+                                                                    cursor: getRecalculatedProcessQty(item) !== 0 ? "pointer" : "default",
+                                                                    textDecoration: getRecalculatedProcessQty(item) !== 0 ? "underline" : "none",
+                                                                    width: 140,
+                                                                    minWidth: 140,
+                                                                    "&:hover": getRecalculatedProcessQty(item) !== 0 ? { color: "#1d4ed8" } : {}
+                                                                }}
+                                                            >
+                                                                {formatQtyVal(getRecalculatedProcessQty(item))}
+                                                            </TableCell>
+                                                        </>
+                                                    )}
 
-                                                     {/* Normal Mode: Render STOCK OUTWARDS */}
-                                                     {!inwardMode && !outwardMode && !processMode && (
-                                                         <TableCell
-                                                             align="right"
-                                                             sx={{
-                                                                 borderRight: "1px solid #e2e8f0",
-                                                                 fontWeight: 600,
-                                                                 pr: 2,
-                                                                 color: getRecalculatedStockOutQty(item) > 0 ? "#ef4444" : "#475569",
-                                                                 width: 120,
-                                                                 minWidth: 120
-                                                             }}
-                                                         >
-                                                             {formatQtyVal(getRecalculatedStockOutQty(item))}
-                                                         </TableCell>
-                                                     )}
+                                                    {/* Normal Mode: Render STOCK OUTWARDS */}
+                                                    {!inwardMode && !outwardMode && !processMode && (
+                                                        <TableCell
+                                                            align="right"
+                                                            onClick={() => {
+                                                                const qtyVal = getRecalculatedStockOutQty(item);
+                                                                if (qtyVal !== 0) {
+                                                                    handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'OUT');
+                                                                }
+                                                            }}
+                                                            sx={{
+                                                                borderRight: "1px solid #e2e8f0",
+                                                                fontWeight: 600,
+                                                                pr: 2,
+                                                                color: getRecalculatedStockOutQty(item) > 0 ? "#2563eb" : "#475569",
+                                                                cursor: getRecalculatedStockOutQty(item) !== 0 ? "pointer" : "default",
+                                                                textDecoration: getRecalculatedStockOutQty(item) !== 0 ? "underline" : "none",
+                                                                width: 120,
+                                                                minWidth: 120,
+                                                                "&:hover": getRecalculatedStockOutQty(item) !== 0 ? { color: "#1d4ed8" } : {}
+                                                            }}
+                                                        >
+                                                            {formatQtyVal(getRecalculatedStockOutQty(item))}
+                                                        </TableCell>
+                                                    )}
 
-                                                     {/* Outward Mode: Render dynamic TRIP columns, PENDING DELIVERY, and TOTAL OUTWARD */}
-                                                     {outwardMode && (
-                                                         <>
-                                                             {outwardTripHeaders.map((tripLabel) => {
-                                                                 if (hiddenOutwardColumns.includes(tripLabel)) return null;
-                                                                 const qty = getQtyForTrip(outTrips, tripLabel);
-                                                                 return (
-                                                                     <TableCell key={tripLabel} align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: qty > 0 ? "#1e293b" : "#94a3b8", width: 110, minWidth: 110 }}>
-                                                                         {formatQtyVal(qty)}
-                                                                     </TableCell>
-                                                                 );
-                                                             })}
-                                                             {!hiddenOutwardColumns.includes("PENDING DELIVERY") && (
-                                                                 <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569", width: 130, minWidth: 130 }}>
-                                                                     {formatQtyVal(deliveryQty)}
-                                                                 </TableCell>
-                                                             )}
-                                                             <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#fef2f2", color: "#b91c1c", width: 140, minWidth: 140 }}>
-                                                                 {formatQtyVal(getRecalculatedStockOutQty(item))}
-                                                             </TableCell>
-                                                         </>
-                                                     )}
+                                                    {/* Outward Mode: Render dynamic TRIP columns, PENDING DELIVERY, and TOTAL OUTWARD */}
+                                                    {outwardMode && (
+                                                        <>
+                                                            {outwardTripHeaders.map((tripLabel) => {
+                                                                if (hiddenOutwardColumns.includes(tripLabel)) return null;
+                                                                const qty = getQtyForTrip(outTrips, tripLabel);
+                                                                return (
+                                                                    <TableCell
+                                                                        key={tripLabel}
+                                                                        align="right"
+                                                                        onClick={() => {
+                                                                            if (qty !== 0) {
+                                                                                handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, tripLabel);
+                                                                            }
+                                                                        }}
+                                                                        sx={{
+                                                                            borderRight: "1px solid #e2e8f0",
+                                                                            fontWeight: 600,
+                                                                            pr: 2,
+                                                                            color: qty > 0 ? "#2563eb" : "#94a3b8",
+                                                                            cursor: qty !== 0 ? "pointer" : "default",
+                                                                            textDecoration: qty !== 0 ? "underline" : "none",
+                                                                            width: 110,
+                                                                            minWidth: 110,
+                                                                            "&:hover": qty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                        }}
+                                                                    >
+                                                                        {formatQtyVal(qty)}
+                                                                    </TableCell>
+                                                                );
+                                                            })}
+                                                            {!hiddenOutwardColumns.includes("PENDING DELIVERY") && (
+                                                                <TableCell
+                                                                    align="right"
+                                                                    onClick={() => {
+                                                                        if (deliveryQty !== 0) {
+                                                                            handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'PENDING DELIVERY');
+                                                                        }
+                                                                    }}
+                                                                    sx={{
+                                                                        borderRight: "1px solid #e2e8f0",
+                                                                        fontWeight: 600,
+                                                                        pr: 2,
+                                                                        color: deliveryQty > 0 ? "#2563eb" : "#475569",
+                                                                        cursor: deliveryQty !== 0 ? "pointer" : "default",
+                                                                        textDecoration: deliveryQty !== 0 ? "underline" : "none",
+                                                                        width: 130,
+                                                                        minWidth: 130,
+                                                                        "&:hover": deliveryQty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                    }}
+                                                                >
+                                                                    {formatQtyVal(deliveryQty)}
+                                                                </TableCell>
+                                                            )}
+                                                            <TableCell
+                                                                align="right"
+                                                                onClick={() => {
+                                                                    const qtyVal = getRecalculatedStockOutQty(item);
+                                                                    if (qtyVal !== 0) {
+                                                                        handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'OUT');
+                                                                    }
+                                                                }}
+                                                                sx={{
+                                                                    fontWeight: 700,
+                                                                    pr: 2,
+                                                                    backgroundColor: "#fef2f2",
+                                                                    color: getRecalculatedStockOutQty(item) > 0 ? "#2563eb" : "#b91c1c",
+                                                                    cursor: getRecalculatedStockOutQty(item) !== 0 ? "pointer" : "default",
+                                                                    textDecoration: getRecalculatedStockOutQty(item) !== 0 ? "underline" : "none",
+                                                                    width: 140,
+                                                                    minWidth: 140,
+                                                                    "&:hover": getRecalculatedStockOutQty(item) !== 0 ? { color: "#1d4ed8" } : {}
+                                                                }}
+                                                            >
+                                                                {formatQtyVal(getRecalculatedStockOutQty(item))}
+                                                            </TableCell>
+                                                        </>
+                                                    )}
 
                                                     {/* Normal Mode: Render CLOSING STOCK */}
                                                     {!inwardMode && !outwardMode && !processMode && (
                                                         <TableCell
                                                             align="right"
+                                                            onClick={() => {
+                                                                const qtyVal = getRecalculatedClosingStock(item);
+                                                                if (qtyVal !== 0) {
+                                                                    handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'ALL');
+                                                                }
+                                                            }}
                                                             sx={{
                                                                 fontWeight: 700,
                                                                 pr: 2,
                                                                 backgroundColor: getRecalculatedClosingStock(item) > 0 ? "#dcfce7" : "transparent",
-                                                                color: getRecalculatedClosingStock(item) > 0 ? "#15803d" : "#475569",
+                                                                color: getRecalculatedClosingStock(item) > 0 ? "#2563eb" : "#475569",
+                                                                cursor: getRecalculatedClosingStock(item) !== 0 ? "pointer" : "default",
+                                                                textDecoration: getRecalculatedClosingStock(item) !== 0 ? "underline" : "none",
                                                                 width: 120,
-                                                                minWidth: 120
+                                                                minWidth: 120,
+                                                                "&:hover": getRecalculatedClosingStock(item) !== 0 ? { color: "#1d4ed8" } : {}
                                                             }}
                                                         >
                                                             {formatQtyVal(getRecalculatedClosingStock(item))}
@@ -2563,6 +2960,116 @@ const InStockReport: React.FC = () => {
                     </Box>
                 </Box>
             </Menu>
+
+            {/* ===== DETAILED TRANSACTIONS POPUP ===== */}
+            <Dialog
+                open={popupOpen}
+                onClose={() => setPopupOpen(false)}
+                maxWidth="md"
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: 3,
+                        boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)"
+                    }
+                }}
+            >
+                <DialogTitle sx={{ m: 0, p: 2.5, display: "flex", justifyContent: "space-between", alignItems: "center", bgcolor: "#1E3A8A", color: "#fff" }}>
+                    <Box>
+                        <Typography variant="h6" component="div" fontWeight={700}>
+                            {popupProductInfo?.productName}
+                        </Typography>
+                        <Typography variant="caption" sx={{ opacity: 0.85, fontWeight: 500 }}>
+                            Godown: {popupProductInfo?.godownName} | Period: {dayjs(fromDate).format("DD/MM/YYYY")} - {dayjs(toDate).format("DD/MM/YYYY")}
+                            {popupFilterType !== 'ALL' && ` | View: ${popupFilterType === 'OB' ? 'Opening Stock' : popupFilterType === 'IN' ? 'In Qty' : popupFilterType === 'OUT' ? 'Out Qty' : popupFilterType === 'PROCESS' ? 'Process' : popupFilterType === 'PROCESS_IN' ? 'Process In' : popupFilterType === 'PROCESS_OUT' ? 'Process Out' : popupFilterType}`}
+                        </Typography>
+                    </Box>
+                    <IconButton
+                        aria-label="close"
+                        onClick={() => setPopupOpen(false)}
+                        sx={{
+                            color: "#fff",
+                            "&:hover": { bgcolor: "rgba(255,255,255,0.15)" }
+                        }}
+                    >
+                        <CloseIcon />
+                    </IconButton>
+                </DialogTitle>
+                <DialogContent dividers sx={{ p: 2.5, bgcolor: "#f8fafc" }}>
+                    {popupLoading ? (
+                        <Box display="flex" justifyContent="center" alignItems="center" minHeight={200}>
+                            <CircularProgress color="primary" />
+                        </Box>
+                    ) : (
+                        <>
+                            {/* Transactions Table */}
+                            <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid #cbd5e1", borderRadius: 2, maxHeight: 350 }}>
+                                <Table size="small" stickyHeader sx={{ "& .MuiTableCell-root": { py: 1.2 } }}>
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell align="center" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>S.NO</TableCell>
+                                            <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>DATE</TableCell>
+                                            <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>VOUCHER TYPE</TableCell>
+                                            <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>VOUCHER NO</TableCell>
+                                            <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>RETAILER</TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>IN QTY</TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>OUT QTY</TableCell>
+                                            <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>CLS</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {filteredPopupRows.length === 0 ? (
+                                            <TableRow>
+                                                <TableCell colSpan={8} align="center" sx={{ py: 4, color: "#64748b" }}>
+                                                    No transactions found.
+                                                </TableCell>
+                                            </TableRow>
+                                        ) : (
+                                            <>
+                                                {/* Total Row */}
+                                                <TableRow sx={{ bgcolor: "#eff6ff", "& .MuiTableCell-root": { fontWeight: 700, color: "#1e40af", borderBottom: "2px solid #cbd5e1" } }}>
+                                                    <TableCell align="center">-</TableCell>
+                                                    <TableCell>TOTAL</TableCell>
+                                                    <TableCell></TableCell>
+                                                    <TableCell></TableCell>
+                                                    <TableCell></TableCell>
+                                                    <TableCell align="right">
+                                                        {popupTotals.totalIn.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                    </TableCell>
+                                                    <TableCell align="right">
+                                                        {popupTotals.totalOut.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                    </TableCell>
+                                                    <TableCell align="right">
+                                                        {popupTotals.finalBalance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                    </TableCell>
+                                                </TableRow>
+                                                {filteredPopupRows.map((r, i) => (
+                                                    <TableRow key={i} hover sx={{ "&:hover": { bgcolor: "#f1f5f9" } }}>
+                                                        <TableCell align="center" sx={{ fontWeight: 600, color: "#64748b" }}>{i + 1}</TableCell>
+                                                        <TableCell>{dayjs(r.Ledger_Date).format("DD/MM/YYYY")}</TableCell>
+                                                        <TableCell>{r.voucher_name || "-"}</TableCell>
+                                                        <TableCell>{r.invoice_no || "-"}</TableCell>
+                                                        <TableCell>{r.Retailer_Name || "-"}</TableCell>
+                                                        <TableCell align="right" sx={{ color: Number(r.In_Qty || 0) > 0 ? "#16a34a" : "#64748b", fontWeight: Number(r.In_Qty || 0) > 0 ? 600 : 400 }}>
+                                                            {Number(r.In_Qty || 0) > 0 ? Number(r.In_Qty).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : "-"}
+                                                        </TableCell>
+                                                        <TableCell align="right" sx={{ color: Number(r.Out_Qty || 0) > 0 ? "#dc2626" : "#64748b", fontWeight: Number(r.Out_Qty || 0) > 0 ? 600 : 400 }}>
+                                                            {Number(r.Out_Qty || 0) > 0 ? Number(r.Out_Qty).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : "-"}
+                                                        </TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 600, color: "#1e293b" }}>
+                                                            {Number(r.runningBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        </>
+                    )}
+                </DialogContent>
+            </Dialog>
 
             {loading && (
                 <Box sx={{

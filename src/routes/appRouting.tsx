@@ -40,6 +40,7 @@ import BankAbstractReport from "../reports/Abstract/BankAbstractReport";
 import ChequeTransactionReport from "../reports/Abstract/ChequeTransactionReport";
 import PendingSaleOrder from "../reports/Sales/PendingSaleOrderReport";
 import InStockReport from "../reports/Stock/InStockReport";
+import SalesDeliveryReport from "../reports/Sales/salesDeliveryReport";
 import RetailerLocations from "./RetailerLocations";
 
 interface AppRoutingProps {
@@ -488,6 +489,17 @@ const AppRouting: React.FC<AppRoutingProps> = ({
             <RequireAuth>
               <AppLayout fullWidth>
                 <BankAbstractReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/salesDelivery"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <SalesDeliveryReport />
               </AppLayout>
             </RequireAuth>
           }

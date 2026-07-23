@@ -31,7 +31,21 @@ import { toast } from "react-toastify";
 import PageHeader, { ToggleMode } from "../../Layout/PageHeader";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import CommonPagination from "../../Components/CommonPagination";
+import { DndContext, closestCenter } from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
+import SettingsIcon from "@mui/icons-material/Settings";
+import Switch from "@mui/material/Switch";
+import Tooltip from "@mui/material/Tooltip";
 import { CashBoxReportResponse, CashBoxTransaction, CashBoxMasterAccount } from "../../services/cashbox.service";
+
+type ColumnConfig = {
+    key: string;
+    label: string;
+    enabled: boolean;
+    order: number;
+};
 import { bankboxService } from "../../services/bankbox.service";
 
 interface GroupConfig {
@@ -204,6 +218,188 @@ const BankAbstractReport: React.FC = () => {
     // Selected groups for Expanded view chip filter
     const [selectedDetailedGroups, setSelectedDetailedGroups] = useState<string[]>(["All"]);
 
+    const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
+    const [detailedColumns, setDetailedColumns] = useState<ColumnConfig[]>([
+        { key: "sno", label: "S.No", enabled: true, order: 0 },
+        { key: "Ledger_Date", label: "Date", enabled: true, order: 1 },
+        { key: "Created_on", label: "Time", enabled: true, order: 2 },
+        { key: "Account_name", label: "Ledger Name", enabled: true, order: 3 },
+        { key: "invoice_no", label: "Invoice No.", enabled: true, order: 4 },
+        { key: "Narration", label: "Narration", enabled: true, order: 5 },
+        { key: "Dr_Amount", label: "Debit", enabled: true, order: 6 },
+        { key: "Cr_Amount", label: "Credit", enabled: true, order: 7 },
+        { key: "Trans_Id", label: "Trans ID", enabled: false, order: 8 },
+        { key: "voucher_name", label: "Voucher Name", enabled: false, order: 9 },
+        { key: "Particulars", label: "Particulars", enabled: false, order: 10 },
+        { key: "Month_Year", label: "Month Year", enabled: false, order: 11 },
+        { key: "Debit_Names", label: "Debit Names", enabled: false, order: 12 },
+        { key: "Credit_Names", label: "Credit Names", enabled: false, order: 13 },
+        { key: "Group_Name", label: "Group Name", enabled: false, order: 14 }
+    ]);
+
+    const enabledColumns = useMemo(() => {
+        return detailedColumns
+            .filter(c => c.enabled)
+            .sort((a, b) => a.order - b.order);
+    }, [detailedColumns]);
+
+    const SortableColumnItem: React.FC<{
+        column: ColumnConfig;
+        showFilter: boolean;
+        onToggle: (key: string) => void;
+    }> = ({ column, showFilter, onToggle }) => {
+        const {
+            attributes,
+            listeners,
+            setNodeRef,
+            transform,
+            transition,
+        } = useSortable({ id: column.key });
+
+        const style = {
+            transform: CSS.Transform.toString(transform),
+            transition,
+        };
+
+        return (
+            <Box
+                ref={setNodeRef}
+                style={style}
+                display="flex"
+                alignItems="center"
+                gap={1}
+                px={2}
+                py={0.5}
+                mb={1}
+            >
+                {/* DRAG HANDLE */}
+                <IconButton
+                    size="small"
+                    {...listeners}
+                    {...attributes}
+                    sx={{ cursor: "grab" }}
+                >
+                    <DragIndicatorIcon fontSize="small" />
+                </IconButton>
+
+                {/* LABEL + FILTER ICON */}
+                <Box display="flex" alignItems="center" gap={1} sx={{ flex: 1 }}>
+                    <Typography fontSize="0.75rem">
+                        {column.label}
+                    </Typography>
+                    {showFilter && (
+                        <Tooltip title="Header filter enabled">
+                            <FilterAltIcon fontSize="small" color="action" />
+                        </Tooltip>
+                    )}
+                </Box>
+
+                {/* ENABLE / DISABLE SWITCH */}
+                <Switch
+                    size="medium"
+                    checked={column.enabled}
+                    onChange={() => onToggle(column.key)}
+                    sx={{
+                        "& .MuiSwitch-switchBase.Mui-checked": {
+                            color: "#1E3A8A",
+                        },
+                        "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
+                            backgroundColor: "#b5b9c4",
+                        },
+                        "& .MuiSwitch-track": {
+                            backgroundColor: "#CBD5E1",
+                        },
+                    }}
+                />
+            </Box>
+        );
+    };
+
+    const getWidth = (key: string) => {
+        switch (key) {
+            case "sno": return "4%";
+            case "Ledger_Date": return "10%";
+            case "Created_on": return "8%";
+            case "Account_name": return "17%";
+            case "invoice_no": return "14%";
+            case "Narration": return "23%";
+            case "Cr_Amount": return "12%";
+            case "Dr_Amount": return "12%";
+            default: return undefined;
+        }
+    };
+
+    const renderCell = (tx: any, colKey: string, tIdx: number) => {
+        switch (colKey) {
+            case "sno":
+                return (
+                    <TableCell align="center" sx={{ border: "1px solid #cbd5e1" }} key="sno">
+                        {(page - 1) * rowsPerPage + tIdx + 1}
+                    </TableCell>
+                );
+            case "Ledger_Date":
+                return (
+                    <TableCell sx={{ border: "1px solid #cbd5e1" }} key="Ledger_Date">
+                        {tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : ""}
+                    </TableCell>
+                );
+            case "Created_on":
+                return (
+                    <TableCell sx={{ border: "1px solid #cbd5e1" }} key="Created_on">
+                        {formatTime(tx.Created_on)}
+                    </TableCell>
+                );
+            case "Account_name":
+                return (
+                    <TableCell sx={{ border: "1px solid #cbd5e1" }} key="Account_name">
+                        {Number(tx.Dr_Amount) > 0 ? tx.Credit_Names : (Number(tx.Cr_Amount) > 0 ? tx.Debit_Names : tx.Account_name)}
+                    </TableCell>
+                );
+            case "invoice_no":
+                return (
+                    <TableCell sx={{ border: "1px solid #cbd5e1" }} key="invoice_no">
+                        {tx.invoice_no || "-"}
+                    </TableCell>
+                );
+            case "Narration":
+                return (
+                    <TableCell sx={{ border: "1px solid #cbd5e1", maxWidth: 250, whiteSpace: "normal" }} key="Narration">
+                        <Box
+                            sx={{
+                                display: "-webkit-box",
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: "vertical",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "normal",
+                                wordBreak: "break-all"
+                            }}
+                        >
+                            {tx.Narration || tx.Line_Naration || ""}
+                        </Box>
+                    </TableCell>
+                );
+            case "Dr_Amount":
+                return (
+                    <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }} key="Dr_Amount">
+                        {Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-"}
+                    </TableCell>
+                );
+            case "Cr_Amount":
+                return (
+                    <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }} key="Cr_Amount">
+                        {Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-"}
+                    </TableCell>
+                );
+            default:
+                return (
+                    <TableCell sx={{ border: "1px solid #cbd5e1" }} key={colKey}>
+                        {tx[colKey] || "-"}
+                    </TableCell>
+                );
+        }
+    };
+
     // Extract all unique Group Names from Bank dataset only for Abstract view
     const allGroupNames = useMemo(() => {
         if (!reportData) return [];
@@ -233,14 +429,11 @@ const BankAbstractReport: React.FC = () => {
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
     const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
     const [searchText, setSearchText] = useState("");
-    const [columnFilters, setColumnFilters] = useState<{
-        voucher_name: string[];
-        Account_name: string[];
-        Particulars: string[];
-    }>({
+    const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({
         voucher_name: [],
         Account_name: [],
         Particulars: [],
+        invoice_no: [],
     });
 
     const handleGroupChipClick = (groupName: string) => {
@@ -686,16 +879,12 @@ const BankAbstractReport: React.FC = () => {
         };
     }, [reportData, selectedBankAccIds, filteredTransactions, bankToBankInvoiceKeys, invoiceKeysWithCreditSelectedBank, invoiceKeysWithDebitSelectedBank, selectedGroups, allBankAccIds]);
 
-    // Group and calculate detailed data for Expanded side with pagination and chips
-    const detailedReportSummary = useMemo(() => {
-        if (!detailedData || !detailedData.Group || !detailedData.Data) {
-            return { groups: [], totalRows: 0 };
-        }
+    // Get all filtered detailed transactions (unpaginated)
+    const filteredDetailedTransactions = useMemo(() => {
+        if (!detailedData || !detailedData.Data) return [];
+        const { Data } = detailedData;
 
-        const { OB, Data, Group } = detailedData;
-
-        // Apply Column Header Filters first
-        let filteredTx = Data.filter((item: any) => {
+        let filtered = Data.filter((item: any) => {
             const voucherFilter = columnFilters.voucher_name || [];
             if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucher_name)) return false;
 
@@ -705,31 +894,36 @@ const BankAbstractReport: React.FC = () => {
             const particularsFilter = columnFilters.Particulars || [];
             if (particularsFilter.length > 0 && !particularsFilter.includes(item.Particulars)) return false;
 
+            const invoiceNoFilter = columnFilters.invoice_no || [];
+            if (invoiceNoFilter.length > 0 && !invoiceNoFilter.includes(item.invoice_no)) return false;
+
             return true;
         });
 
-        // Apply Expanded view Group Chip filter
         const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
         if (isGroupFiltered) {
-            filteredTx = filteredTx.filter((item: any) =>
+            filtered = filtered.filter((item: any) =>
                 item.Group_Name && selectedDetailedGroups.includes(item.Group_Name.trim())
             );
         }
 
-        const totalRows = filteredTx.length;
+        return filtered;
+    }, [detailedData, columnFilters, selectedDetailedGroups]);
 
-        // Paginate the flat filtered transactions
-        const paginatedTx = filteredTx.slice((page - 1) * rowsPerPage, page * rowsPerPage);
-
-        // Group the paginated transactions
-        const assignedObIndices = new Set<number>();
+    // Helper to group transactions into their respective Account groups
+    const getGroupedDetailedTransactions = useCallback((transactionsList: any[]) => {
+        if (!detailedData || !detailedData.Group || !detailedData.OB) return [];
+        const { OB, Group } = detailedData;
+        const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
 
         const activeGroups = Group.filter((g: any) =>
             !isGroupFiltered || (g.Group_Name && selectedDetailedGroups.includes(g.Group_Name.trim()))
         );
 
-        const groups = activeGroups.map((groupItem: any) => {
-            const matchedTransactions = paginatedTx.filter((item: any) => {
+        const assignedObIndices = new Set<number>();
+
+        return activeGroups.map((groupItem: any) => {
+            const matchedTransactions = transactionsList.filter((item: any) => {
                 if (!item.Acc_Id) return false;
                 const txAccIds = Array.isArray(item.Acc_Id) ? item.Acc_Id.map(String) : [String(item.Acc_Id)];
                 return txAccIds.includes(String(groupItem.Acc_Id));
@@ -755,22 +949,36 @@ const BankAbstractReport: React.FC = () => {
                 txCreditSum += Number(tx.Cr_Amount || 0);
             });
 
-            const totalDebit = txDebitSum;
-            const totalCredit = txCreditSum;
-            const closingBalance = totalDebit - totalCredit;
+            const sortedTransactions = [...matchedTransactions].sort((a, b) => {
+                const aDr = Number(a.Dr_Amount) || 0;
+                const bDr = Number(b.Dr_Amount) || 0;
+                if (aDr > 0 && bDr === 0) return -1;
+                if (aDr === 0 && bDr > 0) return 1;
+                return 0;
+            });
 
             return {
                 ...groupItem,
                 obAmount,
-                transactions: matchedTransactions,
-                totalDebit,
-                totalCredit,
-                closingBalance
+                transactions: sortedTransactions,
+                totalDebit: txDebitSum,
+                totalCredit: txCreditSum,
+                closingBalance: txDebitSum - txCreditSum
             };
         }).filter((g: any) => g.transactions.length > 0);
+    }, [detailedData, selectedDetailedGroups]);
 
-        return { groups, totalRows };
-    }, [detailedData, columnFilters, selectedDetailedGroups, page, rowsPerPage]);
+    // Group and calculate detailed data for Expanded side with pagination and chips
+    const detailedReportSummary = useMemo(() => {
+        const totalRows = filteredDetailedTransactions.length;
+        const paginatedTx = filteredDetailedTransactions.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+        const groups = getGroupedDetailedTransactions(paginatedTx);
+
+        return {
+            groups,
+            totalRows
+        };
+    }, [filteredDetailedTransactions, page, rowsPerPage, getGroupedDetailedTransactions]);
 
     const totalOpeningBalance = useMemo(() => {
         if (!detailedData || !detailedData.OB) return 0;
@@ -1106,35 +1314,46 @@ const BankAbstractReport: React.FC = () => {
 
                 excelData.push(["", "", "Closing Balance", parsedData.closing]);
             } else {
-                excelData.push([
-                    "S.No",
-                    "Date",
-                    "Ledger Name",
-                    "Particulars",
-                    "Narration",
-                    "Debit",
-                    "Credit"
-                ]);
+                excelData.push(enabledColumns.map(c => c.label));
 
-                excelData.push(["-", "-", "Opening Balance", "-", "-", "-", totalOpeningBalance]);
+                excelData.push(enabledColumns.map(c => {
+                    if (c.key === "Account_name") return "Opening Balance";
+                    if (c.key === "Cr_Amount") return totalOpeningBalance;
+                    return "-";
+                }));
 
-                detailedReportSummary.groups.forEach((group: any) => {
-                    excelData.push([`${group.Account_name} (${group.Group_Name})`, "", "", "", "", "", ""]);
+                const exportGroups = getGroupedDetailedTransactions(filteredDetailedTransactions);
+                exportGroups.forEach((group: any) => {
+                    const groupRow = new Array(enabledColumns.length).fill("");
+                    groupRow[0] = `${group.Account_name} (${group.Group_Name})`;
+                    excelData.push(groupRow);
                     group.transactions.forEach((tx: any, tIdx: number) => {
-                        excelData.push([
-                            tIdx + 1,
-                            tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : "",
-                            tx.Account_name || "",
-                            tx.Particulars || "",
-                            tx.Narration || tx.Line_Naration || "",
-                            Number(tx.Dr_Amount) > 0 ? Number(tx.Dr_Amount) : "",
-                            Number(tx.Cr_Amount) > 0 ? Number(tx.Cr_Amount) : ""
-                        ]);
+                        excelData.push(enabledColumns.map(c => {
+                            if (c.key === "sno") return tIdx + 1;
+                            if (c.key === "Ledger_Date") return tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : "";
+                            if (c.key === "Created_on") return tx.Created_on ? formatTime(tx.Created_on) : "";
+                            if (c.key === "Account_name") return (Number(tx.Dr_Amount) > 0 ? tx.Credit_Names : (Number(tx.Cr_Amount) > 0 ? tx.Debit_Names : tx.Account_name)) || "";
+                            if (c.key === "invoice_no") return tx.invoice_no || "";
+                            if (c.key === "Narration") return tx.Narration || tx.Line_Naration || "";
+                            if (c.key === "Dr_Amount") return Number(tx.Dr_Amount) > 0 ? Number(tx.Dr_Amount) : "";
+                            if (c.key === "Cr_Amount") return Number(tx.Cr_Amount) > 0 ? Number(tx.Cr_Amount) : "";
+                            return tx[c.key] || "";
+                        }));
                     });
-                    excelData.push([`Sub Total (${group.Account_name})`, "", "", "", "", group.totalDebit, group.totalCredit]);
+                    
+                    excelData.push(enabledColumns.map(c => {
+                        if (c.key === "Account_name") return `Sub Total (${group.Account_name})`;
+                        if (c.key === "Dr_Amount") return group.totalDebit;
+                        if (c.key === "Cr_Amount") return group.totalCredit;
+                        return "";
+                    }));
                 });
 
-                excelData.push(["-", "-", "Closing Balance", "-", "-", "-", finalClosing]);
+                excelData.push(enabledColumns.map(c => {
+                    if (c.key === "Account_name") return "Closing Balance";
+                    if (c.key === "Cr_Amount") return finalClosing;
+                    return "-";
+                }));
             }
 
             const ws = XLSX.utils.aoa_to_sheet(excelData);
@@ -1142,12 +1361,21 @@ const BankAbstractReport: React.FC = () => {
 
             const wb = XLSX.utils.book_new();
 
-            ws["!cols"] = [
-                { wch: 45 },
-                { wch: 15 },
-                { wch: 35 },
-                { wch: 15 },
-            ];
+            if (toggleMode === "Expanded") {
+                ws["!cols"] = enabledColumns.map(c => {
+                    if (c.key === "Narration") return { wch: 30 };
+                    if (c.key === "Account_name") return { wch: 25 };
+                    if (c.key === "invoice_no") return { wch: 20 };
+                    return { wch: 12 };
+                });
+            } else {
+                ws["!cols"] = [
+                    { wch: 45 },
+                    { wch: 15 },
+                    { wch: 35 },
+                    { wch: 15 },
+                ];
+            }
 
             XLSX.utils.book_append_sheet(wb, ws, "BankBox Report");
             XLSX.writeFile(wb, `BankBox_Report_${dayjs().format("YYYYMMDD_HHmmss")}.xlsx`);
@@ -1339,29 +1567,48 @@ const BankAbstractReport: React.FC = () => {
                 });
             } else {
                 const pdfBody: any[][] = [];
-                pdfBody.push(["-", "-", "Opening Balance", "-", "-", "-", formatNum(totalOpeningBalance)]);
+                pdfBody.push(enabledColumns.map(c => {
+                    if (c.key === "Account_name") return "Opening Balance";
+                    if (c.key === "Cr_Amount") return formatNum(totalOpeningBalance);
+                    return "-";
+                }));
 
-                detailedReportSummary.groups.forEach((group: any) => {
-                    pdfBody.push([`${group.Account_name} (${group.Group_Name})`, "", "", "", "", "", ""]);
+                const exportGroups = getGroupedDetailedTransactions(filteredDetailedTransactions);
+                exportGroups.forEach((group: any) => {
+                    const groupRow = new Array(enabledColumns.length).fill("");
+                    groupRow[0] = `${group.Account_name} (${group.Group_Name})`;
+                    pdfBody.push(groupRow);
                     group.transactions.forEach((tx: any, tIdx: number) => {
-                        pdfBody.push([
-                            tIdx + 1,
-                            tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : "",
-                            tx.Account_name || "",
-                            tx.Particulars || "",
-                            tx.Narration || tx.Line_Naration || "",
-                            Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-",
-                            Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-"
-                        ]);
+                        pdfBody.push(enabledColumns.map(c => {
+                            if (c.key === "sno") return tIdx + 1;
+                            if (c.key === "Ledger_Date") return tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : "";
+                            if (c.key === "Created_on") return tx.Created_on ? formatTime(tx.Created_on) : "-";
+                            if (c.key === "Account_name") return (Number(tx.Dr_Amount) > 0 ? tx.Credit_Names : (Number(tx.Cr_Amount) > 0 ? tx.Debit_Names : tx.Account_name)) || "";
+                            if (c.key === "invoice_no") return tx.invoice_no || "";
+                            if (c.key === "Narration") return tx.Narration || tx.Line_Naration || "";
+                            if (c.key === "Dr_Amount") return Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-";
+                            if (c.key === "Cr_Amount") return Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-";
+                            return tx[c.key] || "";
+                        }));
                     });
-                    pdfBody.push([`Sub Total (${group.Account_name})`, "", "", "", "", formatNum(group.totalDebit), formatNum(group.totalCredit)]);
+                    
+                    pdfBody.push(enabledColumns.map(c => {
+                        if (c.key === "Account_name") return `Sub Total (${group.Account_name})`;
+                        if (c.key === "Dr_Amount") return formatNum(group.totalDebit);
+                        if (c.key === "Cr_Amount") return formatNum(group.totalCredit);
+                        return "";
+                    }));
                 });
 
-                pdfBody.push(["-", "-", "Closing Balance", "-", "-", "-", finalClosing]);
+                pdfBody.push(enabledColumns.map(c => {
+                    if (c.key === "Account_name") return "Closing Balance";
+                    if (c.key === "Cr_Amount") return formatNum(finalClosing);
+                    return "-";
+                }));
 
                 autoTable(doc, {
                     startY: 20,
-                    head: [["S.No", "Date", "Ledger Name", "Particulars", "Narration", "Debit", "Credit"]],
+                    head: [enabledColumns.map(c => c.label)],
                     body: pdfBody,
                     styles: { fontSize: 7, cellPadding: 1 },
                     headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
@@ -1381,16 +1628,44 @@ const BankAbstractReport: React.FC = () => {
         <Box sx={{ width: "100%", minHeight: "100vh", bgcolor: "#f8fafc", overflowX: "hidden" }}>
             <PageHeader
                 onExportExcel={() => {
-                    setExportType("excel");
-                    setExportModalOpen(true);
+                    if (toggleMode === "Expanded") {
+                        handleExportExcel();
+                    } else {
+                        setExportType("excel");
+                        setExportModalOpen(true);
+                    }
                 }}
                 onExportPDF={() => {
-                    setExportType("pdf");
-                    setExportModalOpen(true);
+                    if (toggleMode === "Expanded") {
+                        handleExportPDF();
+                    } else {
+                        setExportType("pdf");
+                        setExportModalOpen(true);
+                    }
                 }}
                 toggleMode={toggleMode}
                 onToggleChange={(mode) => setToggleMode(mode)}
                 showPages={true}
+                settingsSlot={
+                    toggleMode === "Expanded" && (
+                        <Box display="flex" gap={1}>
+                            <Tooltip title="Column Settings">
+                                <IconButton
+                                    size="small"
+                                    onClick={e => setSettingsAnchor(e.currentTarget)}
+                                    sx={{
+                                        height: 24,
+                                        width: 24,
+                                        backgroundColor: "#fff",
+                                        borderRadius: 0.5,
+                                    }}
+                                >
+                                    <SettingsIcon fontSize="small" />
+                                </IconButton>
+                            </Tooltip>
+                        </Box>
+                    )
+                }
             />
 
             <ReportFilterDrawer
@@ -1472,6 +1747,128 @@ const BankAbstractReport: React.FC = () => {
                                 })}
                         </Box>
                     </Box>
+                </Menu>
+
+                {/* ===== COLUMN SETTINGS MENU ===== */}
+                <Menu
+                    anchorEl={settingsAnchor}
+                    open={Boolean(settingsAnchor)}
+                    onClose={() => setSettingsAnchor(null)}
+                    PaperProps={{
+                        sx: {
+                            width: 280,
+                            maxHeight: 420,
+                        },
+                    }}
+                >
+                    <Box px={2} py={1}>
+                        <Typography fontWeight={600} fontSize={13}>
+                            Enabled Columns
+                        </Typography>
+                    </Box>
+
+                    <DndContext
+                        collisionDetection={closestCenter}
+                        onDragEnd={({ active, over }) => {
+                            if (!over || active.id === over.id) return;
+
+                            setDetailedColumns(prev => {
+                                const enabledCols = prev
+                                    .filter(c => c.enabled)
+                                    .sort((a, b) => a.order - b.order);
+
+                                const oldIndex = enabledCols.findIndex(c => c.key === active.id);
+                                const newIndex = enabledCols.findIndex(c => c.key === over.id);
+
+                                const reordered = arrayMove(enabledCols, oldIndex, newIndex);
+
+                                return prev.map(col => {
+                                    const idx = reordered.findIndex(r => r.key === col.key);
+                                    return idx !== -1 ? { ...col, order: idx } : col;
+                                });
+                            });
+                        }}
+                    >
+                        <SortableContext
+                            items={detailedColumns.filter(c => c.enabled).map(c => c.key)}
+                            strategy={verticalListSortingStrategy}
+                        >
+                            {detailedColumns
+                                .filter(c => c.enabled)
+                                .sort((a, b) => a.order - b.order)
+                                .map(col => (
+                                    <SortableColumnItem
+                                        key={col.key}
+                                        column={col}
+                                        showFilter={
+                                            col.key === "voucher_name" || col.key === "Account_name" || col.key === "invoice_no"
+                                                ? (columnFilters[col.key as keyof typeof columnFilters] || []).length > 0
+                                                : false
+                                        }
+                                        onToggle={() =>
+                                            setDetailedColumns(prev =>
+                                                prev.map(c =>
+                                                    c.key === col.key
+                                                        ? { ...c, enabled: false }
+                                                        : c
+                                                )
+                                            )
+                                        }
+                                    />
+                                ))}
+                        </SortableContext>
+                    </DndContext>
+
+                    <Box px={2} py={1} mt={1}>
+                        <Typography fontWeight={600} fontSize={13}>
+                            Disabled Columns
+                        </Typography>
+                    </Box>
+
+                    {detailedColumns
+                        .filter(c => !c.enabled)
+                        .sort((a, b) => a.order - b.order)
+                        .map(col => (
+                            <Box
+                                key={col.key}
+                                display="flex"
+                                alignItems="center"
+                                gap={1}
+                                px={2}
+                                py={0.5}
+                                mb={1}
+                            >
+                                <Box sx={{ flex: 1 }}>
+                                    <Typography fontSize="0.75rem">
+                                        {col.label}
+                                    </Typography>
+                                </Box>
+                                <Switch
+                                    size="medium"
+                                    checked={false}
+                                    onChange={() =>
+                                        setDetailedColumns(prev =>
+                                            prev.map(c =>
+                                                c.key === col.key
+                                                    ? { ...c, enabled: true }
+                                                    : c
+                                            )
+                                        )
+                                    }
+                                    sx={{
+                                        "& .MuiSwitch-switchBase.Mui-checked": {
+                                            color: "#1E3A8A",
+                                        },
+                                        "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
+                                            backgroundColor: "#b5b9c4",
+                                        },
+                                        "& .MuiSwitch-track": {
+                                            backgroundColor: "#CBD5E1",
+                                        },
+                                    }}
+                                />
+                            </Box>
+                        ))}
                 </Menu>
 
                 {/* Filter Chips Bar */}
@@ -1795,151 +2192,161 @@ const BankAbstractReport: React.FC = () => {
                             </TableContainer>
                         ) : (
                             <>
-                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", width: "100%", overflowX: "hidden", maxHeight: "calc(100vh - 230px)" }}>
-                                    <Table size="small" sx={{ width: "100%", tableLayout: "fixed", "& .MuiTableCell-root": { fontSize: "0.72rem", py: 0.5, overflow: "hidden", textOverflow: "ellipsis" } }} stickyHeader>
-                                        <TableHead>
-                                            <TableRow>
-                                                <TableCell align="center" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "4%", border: "1px solid #cbd5e1" }}>
-                                                    S.No
-                                                </TableCell>
-                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "11%", border: "1px solid #cbd5e1" }}>
-                                                    Date
-                                                </TableCell>
-                                                <TableCell
-                                                    onClick={(e) => handleHeaderClick(e, "Account_name")}
-                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "18%", border: "1px solid #cbd5e1", cursor: "pointer" }}
-                                                >
-                                                    <Box display="flex" alignItems="center" gap={0.5}>
-                                                        Ledger Name
-                                                        {columnFilters.Account_name.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffff" }} />}
-                                                    </Box>
-                                                </TableCell>
-                                                <TableCell
-                                                    onClick={(e) => handleHeaderClick(e, "Particulars")}
-                                                    sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "18%", border: "1px solid #cbd5e1", cursor: "pointer" }}
-                                                >
-                                                    <Box display="flex" alignItems="center" gap={0.5}>
-                                                        Particulars
-                                                        {columnFilters.Particulars.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffff" }} />}
-                                                    </Box>
-                                                </TableCell>
-                                                <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "25%", border: "1px solid #cbd5e1" }}>
-                                                    Narration
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "12%", border: "1px solid #cbd5e1" }}>
-                                                    Debit
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, width: "12%", border: "1px solid #cbd5e1" }}>
-                                                    Credit
-                                                </TableCell>
-                                            </TableRow>
-                                        </TableHead>
-                                        <TableBody>
-                                            {/* ONE SINGLE OPENING BALANCE ROW AT THE TOP */}
-                                            <TableRow hover>
-                                                <TableCell align="center" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>-</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }}>Opening Balance</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
-                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }}>
-                                                    -
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }}>
-                                                    {formatNum(totalOpeningBalance)}
-                                                </TableCell>
-                                            </TableRow>
-
-                                            {detailedReportSummary.groups.length === 0 ? (
-                                                <TableRow>
-                                                    <TableCell colSpan={7} align="center" sx={{ py: 6, color: "#94a3b8" }}>
-                                                        No detailed bank transactions match your filter criteria.
+                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflowX: "auto", maxHeight: "calc(100vh - 230px)" }}>
+                                    <Table size="small" sx={{ minWidth: 1000, "& .MuiTableCell-root": { fontSize: "0.72rem", whiteSpace: "nowrap", py: 0.6 } }} stickyHeader>
+                                    <TableHead>
+                                        <TableRow>
+                                            {enabledColumns.map((col) => {
+                                                const isClickable = col.key === "Account_name" || col.key === "invoice_no";
+                                                const filterActive = isClickable && (columnFilters[col.key as keyof typeof columnFilters] || []).length > 0;
+                                                
+                                                return (
+                                                    <TableCell
+                                                        key={col.key}
+                                                        align={col.key === "Dr_Amount" || col.key === "Cr_Amount" ? "right" : (col.key === "sno" ? "center" : "left")}
+                                                        onClick={isClickable ? (e) => handleHeaderClick(e, col.key as any) : undefined}
+                                                        sx={{
+                                                            backgroundColor: "#1E3A8A",
+                                                            color: "#fff",
+                                                            fontWeight: 700,
+                                                            py: 1.5,
+                                                            border: "1px solid #cbd5e1",
+                                                            cursor: isClickable ? "pointer" : "default",
+                                                            width: getWidth(col.key)
+                                                        }}
+                                                    >
+                                                        {isClickable ? (
+                                                            <Box display="flex" alignItems="center" gap={0.5}>
+                                                                {col.label}
+                                                                {filterActive && <FilterAltIcon fontSize="small" sx={{ color: "#ffffff" }} />}
+                                                            </Box>
+                                                        ) : (
+                                                            col.label
+                                                        )}
                                                     </TableCell>
-                                                </TableRow>
-                                            ) : (
-                                                detailedReportSummary.groups.map((group: any, gIdx: number) => {
-                                                    const hasTransactions = group.transactions.length > 0;
-
+                                                );
+                                            })}
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {/* ONE SINGLE OPENING BALANCE ROW AT THE TOP */}
+                                        <TableRow hover>
+                                            {enabledColumns.map((col) => {
+                                                if (col.key === "Account_name") {
                                                     return (
-                                                        <React.Fragment key={`detailed-group-${group.Acc_Id}-${gIdx}`}>
-                                                            {/* Group Name Header Row */}
-                                                            <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
-                                                                <TableCell colSpan={7} sx={{ fontWeight: 800, color: "#1e3a8a", py: 1, border: "1px solid #cbd5e1" }}>
-                                                                    {group.Account_name} ({group.Group_Name})
-                                                                </TableCell>
-                                                            </TableRow>
-
-                                                            {/* Transactions List */}
-                                                            {hasTransactions && group.transactions.map((tx: any, tIdx: number) => (
-                                                                <React.Fragment key={`tx-${tx.Trans_Id}-${tIdx}`}>
-                                                                    <TableRow hover>
-                                                                        <TableCell align="center" sx={{ border: "1px solid #cbd5e1" }}>
-                                                                            {(page - 1) * rowsPerPage + tIdx + 1}
-                                                                        </TableCell>
-                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }}>
-                                                                            {tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : ""}
-                                                                        </TableCell>
-                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }}>{tx.Account_name}</TableCell>
-                                                                        <TableCell sx={{ border: "1px solid #cbd5e1" }}>{tx.Particulars}</TableCell>
-                                                                        <TableCell sx={{ border: "1px solid #cbd5e1", maxWidth: 250, whiteSpace: "normal" }}>
-                                                                            <Box
-                                                                                sx={{
-                                                                                    display: "-webkit-box",
-                                                                                    WebkitLineClamp: 2,
-                                                                                    WebkitBoxOrient: "vertical",
-                                                                                    overflow: "hidden",
-                                                                                    textOverflow: "ellipsis",
-                                                                                    whiteSpace: "normal",
-                                                                                    wordBreak: "break-all"
-                                                                                }}
-                                                                            >
-                                                                                {tx.Narration || tx.Line_Naration || ""}
-                                                                            </Box>
-                                                                        </TableCell>
-                                                                        <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
-                                                                            {Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-"}
-                                                                        </TableCell>
-                                                                        <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>
-                                                                            {Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-"}
-                                                                        </TableCell>
-                                                                    </TableRow>
-                                                                </React.Fragment>
-                                                            ))}
-
-                                                            {/* Sub-Total Row */}
-                                                            <TableRow sx={{ backgroundColor: "#f8fafc" }}>
-                                                                <TableCell colSpan={5} align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1" }}>
-                                                                    Sub Total ({group.Account_name})
-                                                                </TableCell>
-                                                                <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }}>
-                                                                    {formatNum(group.totalDebit)}
-                                                                </TableCell>
-                                                                <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }}>
-                                                                    {formatNum(group.totalCredit)}
-                                                                </TableCell>
-                                                            </TableRow>
-                                                        </React.Fragment>
+                                                        <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }} key={col.key}>
+                                                            Opening Balance
+                                                        </TableCell>
                                                     );
-                                                })
-                                            )}
+                                                }
+                                                if (col.key === "Cr_Amount") {
+                                                    return (
+                                                        <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }} key={col.key}>
+                                                            {formatNum(totalOpeningBalance)}
+                                                        </TableCell>
+                                                    );
+                                                }
+                                                return (
+                                                    <TableCell align={col.key === "Dr_Amount" ? "right" : "left"} sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }} key={col.key}>
+                                                        -
+                                                    </TableCell>
+                                                );
+                                            })}
+                                        </TableRow>
 
-                                            {/* ONE SINGLE CLOSING BALANCE ROW AT THE BOTTOM */}
-                                            <TableRow sx={{ backgroundColor: "#f8fafc" }}>
-                                                <TableCell align="center" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }}>-</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }}>Closing Balance</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
-                                                <TableCell sx={{ border: "1px solid #cbd5e1" }}>-</TableCell>
-                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }}>
-                                                    -
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }}>
-                                                    {formatNum(finalClosing)}
+                                        {detailedReportSummary.groups.length === 0 ? (
+                                            <TableRow>
+                                                <TableCell colSpan={enabledColumns.length} align="center" sx={{ py: 6, color: "#94a3b8" }}>
+                                                    No detailed bank transactions match your filter criteria.
                                                 </TableCell>
                                             </TableRow>
-                                        </TableBody>
-                                    </Table>
-                                </TableContainer>
+                                        ) : (
+                                            detailedReportSummary.groups.map((group: any, gIdx: number) => {
+                                                const hasTransactions = group.transactions.length > 0;
+
+                                                return (
+                                                    <React.Fragment key={`detailed-group-${group.Acc_Id}-${gIdx}`}>
+                                                        {/* Group Name Header Row */}
+                                                        <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
+                                                            <TableCell colSpan={enabledColumns.length} sx={{ fontWeight: 800, color: "#1e3a8a", py: 1, border: "1px solid #cbd5e1" }}>
+                                                                {group.Account_name} ({group.Group_Name})
+                                                            </TableCell>
+                                                        </TableRow>
+
+                                                        {/* Transactions List */}
+                                                        {hasTransactions && group.transactions.map((tx: any, tIdx: number) => (
+                                                            <React.Fragment key={`tx-${tx.Trans_Id}-${tIdx}`}>
+                                                                <TableRow hover>
+                                                                    {enabledColumns.map((col) => renderCell(tx, col.key, tIdx))}
+                                                                </TableRow>
+                                                            </React.Fragment>
+                                                        ))}
+
+                                                        {/* Sub-Total Row */}
+                                                        <TableRow sx={{ backgroundColor: "#f8fafc" }}>
+                                                            {(() => {
+                                                                const nonAmountCols = enabledColumns.filter(c => c.key !== "Dr_Amount" && c.key !== "Cr_Amount");
+                                                                const cells = [];
+                                                                
+                                                                if (nonAmountCols.length > 0) {
+                                                                    cells.push(
+                                                                        <TableCell colSpan={nonAmountCols.length} align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1" }} key="subtotal-label">
+                                                                            Sub Total ({group.Account_name})
+                                                                        </TableCell>
+                                                                    );
+                                                                }
+                                                                
+                                                                enabledColumns.forEach((col) => {
+                                                                    if (col.key === "Dr_Amount") {
+                                                                        cells.push(
+                                                                            <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }} key="Dr_Amount">
+                                                                                {formatNum(group.totalDebit)}
+                                                                            </TableCell>
+                                                                        );
+                                                                    } else if (col.key === "Cr_Amount") {
+                                                                        cells.push(
+                                                                            <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }} key="Cr_Amount">
+                                                                                {formatNum(group.totalCredit)}
+                                                                            </TableCell>
+                                                                        );
+                                                                    }
+                                                                });
+                                                                
+                                                                return cells;
+                                                            })()}
+                                                        </TableRow>
+                                                    </React.Fragment>
+                                                );
+                                            })
+                                        )}
+
+                                        {/* ONE SINGLE CLOSING BALANCE ROW AT THE BOTTOM */}
+                                        <TableRow sx={{ backgroundColor: "#f8fafc" }}>
+                                            {enabledColumns.map((col) => {
+                                                if (col.key === "Account_name") {
+                                                    return (
+                                                        <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }} key={col.key}>
+                                                            Closing Balance
+                                                        </TableCell>
+                                                    );
+                                                }
+                                                if (col.key === "Cr_Amount") {
+                                                    return (
+                                                        <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }} key={col.key}>
+                                                            {formatNum(finalClosing)}
+                                                        </TableCell>
+                                                    );
+                                                }
+                                                return (
+                                                    <TableCell align={col.key === "Dr_Amount" ? "right" : "left"} sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }} key={col.key}>
+                                                        -
+                                                    </TableCell>
+                                                );
+                                            })}
+                                        </TableRow>
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
                                 <CommonPagination
                                     totalRows={detailedReportSummary.totalRows}
                                     page={page}

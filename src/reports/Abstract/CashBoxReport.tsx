@@ -1457,7 +1457,7 @@ const CashBoxReport: React.FC = () => {
                             return tx[c.key] || "";
                         }));
                     });
-                    
+
                     excelData.push(enabledColumns.map(c => {
                         if (c.key === "Account_name") return `Sub Total (${group.Account_name})`;
                         if (c.key === "Dr_Amount") return group.totalCredit;
@@ -1710,7 +1710,7 @@ const CashBoxReport: React.FC = () => {
                             return tx[c.key] || "";
                         }));
                     });
-                    
+
                     pdfBody.push(enabledColumns.map(c => {
                         if (c.key === "Account_name") return `Sub Total (${group.Account_name})`;
                         if (c.key === "Dr_Amount") return formatNum(group.totalCredit);
@@ -1873,24 +1873,26 @@ const CashBoxReport: React.FC = () => {
                 ) : (
                     <>
                         {/* Transaction Header Banner */}
-                        <Box
-                            sx={{
-                                border: "1px solid #cbd5e1",
-                                borderRadius: 1.5,
-                                py: 1.2,
-                                textAlign: "center",
-                                mb: 3,
-                                background: "#fff",
-                                boxShadow: 1,
-                            }}
-                        >
-                            <Typography variant="body1" fontWeight={700} sx={{ letterSpacing: 0.5, color: "#1e293b" }}>
-                                CASH BOX TRANSACTION  {" "}
-                                {filters.Date.from === filters.Date.to
-                                    ? dayjs(filters.Date.from).format("DD-MM-YYYY")
-                                    : `${dayjs(filters.Date.from).format("DD-MM-YYYY")} - ${dayjs(filters.Date.to).format("DD-MM-YYYY")}`}
-                            </Typography>
-                        </Box>
+                        {toggleMode === "Abstract" && (
+                            <Box
+                                sx={{
+                                    border: "1px solid #cbd5e1",
+                                    borderRadius: 1.5,
+                                    py: 1.2,
+                                    textAlign: "center",
+                                    mb: 3,
+                                    background: "#fff",
+                                    boxShadow: 1,
+                                }}
+                            >
+                                <Typography variant="body1" fontWeight={700} sx={{ letterSpacing: 0.5, color: "#1e293b" }}>
+                                    CASH BOX TRANSACTION  {" "}
+                                    {filters.Date.from === filters.Date.to
+                                        ? dayjs(filters.Date.from).format("DD-MM-YYYY")
+                                        : `${dayjs(filters.Date.from).format("DD-MM-YYYY")} - ${dayjs(filters.Date.to).format("DD-MM-YYYY")}`}
+                                </Typography>
+                            </Box>
+                        )}
 
                         {/* Parallel Grid Table */}
                         {toggleMode === "Abstract" ? (
@@ -2067,7 +2069,7 @@ const CashBoxReport: React.FC = () => {
                             </TableContainer>
                         ) : (
                             <>
-                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflowX: "auto", maxHeight: "calc(100vh - 230px)" }}>
+                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflowX: "auto", maxHeight: "calc(100vh - 170px)" }}>
                                     <Table size="small" sx={{ minWidth: 1000, "& .MuiTableCell-root": { fontSize: "0.72rem", whiteSpace: "nowrap", py: 0.6 } }} stickyHeader>
                                         <TableHead>
                                             <TableRow>
@@ -2162,7 +2164,7 @@ const CashBoxReport: React.FC = () => {
                                                                 {(() => {
                                                                     const nonAmountCols = enabledColumns.filter(c => c.key !== "Dr_Amount" && c.key !== "Cr_Amount");
                                                                     const cells = [];
-                                                                    
+
                                                                     if (nonAmountCols.length > 0) {
                                                                         cells.push(
                                                                             <TableCell colSpan={nonAmountCols.length} align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1" }} key="subtotal-label">
@@ -2170,7 +2172,7 @@ const CashBoxReport: React.FC = () => {
                                                                             </TableCell>
                                                                         );
                                                                     }
-                                                                    
+
                                                                     enabledColumns.forEach((col) => {
                                                                         if (col.key === "Dr_Amount") {
                                                                             cells.push(
@@ -2186,7 +2188,7 @@ const CashBoxReport: React.FC = () => {
                                                                             );
                                                                         }
                                                                     });
-                                                                    
+
                                                                     return cells;
                                                                 })()}
                                                             </TableRow>

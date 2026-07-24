@@ -400,26 +400,97 @@ const BankAbstractReport: React.FC = () => {
         }
     };
 
-    // Extract all unique Group Names from Bank dataset only for Abstract view
+    // Extract all unique Account Names from Bank dataset only for Abstract view (only those with data)
     const allGroupNames = useMemo(() => {
         if (!reportData) return [];
 
         const names = new Set<string>();
+        const transactions = reportData.Data1 || [];
+        const obList = reportData.OB || [];
+        const clsList = reportData.Cls || [];
+
         (reportData.Bank || []).forEach((acc) => {
-            if (acc.Group_Name) {
-                names.add(acc.Group_Name.trim());
+            const accIdStr = String(acc.Acc_Id).trim();
+            const accNameLower = acc.Account_name ? acc.Account_name.trim().toLowerCase() : "";
+
+            // Check if there are transactions matching this bank account
+            const hasTx = transactions.some((tx: any) =>
+                (tx.Debit_Ac_Id && String(tx.Debit_Ac_Id).trim() === accIdStr) ||
+                (tx.Credit_Ac_Id && String(tx.Credit_Ac_Id).trim() === accIdStr)
+            );
+
+            // Check if there is non-zero opening balance
+            const hasOB = obList.some((ob: any) =>
+                ((ob.Acc_Id && String(ob.Acc_Id).trim() === accIdStr) ||
+                    (ob.Account_name && ob.Account_name.trim().toLowerCase() === accNameLower)) &&
+                Number(ob.OB_Amount) !== 0
+            );
+
+            // Check if there is non-zero closing balance
+            const hasCls = clsList.some((cls: any) =>
+                ((cls.Acc_Id && String(cls.Acc_Id).trim() === accIdStr) ||
+                 (cls.Account_name && cls.Account_name.trim().toLowerCase() === accNameLower)) &&
+                Number(cls.CL_Amount) !== 0
+            );
+
+            if (acc.Account_name && (hasTx || hasOB || hasCls)) {
+                names.add(acc.Account_name.trim());
             }
         });
         return Array.from(names).sort();
     }, [reportData]);
 
-    // Extract unique Group Names for the Expanded view from the detailed Group dataset
+    // Extract unique Account Names for the Expanded view from the detailed Group dataset (only those with data)
     const detailedGroupNames = useMemo(() => {
         if (!detailedData || !detailedData.Group) return [];
         const names = new Set<string>();
+        const transactions = detailedData.Data || [];
+        const obList = detailedData.OB || [];
+
         detailedData.Group.forEach((g: any) => {
-            if (g.Group_Name) {
-                names.add(g.Group_Name.trim());
+            const accIdStr = g.Acc_Id ? String(g.Acc_Id).trim() : "";
+            const accNameLower = g.Account_name ? g.Account_name.trim().toLowerCase() : "";
+
+            // Check if there are transactions in detailedData.Data matching this group account
+            const hasTx = transactions.some((tx: any) => {
+                if (!tx.Acc_Id) return false;
+                const txAccIds = Array.isArray(tx.Acc_Id) ? tx.Acc_Id.map(String) : [String(tx.Acc_Id)];
+                return txAccIds.includes(accIdStr);
+            });
+
+            // Check if there is non-zero opening balance
+            const hasOB = obList.some((ob: any) =>
+                ((ob.Acc_Id && String(ob.Acc_Id).trim() === accIdStr) ||
+                    (ob.Account_name && ob.Account_name.trim().toLowerCase() === accNameLower)) &&
+                Number(ob.OB_Amount) !== 0
+            );
+
+            // Calculate closing balance dynamically to check if it has a non-zero closing balance
+            let obAmount = 0;
+            const obItem = obList.find((ob: any) =>
+                (ob.Acc_Id && String(ob.Acc_Id).trim() === accIdStr) ||
+                (ob.Account_name && ob.Account_name.trim().toLowerCase() === accNameLower)
+            );
+            if (obItem) {
+                obAmount = Number(obItem.OB_Amount) || 0;
+            }
+
+            let txDebitSum = 0;
+            let txCreditSum = 0;
+            transactions.forEach((tx: any) => {
+                if (!tx.Acc_Id) return;
+                const txAccIds = Array.isArray(tx.Acc_Id) ? tx.Acc_Id.map(String) : [String(tx.Acc_Id)];
+                if (txAccIds.includes(accIdStr)) {
+                    txDebitSum += Number(tx.Dr_Amount || 0);
+                    txCreditSum += Number(tx.Cr_Amount || 0);
+                }
+            });
+
+            const closingBalance = obAmount + txDebitSum - txCreditSum;
+            const hasCls = closingBalance !== 0;
+
+            if (g.Account_name && (hasTx || hasOB || hasCls)) {
+                names.add(g.Account_name.trim());
             }
         });
         return Array.from(names).sort();
@@ -582,7 +653,7 @@ const BankAbstractReport: React.FC = () => {
         const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
         return new Set(
             (reportData?.Bank || [])
-                .filter((acc) => !isFiltered || (acc.Group_Name && selectedGroups.includes(acc.Group_Name.trim())))
+                .filter((acc) => !isFiltered || (acc.Account_name && selectedGroups.includes(acc.Account_name.trim())))
                 .map((acc) => String(acc.Acc_Id).trim())
         );
     }, [reportData, selectedGroups]);
@@ -751,13 +822,14 @@ const BankAbstractReport: React.FC = () => {
         let opening = 0;
         if (obList.length > 0) {
             const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
+            const bankAccountNames = new Set((reportData?.Bank || []).map(acc => acc.Account_name ? acc.Account_name.trim() : ""));
             const bankGroupNames = new Set((reportData?.Bank || []).map(acc => acc.Group_Name ? acc.Group_Name.trim() : ""));
 
             let sum = 0;
             obList.forEach((obItem: any) => {
                 const isSelected = isFiltered
-                    ? (obItem.Acc_Id ? selectedBankAccIds.has(String(obItem.Acc_Id).trim()) : (obItem.Group_Name && selectedGroups.includes(obItem.Group_Name.trim())))
-                    : (obItem.Acc_Id ? allBankAccIds.has(String(obItem.Acc_Id).trim()) : (obItem.Group_Name ? bankGroupNames.has(obItem.Group_Name.trim()) : true));
+                    ? (obItem.Acc_Id ? selectedBankAccIds.has(String(obItem.Acc_Id).trim()) : ((obItem.Account_name && selectedGroups.includes(obItem.Account_name.trim())) || (obItem.Group_Name && selectedGroups.includes(obItem.Group_Name.trim()))))
+                    : (obItem.Acc_Id ? allBankAccIds.has(String(obItem.Acc_Id).trim()) : ((obItem.Account_name ? bankAccountNames.has(obItem.Account_name.trim()) : true) && (obItem.Group_Name ? bankGroupNames.has(obItem.Group_Name.trim()) : true)));
 
                 if (isSelected) {
                     sum += Number(obItem.OB_Amount) || 0;
@@ -853,13 +925,14 @@ const BankAbstractReport: React.FC = () => {
         const clsList = reportData?.Cls || [];
         if (clsList.length > 0) {
             const isFiltered = !selectedGroups.includes("All") && selectedGroups.length > 0;
+            const bankAccountNames = new Set((reportData?.Bank || []).map(acc => acc.Account_name ? acc.Account_name.trim() : ""));
             const bankGroupNames = new Set((reportData?.Bank || []).map(acc => acc.Group_Name ? acc.Group_Name.trim() : ""));
 
             let sum = 0;
             clsList.forEach((clsItem: any) => {
                 const isSelected = isFiltered
-                    ? (clsItem.Acc_Id ? selectedBankAccIds.has(String(clsItem.Acc_Id).trim()) : (clsItem.Group_Name && selectedGroups.includes(clsItem.Group_Name.trim())))
-                    : (clsItem.Acc_Id ? allBankAccIds.has(String(clsItem.Acc_Id).trim()) : (clsItem.Group_Name ? bankGroupNames.has(clsItem.Group_Name.trim()) : true));
+                    ? (clsItem.Acc_Id ? selectedBankAccIds.has(String(clsItem.Acc_Id).trim()) : ((clsItem.Account_name && selectedGroups.includes(clsItem.Account_name.trim())) || (clsItem.Group_Name && selectedGroups.includes(clsItem.Group_Name.trim()))))
+                    : (clsItem.Acc_Id ? allBankAccIds.has(String(clsItem.Acc_Id).trim()) : ((clsItem.Account_name ? bankAccountNames.has(clsItem.Account_name.trim()) : true) && (clsItem.Group_Name ? bankGroupNames.has(clsItem.Group_Name.trim()) : true)));
 
                 if (isSelected) {
                     sum += Number(clsItem.CL_Amount) || 0;
@@ -903,7 +976,7 @@ const BankAbstractReport: React.FC = () => {
         const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
         if (isGroupFiltered) {
             filtered = filtered.filter((item: any) =>
-                item.Group_Name && selectedDetailedGroups.includes(item.Group_Name.trim())
+                item.Account_name && selectedDetailedGroups.includes(item.Account_name.trim())
             );
         }
 
@@ -917,7 +990,7 @@ const BankAbstractReport: React.FC = () => {
         const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
 
         const activeGroups = Group.filter((g: any) =>
-            !isGroupFiltered || (g.Group_Name && selectedDetailedGroups.includes(g.Group_Name.trim()))
+            !isGroupFiltered || (g.Account_name && selectedDetailedGroups.includes(g.Account_name.trim()))
         );
 
         const assignedObIndices = new Set<number>();
@@ -988,7 +1061,7 @@ const BankAbstractReport: React.FC = () => {
         let filteredOB = OB;
         if (isGroupFiltered) {
             filteredOB = OB.filter((ob: any) =>
-                ob.Group_Name && selectedDetailedGroups.includes(ob.Group_Name.trim())
+                ob.Account_name && selectedDetailedGroups.includes(ob.Account_name.trim())
             );
         }
         return filteredOB.reduce((sum, item) => sum + (Number(item.OB_Amount) || 0), 0);
@@ -1014,7 +1087,7 @@ const BankAbstractReport: React.FC = () => {
         const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
         if (isGroupFiltered) {
             filteredTx = filteredTx.filter((item: any) =>
-                item.Group_Name && selectedDetailedGroups.includes(item.Group_Name.trim())
+                item.Account_name && selectedDetailedGroups.includes(item.Account_name.trim())
             );
         }
 
@@ -1340,7 +1413,7 @@ const BankAbstractReport: React.FC = () => {
                             return tx[c.key] || "";
                         }));
                     });
-                    
+
                     excelData.push(enabledColumns.map(c => {
                         if (c.key === "Account_name") return `Sub Total (${group.Account_name})`;
                         if (c.key === "Dr_Amount") return group.totalCredit;
@@ -1591,7 +1664,7 @@ const BankAbstractReport: React.FC = () => {
                             return tx[c.key] || "";
                         }));
                     });
-                    
+
                     pdfBody.push(enabledColumns.map(c => {
                         if (c.key === "Account_name") return `Sub Total (${group.Account_name})`;
                         if (c.key === "Dr_Amount") return formatNum(group.totalCredit);
@@ -2000,24 +2073,26 @@ const BankAbstractReport: React.FC = () => {
                 ) : (
                     <>
                         {/* Header Banner */}
-                        <Box
-                            sx={{
-                                border: "1px solid #cbd5e1",
-                                borderRadius: 2,
-                                py: 1.2,
-                                textAlign: "center",
-                                mb: 3,
-                                background: "#fff",
-                                boxShadow: 1,
-                            }}
-                        >
-                            <Typography variant="body1" fontWeight={700} sx={{ letterSpacing: 0.5, color: "#1e293b" }}>
-                                BANK BOX TRANSACTION {" "}
-                                {filters.Date.from === filters.Date.to
-                                    ? dayjs(filters.Date.from).format("DD-MM-YYYY")
-                                    : `${dayjs(filters.Date.from).format("DD-MM-YYYY")} - ${dayjs(filters.Date.to).format("DD-MM-YYYY")}`}
-                            </Typography>
-                        </Box>
+                        {toggleMode === "Abstract" && (
+                            <Box
+                                sx={{
+                                    border: "1px solid #cbd5e1",
+                                    borderRadius: 2,
+                                    py: 1.2,
+                                    textAlign: "center",
+                                    mb: 3,
+                                    background: "#fff",
+                                    boxShadow: 1,
+                                }}
+                            >
+                                <Typography variant="body1" fontWeight={700} sx={{ letterSpacing: 0.5, color: "#1e293b" }}>
+                                    BANK BOX TRANSACTION {" "}
+                                    {filters.Date.from === filters.Date.to
+                                        ? dayjs(filters.Date.from).format("DD-MM-YYYY")
+                                        : `${dayjs(filters.Date.from).format("DD-MM-YYYY")} - ${dayjs(filters.Date.to).format("DD-MM-YYYY")}`}
+                                </Typography>
+                            </Box>
+                        )}
                         {toggleMode === "Abstract" ? (
                             <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", width: "100%", overflowX: "hidden" }}>
                                 <Table size="small" sx={{ width: "100%", tableLayout: "fixed", "& .MuiTableCell-root": { fontSize: "0.78rem", py: 0.8, px: 1.5 } }}>
@@ -2192,161 +2267,161 @@ const BankAbstractReport: React.FC = () => {
                             </TableContainer>
                         ) : (
                             <>
-                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflowX: "auto", maxHeight: "calc(100vh - 230px)" }}>
+                                <TableContainer component={Paper} elevation={2} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflowX: "auto", maxHeight: "calc(100vh - 200px)" }}>
                                     <Table size="small" sx={{ minWidth: 1000, "& .MuiTableCell-root": { fontSize: "0.72rem", whiteSpace: "nowrap", py: 0.6 } }} stickyHeader>
-                                    <TableHead>
-                                        <TableRow>
-                                            {enabledColumns.map((col) => {
-                                                const isClickable = col.key === "Account_name" || col.key === "invoice_no";
-                                                const filterActive = isClickable && (columnFilters[col.key as keyof typeof columnFilters] || []).length > 0;
-                                                
-                                                return (
-                                                    <TableCell
-                                                        key={col.key}
-                                                        align={col.key === "Dr_Amount" || col.key === "Cr_Amount" ? "right" : (col.key === "sno" ? "center" : "left")}
-                                                        onClick={isClickable ? (e) => handleHeaderClick(e, col.key as any) : undefined}
-                                                        sx={{
-                                                            backgroundColor: "#1E3A8A",
-                                                            color: "#fff",
-                                                            fontWeight: 700,
-                                                            py: 1.5,
-                                                            border: "1px solid #cbd5e1",
-                                                            cursor: isClickable ? "pointer" : "default",
-                                                            width: getWidth(col.key)
-                                                        }}
-                                                    >
-                                                        {isClickable ? (
-                                                            <Box display="flex" alignItems="center" gap={0.5}>
-                                                                {col.label}
-                                                                {filterActive && <FilterAltIcon fontSize="small" sx={{ color: "#ffffff" }} />}
-                                                            </Box>
-                                                        ) : (
-                                                            col.label
-                                                        )}
-                                                    </TableCell>
-                                                );
-                                            })}
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {/* ONE SINGLE OPENING BALANCE ROW AT THE TOP */}
-                                        <TableRow hover>
-                                            {enabledColumns.map((col) => {
-                                                if (col.key === "Account_name") {
-                                                    return (
-                                                        <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }} key={col.key}>
-                                                            Opening Balance
-                                                        </TableCell>
-                                                    );
-                                                }
-                                                if (col.key === "Cr_Amount") {
-                                                    return (
-                                                        <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }} key={col.key}>
-                                                            {formatNum(totalOpeningBalance)}
-                                                        </TableCell>
-                                                    );
-                                                }
-                                                return (
-                                                    <TableCell align={col.key === "Dr_Amount" ? "right" : "left"} sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }} key={col.key}>
-                                                        -
-                                                    </TableCell>
-                                                );
-                                            })}
-                                        </TableRow>
-
-                                        {detailedReportSummary.groups.length === 0 ? (
+                                        <TableHead>
                                             <TableRow>
-                                                <TableCell colSpan={enabledColumns.length} align="center" sx={{ py: 6, color: "#94a3b8" }}>
-                                                    No detailed bank transactions match your filter criteria.
-                                                </TableCell>
+                                                {enabledColumns.map((col) => {
+                                                    const isClickable = col.key === "Account_name" || col.key === "invoice_no";
+                                                    const filterActive = isClickable && (columnFilters[col.key as keyof typeof columnFilters] || []).length > 0;
+
+                                                    return (
+                                                        <TableCell
+                                                            key={col.key}
+                                                            align={col.key === "Dr_Amount" || col.key === "Cr_Amount" ? "right" : (col.key === "sno" ? "center" : "left")}
+                                                            onClick={isClickable ? (e) => handleHeaderClick(e, col.key as any) : undefined}
+                                                            sx={{
+                                                                backgroundColor: "#1E3A8A",
+                                                                color: "#fff",
+                                                                fontWeight: 700,
+                                                                py: 1.5,
+                                                                border: "1px solid #cbd5e1",
+                                                                cursor: isClickable ? "pointer" : "default",
+                                                                width: getWidth(col.key)
+                                                            }}
+                                                        >
+                                                            {isClickable ? (
+                                                                <Box display="flex" alignItems="center" gap={0.5}>
+                                                                    {col.label}
+                                                                    {filterActive && <FilterAltIcon fontSize="small" sx={{ color: "#ffffff" }} />}
+                                                                </Box>
+                                                            ) : (
+                                                                col.label
+                                                            )}
+                                                        </TableCell>
+                                                    );
+                                                })}
                                             </TableRow>
-                                        ) : (
-                                            detailedReportSummary.groups.map((group: any, gIdx: number) => {
-                                                const hasTransactions = group.transactions.length > 0;
-
-                                                return (
-                                                    <React.Fragment key={`detailed-group-${group.Acc_Id}-${gIdx}`}>
-                                                        {/* Group Name Header Row */}
-                                                        <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
-                                                            <TableCell colSpan={enabledColumns.length} sx={{ fontWeight: 800, color: "#1e3a8a", py: 1, border: "1px solid #cbd5e1" }}>
-                                                                {group.Account_name} ({group.Group_Name})
+                                        </TableHead>
+                                        <TableBody>
+                                            {/* ONE SINGLE OPENING BALANCE ROW AT THE TOP */}
+                                            <TableRow hover>
+                                                {enabledColumns.map((col) => {
+                                                    if (col.key === "Account_name") {
+                                                        return (
+                                                            <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }} key={col.key}>
+                                                                Opening Balance
                                                             </TableCell>
-                                                        </TableRow>
+                                                        );
+                                                    }
+                                                    if (col.key === "Cr_Amount") {
+                                                        return (
+                                                            <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#b45309" }} key={col.key}>
+                                                                {formatNum(totalOpeningBalance)}
+                                                            </TableCell>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <TableCell align={col.key === "Dr_Amount" ? "right" : "left"} sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }} key={col.key}>
+                                                            -
+                                                        </TableCell>
+                                                    );
+                                                })}
+                                            </TableRow>
 
-                                                        {/* Transactions List */}
-                                                        {hasTransactions && group.transactions.map((tx: any, tIdx: number) => (
-                                                            <React.Fragment key={`tx-${tx.Trans_Id}-${tIdx}`}>
-                                                                <TableRow hover>
-                                                                    {enabledColumns.map((col) => renderCell(tx, col.key, tIdx))}
-                                                                </TableRow>
-                                                            </React.Fragment>
-                                                        ))}
+                                            {detailedReportSummary.groups.length === 0 ? (
+                                                <TableRow>
+                                                    <TableCell colSpan={enabledColumns.length} align="center" sx={{ py: 6, color: "#94a3b8" }}>
+                                                        No detailed bank transactions match your filter criteria.
+                                                    </TableCell>
+                                                </TableRow>
+                                            ) : (
+                                                detailedReportSummary.groups.map((group: any, gIdx: number) => {
+                                                    const hasTransactions = group.transactions.length > 0;
 
-                                                        {/* Sub-Total Row */}
-                                                        <TableRow sx={{ backgroundColor: "#f8fafc" }}>
-                                                            {(() => {
-                                                                const nonAmountCols = enabledColumns.filter(c => c.key !== "Dr_Amount" && c.key !== "Cr_Amount");
-                                                                const cells = [];
-                                                                
-                                                                if (nonAmountCols.length > 0) {
-                                                                    cells.push(
-                                                                        <TableCell colSpan={nonAmountCols.length} align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1" }} key="subtotal-label">
-                                                                            Sub Total ({group.Account_name})
-                                                                        </TableCell>
-                                                                    );
-                                                                }
-                                                                
-                                                                enabledColumns.forEach((col) => {
-                                                                    if (col.key === "Dr_Amount") {
+                                                    return (
+                                                        <React.Fragment key={`detailed-group-${group.Acc_Id}-${gIdx}`}>
+                                                            {/* Group Name Header Row */}
+                                                            <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
+                                                                <TableCell colSpan={enabledColumns.length} sx={{ fontWeight: 800, color: "#1e3a8a", py: 1, border: "1px solid #cbd5e1" }}>
+                                                                    {group.Account_name} ({group.Group_Name})
+                                                                </TableCell>
+                                                            </TableRow>
+
+                                                            {/* Transactions List */}
+                                                            {hasTransactions && group.transactions.map((tx: any, tIdx: number) => (
+                                                                <React.Fragment key={`tx-${tx.Trans_Id}-${tIdx}`}>
+                                                                    <TableRow hover>
+                                                                        {enabledColumns.map((col) => renderCell(tx, col.key, tIdx))}
+                                                                    </TableRow>
+                                                                </React.Fragment>
+                                                            ))}
+
+                                                            {/* Sub-Total Row */}
+                                                            <TableRow sx={{ backgroundColor: "#f8fafc" }}>
+                                                                {(() => {
+                                                                    const nonAmountCols = enabledColumns.filter(c => c.key !== "Dr_Amount" && c.key !== "Cr_Amount");
+                                                                    const cells = [];
+
+                                                                    if (nonAmountCols.length > 0) {
                                                                         cells.push(
-                                                                            <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }} key="Dr_Amount">
-                                                                                {formatNum(group.totalCredit)}
-                                                                            </TableCell>
-                                                                        );
-                                                                    } else if (col.key === "Cr_Amount") {
-                                                                        cells.push(
-                                                                            <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }} key="Cr_Amount">
-                                                                                {formatNum(group.totalDebit)}
+                                                                            <TableCell colSpan={nonAmountCols.length} align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1" }} key="subtotal-label">
+                                                                                Sub Total ({group.Account_name})
                                                                             </TableCell>
                                                                         );
                                                                     }
-                                                                });
-                                                                
-                                                                return cells;
-                                                            })()}
-                                                        </TableRow>
-                                                    </React.Fragment>
-                                                );
-                                            })
-                                        )}
 
-                                        {/* ONE SINGLE CLOSING BALANCE ROW AT THE BOTTOM */}
-                                        <TableRow sx={{ backgroundColor: "#f8fafc" }}>
-                                            {enabledColumns.map((col) => {
-                                                if (col.key === "Account_name") {
+                                                                    enabledColumns.forEach((col) => {
+                                                                        if (col.key === "Dr_Amount") {
+                                                                            cells.push(
+                                                                                <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }} key="Dr_Amount">
+                                                                                    {formatNum(group.totalCredit)}
+                                                                                </TableCell>
+                                                                            );
+                                                                        } else if (col.key === "Cr_Amount") {
+                                                                            cells.push(
+                                                                                <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }} key="Cr_Amount">
+                                                                                    {formatNum(group.totalDebit)}
+                                                                                </TableCell>
+                                                                            );
+                                                                        }
+                                                                    });
+
+                                                                    return cells;
+                                                                })()}
+                                                            </TableRow>
+                                                        </React.Fragment>
+                                                    );
+                                                })
+                                            )}
+
+                                            {/* ONE SINGLE CLOSING BALANCE ROW AT THE BOTTOM */}
+                                            <TableRow sx={{ backgroundColor: "#f8fafc" }}>
+                                                {enabledColumns.map((col) => {
+                                                    if (col.key === "Account_name") {
+                                                        return (
+                                                            <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }} key={col.key}>
+                                                                Closing Balance
+                                                            </TableCell>
+                                                        );
+                                                    }
+                                                    if (col.key === "Cr_Amount") {
+                                                        return (
+                                                            <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }} key={col.key}>
+                                                                {formatNum(finalClosing)}
+                                                            </TableCell>
+                                                        );
+                                                    }
                                                     return (
-                                                        <TableCell sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }} key={col.key}>
-                                                            Closing Balance
+                                                        <TableCell align={col.key === "Dr_Amount" ? "right" : "left"} sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }} key={col.key}>
+                                                            -
                                                         </TableCell>
                                                     );
-                                                }
-                                                if (col.key === "Cr_Amount") {
-                                                    return (
-                                                        <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 700, color: "#15803d" }} key={col.key}>
-                                                            {formatNum(finalClosing)}
-                                                        </TableCell>
-                                                    );
-                                                }
-                                                return (
-                                                    <TableCell align={col.key === "Dr_Amount" ? "right" : "left"} sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }} key={col.key}>
-                                                        -
-                                                    </TableCell>
-                                                );
-                                            })}
-                                        </TableRow>
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
+                                                })}
+                                            </TableRow>
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
                                 <CommonPagination
                                     totalRows={detailedReportSummary.totalRows}
                                     page={page}

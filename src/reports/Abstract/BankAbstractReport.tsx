@@ -382,13 +382,13 @@ const BankAbstractReport: React.FC = () => {
             case "Dr_Amount":
                 return (
                     <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }} key="Dr_Amount">
-                        {Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-"}
+                        {Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-"}
                     </TableCell>
                 );
             case "Cr_Amount":
                 return (
                     <TableCell align="right" sx={{ border: "1px solid #cbd5e1", fontWeight: 600 }} key="Cr_Amount">
-                        {Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-"}
+                        {Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-"}
                     </TableCell>
                 );
             default:
@@ -1335,16 +1335,16 @@ const BankAbstractReport: React.FC = () => {
                             if (c.key === "Account_name") return (Number(tx.Dr_Amount) > 0 ? tx.Credit_Names : (Number(tx.Cr_Amount) > 0 ? tx.Debit_Names : tx.Account_name)) || "";
                             if (c.key === "invoice_no") return tx.invoice_no || "";
                             if (c.key === "Narration") return tx.Narration || tx.Line_Naration || "";
-                            if (c.key === "Dr_Amount") return Number(tx.Dr_Amount) > 0 ? Number(tx.Dr_Amount) : "";
-                            if (c.key === "Cr_Amount") return Number(tx.Cr_Amount) > 0 ? Number(tx.Cr_Amount) : "";
+                            if (c.key === "Dr_Amount") return Number(tx.Cr_Amount) > 0 ? Number(tx.Cr_Amount) : "";
+                            if (c.key === "Cr_Amount") return Number(tx.Dr_Amount) > 0 ? Number(tx.Dr_Amount) : "";
                             return tx[c.key] || "";
                         }));
                     });
                     
                     excelData.push(enabledColumns.map(c => {
                         if (c.key === "Account_name") return `Sub Total (${group.Account_name})`;
-                        if (c.key === "Dr_Amount") return group.totalDebit;
-                        if (c.key === "Cr_Amount") return group.totalCredit;
+                        if (c.key === "Dr_Amount") return group.totalCredit;
+                        if (c.key === "Cr_Amount") return group.totalDebit;
                         return "";
                     }));
                 });
@@ -1586,16 +1586,16 @@ const BankAbstractReport: React.FC = () => {
                             if (c.key === "Account_name") return (Number(tx.Dr_Amount) > 0 ? tx.Credit_Names : (Number(tx.Cr_Amount) > 0 ? tx.Debit_Names : tx.Account_name)) || "";
                             if (c.key === "invoice_no") return tx.invoice_no || "";
                             if (c.key === "Narration") return tx.Narration || tx.Line_Naration || "";
-                            if (c.key === "Dr_Amount") return Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-";
-                            if (c.key === "Cr_Amount") return Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-";
+                            if (c.key === "Dr_Amount") return Number(tx.Cr_Amount) > 0 ? formatNum(Number(tx.Cr_Amount)) : "-";
+                            if (c.key === "Cr_Amount") return Number(tx.Dr_Amount) > 0 ? formatNum(Number(tx.Dr_Amount)) : "-";
                             return tx[c.key] || "";
                         }));
                     });
                     
                     pdfBody.push(enabledColumns.map(c => {
                         if (c.key === "Account_name") return `Sub Total (${group.Account_name})`;
-                        if (c.key === "Dr_Amount") return formatNum(group.totalDebit);
-                        if (c.key === "Cr_Amount") return formatNum(group.totalCredit);
+                        if (c.key === "Dr_Amount") return formatNum(group.totalCredit);
+                        if (c.key === "Cr_Amount") return formatNum(group.totalDebit);
                         return "";
                     }));
                 });
@@ -2300,13 +2300,13 @@ const BankAbstractReport: React.FC = () => {
                                                                     if (col.key === "Dr_Amount") {
                                                                         cells.push(
                                                                             <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }} key="Dr_Amount">
-                                                                                {formatNum(group.totalDebit)}
+                                                                                {formatNum(group.totalCredit)}
                                                                             </TableCell>
                                                                         );
                                                                     } else if (col.key === "Cr_Amount") {
                                                                         cells.push(
                                                                             <TableCell align="right" sx={{ fontWeight: 800, py: 1, border: "1px solid #cbd5e1", color: "#1e3a8a" }} key="Cr_Amount">
-                                                                                {formatNum(group.totalCredit)}
+                                                                                {formatNum(group.totalDebit)}
                                                                             </TableCell>
                                                                         );
                                                                     }

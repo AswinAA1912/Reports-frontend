@@ -18,8 +18,12 @@ import {
     DialogActions,
     CircularProgress,
     Checkbox,
+    Slider,
+    Typography,
 } from "@mui/material";
 import SyncIcon from "@mui/icons-material/Sync";
+import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
+import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import { toast } from "react-toastify";
 import dayjs from "dayjs";
 import AppLayout from "../../Layout/appLayout";
@@ -76,6 +80,104 @@ const UnitEconomicsAdmin: React.FC = () => {
 
     /* -------- SUMMARY -------- */
     const [summaryColumn, setSummaryColumn] = useState<keyof AdminUnitEconomicsReport | null>(null);
+
+    /* -------- SORTING -------- */
+    const [sortConfig, setSortConfig] = useState<{
+        key: keyof AdminUnitEconomicsReport;
+        direction: "asc" | "desc";
+    } | null>(null);
+
+    /* -------- RANGE FILTER -------- */
+    const [rangeFilter, setRangeFilter] = useState<Record<string, [number, number]>>({});
+
+    const isNumericColumn = (key: string) => {
+        return [
+            "Bill_Qty",
+            "Rate",
+            "Amount",
+            "Min_Rate",
+            "COGS_Rate",
+            "GP_MR",
+            "GP_COGS",
+            "TGP_MR",
+            "TGP_COGS",
+            "GP_Percentage_MR",
+            "GP_Percentage_COGS"
+        ].includes(key);
+    };
+
+    const getMinMax = (key: string) => {
+        const nums = rawApiData
+            .map((r) => Number(r[key as keyof AdminUnitEconomicsReport]))
+            .filter((v) => !isNaN(v));
+        if (nums.length === 0) return { min: 0, max: 100 };
+        const minVal = Math.min(...nums);
+        const maxVal = Math.max(...nums);
+        return {
+            min: minVal,
+            max: minVal === maxVal ? minVal + 1 : maxVal,
+        };
+    };
+
+    const handleSort = (columnKey: keyof AdminUnitEconomicsReport) => {
+        setSortConfig((prev) => {
+            if (prev && prev.key === columnKey) {
+                return {
+                    key: columnKey,
+                    direction: prev.direction === "asc" ? "desc" : "asc",
+                };
+            }
+            return {
+                key: columnKey,
+                direction: "asc",
+            };
+        });
+    };
+
+    const renderHeader = (label: string, key: keyof AdminUnitEconomicsReport) => {
+        const isActive = sortConfig?.key === key;
+        const direction = sortConfig?.direction;
+
+        return (
+            <Box
+                sx={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                    width: "100%",
+                }}
+            >
+                <span onClick={(e) => { e.stopPropagation(); openFilter(e, key); }} style={{ cursor: "pointer" }}>{label}</span>
+                <Box
+                    component="span"
+                    onClick={(e) => { e.stopPropagation(); handleSort(key); }}
+                    sx={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        marginLeft: 0.5,
+                        width: 16,
+                        height: 16,
+                        cursor: "pointer",
+                        opacity: isActive ? 1 : 0.2,
+                        transition: "opacity 0.2s",
+                        "th:hover &": {
+                            opacity: isActive ? 1 : 0.6,
+                        }
+                    }}
+                >
+                    {isActive ? (
+                        direction === "asc" ? (
+                            <ArrowUpwardIcon sx={{ fontSize: "0.95rem" }} />
+                        ) : (
+                            <ArrowDownwardIcon sx={{ fontSize: "0.95rem" }} />
+                        )
+                    ) : (
+                        <ArrowUpwardIcon sx={{ fontSize: "0.95rem" }} />
+                    )}
+                </Box>
+            </Box>
+        );
+    };
 
     /* -------- SYNC DIALOG STATE -------- */
     const [syncDialogOpen, setSyncDialogOpen] = useState(false);
@@ -172,7 +274,7 @@ const UnitEconomicsAdmin: React.FC = () => {
     }, [filters.Date]);
 
     useEffect(() => {
-        let rows = rawApiData;
+        let rows = [...rawApiData];
         if (filters.Product && filters.Product.length > 0) {
             rows = rows.filter((r) => filters.Product.includes(r.Product_Name));
         }
@@ -182,9 +284,26 @@ const UnitEconomicsAdmin: React.FC = () => {
         if (filters.Retailer_Name && filters.Retailer_Name.length > 0) {
             rows = rows.filter((r) => filters.Retailer_Name.includes(r.Retailer_Name));
         }
+        // Apply Range Filter
+        if (rangeFilter) {
+            for (const [key, range] of Object.entries(rangeFilter)) {
+                rows = rows.filter((r) => {
+                    const val = Number(r[key as keyof AdminUnitEconomicsReport]);
+                    return isNaN(val) || (val >= range[0] && val <= range[1]);
+                });
+            }
+        }
+        if (sortConfig) {
+            const { key, direction } = sortConfig;
+            rows.sort((a, b) => {
+                const valA = Number(a[key]) || 0;
+                const valB = Number(b[key]) || 0;
+                return direction === "asc" ? valA - valB : valB - valA;
+            });
+        }
         setData(rows);
         setPage(1);
-    }, [rawApiData, filters.Product, filters.invoice_no, filters.Retailer_Name]);
+    }, [rawApiData, filters.Product, filters.invoice_no, filters.Retailer_Name, sortConfig, rangeFilter]);
 
     /* ================= PAGINATION ================= */
     const paginatedData = data.slice(
@@ -275,6 +394,7 @@ const UnitEconomicsAdmin: React.FC = () => {
 
     useEffect(() => {
         setSummaryColumn(null);
+        setRangeFilter({});
     }, [filters.Date, filters.Product, filters.invoice_no, filters.Retailer_Name]);
 
 
@@ -370,35 +490,54 @@ const UnitEconomicsAdmin: React.FC = () => {
                                     <TableCell sx={headStyle} onClick={(e) => openFilter(e, "Date")}>Date</TableCell>
                                     <TableCell sx={headStyle} onClick={(e) => openFilter(e, "Retailer Name")}>Retailer Name</TableCell>
                                     <TableCell sx={headStyle} onClick={(e) => openFilter(e, "Product")}>Product</TableCell>
-                                    <TableCell align="right" sx={headStyle} > Quantity </TableCell>
-                                    <TableCell align="right" sx={headStyle} >Rate</TableCell>
-                                    <TableCell align="right" sx={headStyle} >Amount</TableCell>
+                                    <TableCell align="right" sx={headStyle} onClick={() => handleSort("Bill_Qty")}>
+                                        {renderHeader("Quantity", "Bill_Qty")}
+                                    </TableCell>
+                                    <TableCell align="right" sx={headStyle} onClick={() => handleSort("Rate")}>
+                                        {renderHeader("Rate", "Rate")}
+                                    </TableCell>
+                                    <TableCell align="right" sx={headStyle} onClick={() => handleSort("Amount")}>
+                                        {renderHeader("Amount", "Amount")}
+                                    </TableCell>
                                     {rateType === "cogs" ? (
                                         <>
-                                            <TableCell align="right" sx={headStyle} >COGS Rate</TableCell>
-                                            <TableCell align="right" sx={headStyle} >GP COGS</TableCell>
-                                            <TableCell align="right" sx={headStyle} >TGP COGS</TableCell>
-                                            <TableCell align="right" sx={headStyle} >GP % COGS</TableCell>
+                                            <TableCell align="right" sx={headStyle} onClick={() => handleSort("COGS_Rate")}>
+                                                {renderHeader("COGS Rate", "COGS_Rate")}
+                                            </TableCell>
+                                            <TableCell align="right" sx={headStyle} onClick={() => handleSort("GP_COGS")}>
+                                                {renderHeader("GP COGS", "GP_COGS")}
+                                            </TableCell>
+                                            <TableCell align="right" sx={headStyle} onClick={() => handleSort("TGP_COGS")}>
+                                                {renderHeader("TGP COGS", "TGP_COGS")}
+                                            </TableCell>
+                                            <TableCell align="right" sx={headStyle} onClick={() => handleSort("GP_Percentage_COGS")}>
+                                                {renderHeader("GP % COGS", "GP_Percentage_COGS")}
+                                            </TableCell>
                                         </>
                                     ) : (
                                         <>
-                                            <TableCell align="right" sx={headStyle} >MR Rate</TableCell>
-                                            <TableCell align="right" sx={headStyle} >GP MR</TableCell>
-                                            <TableCell align="right" sx={headStyle} >TGP MR</TableCell>
-                                            <TableCell align="right" sx={headStyle} >GP % MR</TableCell>
+                                            <TableCell align="right" sx={headStyle} onClick={() => handleSort("Min_Rate")}>
+                                                {renderHeader("MR Rate", "Min_Rate")}
+                                            </TableCell>
+                                            <TableCell align="right" sx={headStyle} onClick={() => handleSort("GP_MR")}>
+                                                {renderHeader("GP MR", "GP_MR")}
+                                            </TableCell>
+                                            <TableCell align="right" sx={headStyle} onClick={() => handleSort("TGP_MR")}>
+                                                {renderHeader("TGP MR", "TGP_MR")}
+                                            </TableCell>
+                                            <TableCell align="right" sx={headStyle} onClick={() => handleSort("GP_Percentage_MR")}>
+                                                {renderHeader("GP % MR", "GP_Percentage_MR")}
+                                            </TableCell>
                                         </>
                                     )}
                                 </TableRow>
-                            </TableHead>
-
-                            {/* ===== FIXED SUMMARY ROW ABOVE BODY ===== */}
-                            <TableBody>
                                 <TableRow
                                     sx={{
                                         background: "#f3f4f6",
-                                        position: "sticky",
-                                        top: 37,
-                                        zIndex: 1,
+                                        "& .MuiTableCell-root": {
+                                            backgroundColor: "#f3f4f6",
+                                            color: "#374151",
+                                        }
                                     }}
                                 >
                                     {/* S.No */}
@@ -457,7 +596,7 @@ const UnitEconomicsAdmin: React.FC = () => {
                                         </>
                                     )}
                                 </TableRow>
-                            </TableBody>
+                            </TableHead>
 
                             {/* ===== BODY ===== */}
                             <TableBody>
@@ -671,6 +810,119 @@ const UnitEconomicsAdmin: React.FC = () => {
                                 </Button>
                             </Box>
                         )}
+
+                        {activeHeader && isNumericColumn(activeHeader) && (() => {
+                            const { min, max } = getMinMax(activeHeader);
+                            const currentRange = rangeFilter[activeHeader] || [min, max];
+
+                            const handleSliderChange = (newValue: number[]) => {
+                                setRangeFilter((prev) => ({
+                                    ...prev,
+                                    [activeHeader]: newValue as [number, number],
+                                }));
+                            };
+
+                            const handleFromChange = (value: string) => {
+                                let newFrom = Number(value);
+                                if (isNaN(newFrom)) return;
+                                newFrom = Math.max(min, Math.min(newFrom, currentRange[1]));
+                                handleSliderChange([newFrom, currentRange[1]]);
+                            };
+
+                            const handleToChange = (value: string) => {
+                                let newTo = Number(value);
+                                if (isNaN(newTo)) return;
+                                newTo = Math.min(max, Math.max(newTo, currentRange[0]));
+                                handleSliderChange([currentRange[0], newTo]);
+                            };
+
+                            return (
+                                <Box p={2} sx={{ minWidth: 250 }}>
+                                    <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600 }}>
+                                        Filter Range
+                                    </Typography>
+                                    <Box display="flex" alignItems="center" gap={1} mb={2}>
+                                        <TextField
+                                            type="number"
+                                            size="small"
+                                            label="Min"
+                                            value={currentRange[0]}
+                                            onChange={(e) => handleFromChange(e.target.value)}
+                                            inputProps={{ min, max: currentRange[1] }}
+                                            sx={{
+                                                width: 90,
+                                                "& input": {
+                                                    py: 0.5,
+                                                    fontSize: "0.75rem",
+                                                    textAlign: "center"
+                                                }
+                                            }}
+                                        />
+                                        <Typography fontSize={12}>—</Typography>
+                                        <TextField
+                                            type="number"
+                                            size="small"
+                                            label="Max"
+                                            value={currentRange[1]}
+                                            onChange={(e) => handleToChange(e.target.value)}
+                                            inputProps={{ min: currentRange[0], max }}
+                                            sx={{
+                                                width: 90,
+                                                "& input": {
+                                                    py: 0.5,
+                                                    fontSize: "0.75rem",
+                                                    textAlign: "center"
+                                                }
+                                            }}
+                                        />
+                                    </Box>
+                                    <Slider
+                                        value={currentRange}
+                                        min={min}
+                                        max={max}
+                                        step={0.01}
+                                        size="small"
+                                        onChange={(_, newValue) => handleSliderChange(newValue as number[])}
+                                        valueLabelDisplay="auto"
+                                        sx={{
+                                            mb: 1.5,
+                                            "& .MuiSlider-thumb": {
+                                                width: 12,
+                                                height: 12,
+                                            }
+                                        }}
+                                    />
+                                    <Box display="flex" justifyContent="space-between">
+                                        <Button
+                                            size="small"
+                                            onClick={() => {
+                                                setRangeFilter((prev) => {
+                                                    const copy = { ...prev };
+                                                    delete copy[activeHeader];
+                                                    return copy;
+                                                });
+                                                setFilterAnchor(null);
+                                            }}
+                                            sx={{ textTransform: "none", color: "gray" }}
+                                        >
+                                            Clear
+                                        </Button>
+                                        <Button
+                                            variant="contained"
+                                            size="small"
+                                            onClick={() => setFilterAnchor(null)}
+                                            sx={{
+                                                backgroundColor: "#1E3A8A",
+                                                textTransform: "none",
+                                                fontWeight: 600,
+                                            }}
+                                        >
+                                            Close
+                                        </Button>
+                                    </Box>
+                                </Box>
+                            );
+                        })()}
 
                     </Menu>
                 </Box>

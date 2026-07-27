@@ -3,6 +3,9 @@ import React, {
     useMemo,
     useState,
 } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 
 import {
     Box,
@@ -95,7 +98,26 @@ const PendingOutstandingReport: React.FC = () => {
         return dayjs().diff(dayjs(date), "day");
     };
 
-    /* ================= PAGINATION ================= */
+    const processedRows = useMemo(() => {
+        return rows.map(row => ({
+            ...row,
+            pendingDays: row.eventDate ? dayjs().diff(dayjs(row.eventDate), "day") : 0
+        }));
+    }, [rows]);
+
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(processedRows, ["totalValue", "BalanceAmount", "pendingDays"]);
 
     const finalRows =
         useMemo(() => {
@@ -103,12 +125,12 @@ const PendingOutstandingReport: React.FC = () => {
                 (page - 1) *
                 rowsPerPage;
 
-            return rows.slice(
+            return numFilteredAndSortedRows.slice(
                 start,
                 start + rowsPerPage
             );
         }, [
-            rows,
+            numFilteredAndSortedRows,
             page,
             rowsPerPage,
         ]);
@@ -118,7 +140,7 @@ const PendingOutstandingReport: React.FC = () => {
     const handleExportExcel = () => {
         const decodedPartyName = decodeURIComponent(partyName || "");
 
-        const exportRows = rows.map((row, index) => ({
+        const exportRows = numFilteredAndSortedRows.map((row, index) => ({
             "S.No": index + 1,
             "Voucher No": row.voucherNumber,
             Date: row.eventDate
@@ -215,7 +237,7 @@ const PendingOutstandingReport: React.FC = () => {
                 "Pending",
             ]],
 
-            body: rows.map((row, index) => [
+            body: numFilteredAndSortedRows.map((row, index) => [
                 index + 1,
                 row.voucherNumber,
                 row.eventDate
@@ -303,25 +325,43 @@ const PendingOutstandingReport: React.FC = () => {
                                             "Pending Days",
                                             "Total",
                                             "Pending",
-                                        ].map((header) => (
-                                            <TableCell
-                                                key={header}
-                                                align={
-                                                    ["Total", "Pending", "Pending Days"].includes(header)
-                                                        ? "right"
-                                                        : "left"
-                                                }
-                                                sx={{
-                                                    color: "#fff",
-                                                    fontWeight: 500,
-                                                    background: "#1E3A8A",
-                                                    whiteSpace: "nowrap",
-                                                    borderBottom: "none",
-                                                }}
-                                            >
-                                                {header}
-                                            </TableCell>
-                                        ))}
+                                        ].map((header) => {
+                                            const keyMap: Record<string, string> = {
+                                                "Total": "totalValue",
+                                                "Pending": "BalanceAmount",
+                                                "Pending Days": "pendingDays"
+                                            };
+                                            const colKey = keyMap[header];
+                                            const isNumeric = Boolean(colKey);
+
+                                            return (
+                                                <TableCell
+                                                    key={header}
+                                                    align={isNumeric ? "right" : "left"}
+                                                    onClick={isNumeric ? (e) => openNumFilter(e, colKey) : undefined}
+                                                    sx={{
+                                                        color: "#fff",
+                                                        fontWeight: 500,
+                                                        background: "#1E3A8A",
+                                                        whiteSpace: "nowrap",
+                                                        borderBottom: "none",
+                                                        cursor: isNumeric ? "pointer" : "default"
+                                                    }}
+                                                >
+                                                    {isNumeric ? (
+                                                        <SortableHeaderLabel
+                                                            label={header}
+                                                            columnKey={colKey}
+                                                            sortConfig={numSortConfig}
+                                                            onSort={handleNumSort}
+                                                            onOpenFilter={(e) => openNumFilter(e, colKey)}
+                                                        />
+                                                    ) : (
+                                                        header
+                                                    )}
+                                                </TableCell>
+                                            );
+                                        })}
                                     </TableRow>
 
                                     {/* TOTAL ROW */}
@@ -337,7 +377,7 @@ const PendingOutstandingReport: React.FC = () => {
                                         {/* TOTAL */}
                                         <TableCell align="right" sx={{ fontWeight: 700 }}>
                                             {Number(
-                                                finalRows.reduce(
+                                                numFilteredAndSortedRows.reduce(
                                                     (sum, row) => sum + Number(row.totalValue || 0),
                                                     0
                                                 )
@@ -349,7 +389,7 @@ const PendingOutstandingReport: React.FC = () => {
                                         {/* PENDING */}
                                         <TableCell align="right" sx={{ fontWeight: 700 }}>
                                             {Number(
-                                                finalRows.reduce(
+                                                numFilteredAndSortedRows.reduce(
                                                     (sum, row) => sum + Number(row.BalanceAmount || 0),
                                                     0
                                                 )
@@ -425,7 +465,7 @@ const PendingOutstandingReport: React.FC = () => {
 
                     <Box mt={2}>
                         <CommonPagination
-                            totalRows={rows.length}
+                            totalRows={numFilteredAndSortedRows.length}
                             page={page}
                             rowsPerPage={rowsPerPage}
                             onPageChange={setPage}
@@ -438,6 +478,18 @@ const PendingOutstandingReport: React.FC = () => {
                 </Box>
 
             </AppLayout>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </>
     );
 };

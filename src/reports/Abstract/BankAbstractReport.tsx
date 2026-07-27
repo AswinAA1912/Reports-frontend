@@ -1,4 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     Paper,
@@ -507,6 +510,50 @@ const BankAbstractReport: React.FC = () => {
         invoice_no: [],
     });
 
+    const filteredDetailedTransactions = useMemo(() => {
+        if (!detailedData || !detailedData.Data) return [];
+        const { Data } = detailedData;
+
+        let filtered = Data.filter((item: any) => {
+            const voucherFilter = columnFilters.voucher_name || [];
+            if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucher_name)) return false;
+
+            const nameFilter = columnFilters.Account_name || [];
+            if (nameFilter.length > 0 && !nameFilter.includes(item.Account_name)) return false;
+
+            const particularsFilter = columnFilters.Particulars || [];
+            if (particularsFilter.length > 0 && !particularsFilter.includes(item.Particulars)) return false;
+
+            const invoiceNoFilter = columnFilters.invoice_no || [];
+            if (invoiceNoFilter.length > 0 && !invoiceNoFilter.includes(item.invoice_no)) return false;
+
+            return true;
+        });
+
+        const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
+        if (isGroupFiltered) {
+            filtered = filtered.filter((item: any) =>
+                item.Account_name && selectedDetailedGroups.includes(item.Account_name.trim())
+            );
+        }
+
+        return filtered;
+    }, [detailedData, columnFilters, selectedDetailedGroups]);
+
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(filteredDetailedTransactions, ["Dr_Amount", "Cr_Amount"]);
+
     const handleGroupChipClick = (groupName: string) => {
         if (groupName === "All") {
             setSelectedGroups(["All"]);
@@ -952,37 +999,6 @@ const BankAbstractReport: React.FC = () => {
         };
     }, [reportData, selectedBankAccIds, filteredTransactions, bankToBankInvoiceKeys, invoiceKeysWithCreditSelectedBank, invoiceKeysWithDebitSelectedBank, selectedGroups, allBankAccIds]);
 
-    // Get all filtered detailed transactions (unpaginated)
-    const filteredDetailedTransactions = useMemo(() => {
-        if (!detailedData || !detailedData.Data) return [];
-        const { Data } = detailedData;
-
-        let filtered = Data.filter((item: any) => {
-            const voucherFilter = columnFilters.voucher_name || [];
-            if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucher_name)) return false;
-
-            const nameFilter = columnFilters.Account_name || [];
-            if (nameFilter.length > 0 && !nameFilter.includes(item.Account_name)) return false;
-
-            const particularsFilter = columnFilters.Particulars || [];
-            if (particularsFilter.length > 0 && !particularsFilter.includes(item.Particulars)) return false;
-
-            const invoiceNoFilter = columnFilters.invoice_no || [];
-            if (invoiceNoFilter.length > 0 && !invoiceNoFilter.includes(item.invoice_no)) return false;
-
-            return true;
-        });
-
-        const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
-        if (isGroupFiltered) {
-            filtered = filtered.filter((item: any) =>
-                item.Account_name && selectedDetailedGroups.includes(item.Account_name.trim())
-            );
-        }
-
-        return filtered;
-    }, [detailedData, columnFilters, selectedDetailedGroups]);
-
     // Helper to group transactions into their respective Account groups
     const getGroupedDetailedTransactions = useCallback((transactionsList: any[]) => {
         if (!detailedData || !detailedData.Group || !detailedData.OB) return [];
@@ -1043,15 +1059,15 @@ const BankAbstractReport: React.FC = () => {
 
     // Group and calculate detailed data for Expanded side with pagination and chips
     const detailedReportSummary = useMemo(() => {
-        const totalRows = filteredDetailedTransactions.length;
-        const paginatedTx = filteredDetailedTransactions.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+        const totalRows = numFilteredAndSortedRows.length;
+        const paginatedTx = numFilteredAndSortedRows.slice((page - 1) * rowsPerPage, page * rowsPerPage);
         const groups = getGroupedDetailedTransactions(paginatedTx);
 
         return {
             groups,
             totalRows
         };
-    }, [filteredDetailedTransactions, page, rowsPerPage, getGroupedDetailedTransactions]);
+    }, [numFilteredAndSortedRows, page, rowsPerPage, getGroupedDetailedTransactions]);
 
     const totalOpeningBalance = useMemo(() => {
         if (!detailedData || !detailedData.OB) return 0;
@@ -1068,38 +1084,15 @@ const BankAbstractReport: React.FC = () => {
     }, [detailedData, selectedDetailedGroups]);
 
     const totalDetailedDebitsAndCredits = useMemo(() => {
-        if (!detailedData || !detailedData.Data) return { debit: 0, credit: 0 };
-        const { Data } = detailedData;
-
-        let filteredTx = Data.filter((item: any) => {
-            const voucherFilter = columnFilters.voucher_name || [];
-            if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucher_name)) return false;
-
-            const nameFilter = columnFilters.Account_name || [];
-            if (nameFilter.length > 0 && !nameFilter.includes(item.Account_name)) return false;
-
-            const particularsFilter = columnFilters.Particulars || [];
-            if (particularsFilter.length > 0 && !particularsFilter.includes(item.Particulars)) return false;
-
-            return true;
-        });
-
-        const isGroupFiltered = !selectedDetailedGroups.includes("All") && selectedDetailedGroups.length > 0;
-        if (isGroupFiltered) {
-            filteredTx = filteredTx.filter((item: any) =>
-                item.Account_name && selectedDetailedGroups.includes(item.Account_name.trim())
-            );
-        }
-
         let debit = 0;
         let credit = 0;
-        filteredTx.forEach((tx: any) => {
+        numFilteredAndSortedRows.forEach((tx: any) => {
             debit += Number(tx.Dr_Amount || 0);
             credit += Number(tx.Cr_Amount || 0);
         });
 
         return { debit, credit };
-    }, [detailedData, columnFilters, selectedDetailedGroups]);
+    }, [numFilteredAndSortedRows]);
 
     const finalClosing = useMemo(() => {
         return totalOpeningBalance + totalDetailedDebitsAndCredits.debit - totalDetailedDebitsAndCredits.credit;
@@ -1395,7 +1388,7 @@ const BankAbstractReport: React.FC = () => {
                     return "-";
                 }));
 
-                const exportGroups = getGroupedDetailedTransactions(filteredDetailedTransactions);
+                const exportGroups = getGroupedDetailedTransactions(numFilteredAndSortedRows);
                 exportGroups.forEach((group: any) => {
                     const groupRow = new Array(enabledColumns.length).fill("");
                     groupRow[0] = `${group.Account_name} (${group.Group_Name})`;
@@ -1646,7 +1639,7 @@ const BankAbstractReport: React.FC = () => {
                     return "-";
                 }));
 
-                const exportGroups = getGroupedDetailedTransactions(filteredDetailedTransactions);
+                const exportGroups = getGroupedDetailedTransactions(numFilteredAndSortedRows);
                 exportGroups.forEach((group: any) => {
                     const groupRow = new Array(enabledColumns.length).fill("");
                     groupRow[0] = `${group.Account_name} (${group.Group_Name})`;
@@ -2273,24 +2266,33 @@ const BankAbstractReport: React.FC = () => {
                                             <TableRow>
                                                 {enabledColumns.map((col) => {
                                                     const isClickable = col.key === "Account_name" || col.key === "invoice_no";
+                                                    const isNumeric = col.key === "Dr_Amount" || col.key === "Cr_Amount";
                                                     const filterActive = isClickable && (columnFilters[col.key as keyof typeof columnFilters] || []).length > 0;
 
                                                     return (
                                                         <TableCell
                                                             key={col.key}
                                                             align={col.key === "Dr_Amount" || col.key === "Cr_Amount" ? "right" : (col.key === "sno" ? "center" : "left")}
-                                                            onClick={isClickable ? (e) => handleHeaderClick(e, col.key as any) : undefined}
+                                                            onClick={isNumeric ? (e) => openNumFilter(e, col.key) : (isClickable ? (e) => handleHeaderClick(e, col.key as any) : undefined)}
                                                             sx={{
                                                                 backgroundColor: "#1E3A8A",
                                                                 color: "#fff",
                                                                 fontWeight: 700,
                                                                 py: 1.5,
                                                                 border: "1px solid #cbd5e1",
-                                                                cursor: isClickable ? "pointer" : "default",
+                                                                cursor: (isClickable || isNumeric) ? "pointer" : "default",
                                                                 width: getWidth(col.key)
                                                             }}
                                                         >
-                                                            {isClickable ? (
+                                                            {isNumeric ? (
+                                                                <SortableHeaderLabel
+                                                                    label={col.label}
+                                                                    columnKey={col.key}
+                                                                    sortConfig={numSortConfig}
+                                                                    onSort={handleNumSort}
+                                                                    onOpenFilter={(e) => openNumFilter(e, col.key)}
+                                                                />
+                                                            ) : isClickable ? (
                                                                 <Box display="flex" alignItems="center" gap={0.5}>
                                                                     {col.label}
                                                                     {filterActive && <FilterAltIcon fontSize="small" sx={{ color: "#ffffff" }} />}
@@ -2698,6 +2700,18 @@ const BankAbstractReport: React.FC = () => {
                     </Box>
                 </DialogContent>
             </Dialog>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </Box>
     );
 };

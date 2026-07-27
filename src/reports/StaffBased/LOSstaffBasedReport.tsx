@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     Table,
@@ -263,6 +266,8 @@ const LOSStaffBasedReport: React.FC = () => {
         key: null,
         order: "asc",
     });
+
+    // Hook call moved to after filteredRows is declared
 
     const currentDateKey = `${filters.Date.from}_${filters.Date.to}`;
     const [groupDialogOpen, setGroupDialogOpen] = useState(false);
@@ -564,10 +569,30 @@ const LOSStaffBasedReport: React.FC = () => {
         });
     }, [rawRows, filters]);
 
-    const sortedRows = useMemo(() => {
-        if (!sortConfig.key) return filteredRows;
+    const numericKeys = useMemo(() => NUMERIC_KEYS, []);
 
-        return [...filteredRows].sort((a, b) => {
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(filteredRows, numericKeys);
+
+    const sortedRows = useMemo(() => {
+        if (numSortConfig) {
+            return numFilteredAndSortedRows;
+        }
+
+        if (!sortConfig.key) return numFilteredAndSortedRows;
+
+        return [...numFilteredAndSortedRows].sort((a, b) => {
             const aVal = a[sortConfig.key!];
             const bVal = b[sortConfig.key!];
 
@@ -593,7 +618,7 @@ const LOSStaffBasedReport: React.FC = () => {
                 ? String(aVal).localeCompare(String(bVal))
                 : String(bVal).localeCompare(String(aVal));
         });
-    }, [filteredRows, sortConfig]);
+    }, [numFilteredAndSortedRows, numSortConfig, sortConfig]);
 
     /* ================= GROUPING ================= */
 
@@ -792,6 +817,8 @@ const LOSStaffBasedReport: React.FC = () => {
         "Checker",
         "Delivery_Man",
         "Driver",
+        "Ladies_Coolie",
+        "Supervisor",
     ];
 
     /* =====================================================
@@ -1736,12 +1763,15 @@ const LOSStaffBasedReport: React.FC = () => {
                                             {enabledColumns.map((c) => (
                                                 <TableCell
                                                     key={c.key}
+                                                    align={c.isNumeric ? "right" : "left"}
                                                     sx={{
                                                         color: "#fff",
-                                                        cursor: !c.isNumeric ? "pointer" : "default",
+                                                        cursor: "pointer",
                                                     }}
                                                     onClick={(e) =>
-                                                        !c.isNumeric && handleHeaderClick(e, c.key)
+                                                        c.isNumeric
+                                                            ? openNumFilter(e, c.key)
+                                                            : handleHeaderClick(e, c.key)
                                                     }
                                                 >
                                                     <Box
@@ -1750,8 +1780,21 @@ const LOSStaffBasedReport: React.FC = () => {
                                                         justifyContent="space-between"
                                                     >
                                                         {/* HEADER LABEL (FILTER CLICK) */}
-                                                        <Box sx={{ display: "flex", alignItems: "center" }}>
-                                                            {c.label}
+                                                        <Box sx={{ display: "flex", alignItems: "center", width: "100%" }}>
+                                                            {c.isNumeric ? (
+                                                                <SortableHeaderLabel
+                                                                    label={c.label}
+                                                                    columnKey={c.key}
+                                                                    sortConfig={numSortConfig}
+                                                                    onSort={(key) => {
+                                                                        setSortConfig({ key: null, order: "asc" });
+                                                                        handleNumSort(key);
+                                                                    }}
+                                                                    onOpenFilter={(e) => openNumFilter(e, c.key)}
+                                                                />
+                                                            ) : (
+                                                                c.label
+                                                            )}
                                                         </Box>
                                                     </Box>
                                                 </TableCell>
@@ -1767,7 +1810,7 @@ const LOSStaffBasedReport: React.FC = () => {
                                         >
                                             <TableCell>Total</TableCell>
                                             {enabledColumns.map((c) => (
-                                                <TableCell key={c.key}>
+                                                <TableCell key={c.key} align={c.isNumeric ? "right" : "left"}>
                                                     {c.isNumeric
                                                         ? c.key === "Qty"
                                                             ? Number(getTotal(c.key)).toFixed(2)
@@ -1816,7 +1859,7 @@ const LOSStaffBasedReport: React.FC = () => {
 
                                                                 if (c.key === currentGroupKey) {
                                                                     return (
-                                                                        <TableCell key={c.key} sx={{ fontWeight: 700 }}>
+                                                                        <TableCell key={c.key} align={c.isNumeric ? "right" : "left"} sx={{ fontWeight: 700 }}>
                                                                             {row.__value}
                                                                         </TableCell>
                                                                     );
@@ -1830,7 +1873,7 @@ const LOSStaffBasedReport: React.FC = () => {
                                                                     );
 
                                                                     return (
-                                                                        <TableCell key={c.key}>
+                                                                        <TableCell key={c.key} align="right">
                                                                             {c.key === "Qty"
                                                                                 ? total.toFixed(2)
                                                                                 : CURRENCY_KEYS.includes(c.key)
@@ -1840,7 +1883,7 @@ const LOSStaffBasedReport: React.FC = () => {
                                                                     );
                                                                 }
 
-                                                                return <TableCell key={c.key} />;
+                                                                return <TableCell key={c.key} align={c.isNumeric ? "right" : "left"} />;
                                                             })}
                                                         </TableRow>
                                                     );
@@ -1852,13 +1895,16 @@ const LOSStaffBasedReport: React.FC = () => {
                                                             {!row.__group ? ++serialRef.current : ""}
                                                         </TableCell>
 
-                                                        {enabledColumns.map(c => (
-                                                            <TableCell key={c.key}>
-                                                                {c.key === "Stock_Journal_date"
-                                                                    ? dayjs(row[c.key]).format("DD/MM/YYYY")
-                                                                    : row[c.key]}
-                                                            </TableCell>
-                                                        ))}
+                                                        {enabledColumns.map(c => {
+                                                            const align = c.isNumeric ? "right" : "left";
+                                                            return (
+                                                                <TableCell key={c.key} align={align}>
+                                                                    {c.key === "Stock_Journal_date"
+                                                                        ? dayjs(row[c.key]).format("DD/MM/YYYY")
+                                                                        : row[c.key]}
+                                                                </TableCell>
+                                                            );
+                                                        })}
                                                     </TableRow>
                                                 );
                                             });
@@ -2204,6 +2250,18 @@ const LOSStaffBasedReport: React.FC = () => {
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </>
     );
 };

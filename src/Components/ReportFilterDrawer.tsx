@@ -73,6 +73,11 @@ interface ReportFilterDrawerProps {
     showQtyModeFilter?: boolean;
     qtyModeValue?: "qty" | "actQty";
     onQtyModeChange?: (value: "qty" | "actQty") => void;
+
+    // PRODUCTION STAFF BASED REPORT VALUE DISPLAY MODE
+    showProductionDisplayMode?: boolean;
+    productionDisplayModeValue?: "tonnage" | "count";
+    onProductionDisplayModeChange?: (value: "tonnage" | "count") => void;
     children?: React.ReactNode;
 }
 
@@ -124,6 +129,11 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
     showQtyModeFilter,
     qtyModeValue,
     onQtyModeChange,
+
+    // PRODUCTION STAFF BASED REPORT VALUE DISPLAY MODE
+    showProductionDisplayMode,
+    productionDisplayModeValue,
+    onProductionDisplayModeChange,
     children,
 }) => {
     return (
@@ -352,6 +362,30 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                                     value="count"
                                     control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
                                     label={<Typography sx={{ fontSize: "0.825rem" }}>Invoice Count</Typography>}
+                                />
+                            </RadioGroup>
+                        </FormControl>
+                    )}
+                    {showProductionDisplayMode && onProductionDisplayModeChange && (
+                        <FormControl sx={{ mb: 2, display: "block" }}>
+                            <FormLabel sx={{ fontWeight: 600, color: "#1E3A8A", fontSize: "0.875rem", display: "block", mb: 0.5 }}>
+                                Value Display Mode
+                            </FormLabel>
+                            <RadioGroup
+                                value={productionDisplayModeValue || "tonnage"}
+                                onChange={(e) =>
+                                    onProductionDisplayModeChange(e.target.value as "tonnage" | "count")
+                                }
+                            >
+                                <FormControlLabel
+                                    value="tonnage"
+                                    control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                                    label={<Typography sx={{ fontSize: "0.825rem" }}>Tonnage</Typography>}
+                                />
+                                <FormControlLabel
+                                    value="count"
+                                    control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                                    label={<Typography sx={{ fontSize: "0.825rem" }}>Count</Typography>}
                                 />
                             </RadioGroup>
                         </FormControl>

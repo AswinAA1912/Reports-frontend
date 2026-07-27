@@ -48,6 +48,8 @@ import AppLayout, {
 import PageHeader from "../../Layout/PageHeader";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import CommonPagination from "../../Components/CommonPagination";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -651,15 +653,37 @@ const StaffBasedCountReport: React.FC =
             order: "asc",
         });
 
+        const numericKeys = useMemo(() => {
+            return enabledColumns.filter((c) => c.isNumeric).map((c) => c.key);
+        }, [enabledColumns]);
+
+        const {
+            sortConfig: numSortConfig,
+            rangeFilter: numRangeFilter,
+            setRangeFilter: setNumRangeFilter,
+            filterAnchor: numFilterAnchor,
+            setFilterAnchor: setNumFilterAnchor,
+            activeHeader: numActiveHeader,
+            handleSort: handleNumSort,
+            openFilter: openNumFilter,
+            filteredAndSortedData: numFilteredAndSortedRows,
+            getMinMax,
+            clearRangeFilter,
+        } = useNumericalFilter(processedRows, numericKeys);
+
         const sortedRows =
             useMemo(() => {
+                if (numSortConfig) {
+                    return numFilteredAndSortedRows;
+                }
+
                 if (
                     !sortConfig.key
                 )
-                    return processedRows;
+                    return numFilteredAndSortedRows;
 
                 return [
-                    ...processedRows,
+                    ...numFilteredAndSortedRows,
                 ].sort(
                     (
                         a,
@@ -720,8 +744,10 @@ const StaffBasedCountReport: React.FC =
                     }
                 );
             }, [
-                processedRows,
+                numFilteredAndSortedRows,
+                numSortConfig,
                 sortConfig,
+                processedRows
             ]);
 
         /* ================= PAGINATION ================= */
@@ -1201,13 +1227,15 @@ const StaffBasedCountReport: React.FC =
                                                             gap={0.5}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-
-                                                                setActiveHeader(c.key);
-                                                                setSearchText("");
-
-                                                                setFilterAnchor(
-                                                                    e.currentTarget as HTMLElement
-                                                                );
+                                                                if (c.isNumeric) {
+                                                                    openNumFilter(e, c.key);
+                                                                } else {
+                                                                    setActiveHeader(c.key);
+                                                                    setSearchText("");
+                                                                    setFilterAnchor(
+                                                                        e.currentTarget as HTMLElement
+                                                                    );
+                                                                }
                                                             }}
                                                             sx={{
                                                                 display: "flex",
@@ -1231,43 +1259,43 @@ const StaffBasedCountReport: React.FC =
                                                             size="small"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-
-                                                                setSortConfig(
-                                                                    (prev) => ({
-                                                                        key: c.key,
-                                                                        order:
-                                                                            prev.key ===
-                                                                                c.key &&
-                                                                                prev.order ===
-                                                                                "asc"
-                                                                                ? "desc"
-                                                                                : "asc",
-                                                                    })
-                                                                );
+                                                                if (c.isNumeric) {
+                                                                    setSortConfig({ key: null, order: "asc" });
+                                                                    handleNumSort(c.key);
+                                                                } else {
+                                                                    setSortConfig(
+                                                                        (prev) => ({
+                                                                            key: c.key,
+                                                                            order:
+                                                                                prev.key ===
+                                                                                    c.key &&
+                                                                                    prev.order ===
+                                                                                    "asc"
+                                                                                    ? "desc"
+                                                                                    : "asc",
+                                                                        })
+                                                                    );
+                                                                }
                                                             }}
                                                             sx={{
                                                                 p: 0,
                                                                 color: "#fff",
                                                             }}
                                                         >
-                                                            {isSorted ? (
-                                                                sortConfig.order ===
-                                                                    "asc" ? (
-                                                                    <ArrowDropUpIcon
-                                                                        fontSize="small"
-                                                                    />
+                                                            {c.isNumeric && numSortConfig?.key === c.key ? (
+                                                                numSortConfig.direction === "asc" ? (
+                                                                    <ArrowDropUpIcon fontSize="small" />
                                                                 ) : (
-                                                                    <ArrowDropDownIcon
-                                                                        fontSize="small"
-                                                                    />
+                                                                    <ArrowDropDownIcon fontSize="small" />
+                                                                )
+                                                            ) : !c.isNumeric && isSorted ? (
+                                                                sortConfig.order === "asc" ? (
+                                                                    <ArrowDropUpIcon fontSize="small" />
+                                                                ) : (
+                                                                    <ArrowDropDownIcon fontSize="small" />
                                                                 )
                                                             ) : (
-                                                                <ArrowDropDownIcon
-                                                                    sx={{
-                                                                        opacity: 0.4,
-                                                                    }}
-                                                                    fontSize="small"
-                                                                />
+                                                                <ArrowDropDownIcon sx={{ opacity: 0.4 }} fontSize="small" />
                                                             )}
                                                         </IconButton>
                                                     </Box>
@@ -1708,6 +1736,18 @@ const StaffBasedCountReport: React.FC =
                         </DndContext>
                     </Box>
                 </Menu>
+
+                <NumericalFilterMenu
+                    anchorEl={numFilterAnchor}
+                    open={Boolean(numFilterAnchor)}
+                    onClose={() => setNumFilterAnchor(null)}
+                    activeHeader={numActiveHeader}
+                    min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                    max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                    rangeFilter={numRangeFilter}
+                    onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                    onClear={clearRangeFilter}
+                />
             </>
         );
     };

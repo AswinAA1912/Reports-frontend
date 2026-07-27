@@ -1,4 +1,7 @@
 import React, { useMemo, useState, useEffect } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     Paper,
@@ -829,6 +832,25 @@ const InStockReport: React.FC = () => {
         return Object.values(groups);
     }, [filteredDetailedData, enabledConfigColumns, isPivotMode]);
 
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(filteredData, [
+        qtyKeys.opening as string,
+        qtyKeys.in as string,
+        qtyKeys.out as string,
+        qtyKeys.closing as string
+    ]);
+
     const getTripLabel = React.useCallback((t: any): string => {
         const rawVal = t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id;
         if (!rawVal) return "N/A";
@@ -966,8 +988,8 @@ const InStockReport: React.FC = () => {
 
     // Slice data for pagination
     const paginatedData = useMemo(() => {
-        return filteredData.slice((page - 1) * rowsPerPage, page * rowsPerPage);
-    }, [filteredData, page, rowsPerPage]);
+        return numFilteredAndSortedRows.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+    }, [numFilteredAndSortedRows, page, rowsPerPage]);
 
     // Detailed quantities helpers
     const getOpeningStock = (item: stockWiseReport) => Number(item[qtyKeys.opening] || 0);
@@ -1926,7 +1948,15 @@ const InStockReport: React.FC = () => {
                                         );
                                     })}
                                     {!inwardMode && !outwardMode && !processMode && (
-                                        <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OPENING STOCK</TableCell>
+                                        <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>
+                                            <SortableHeaderLabel
+                                                label="OPENING STOCK"
+                                                columnKey={qtyKeys.opening as string}
+                                                sortConfig={numSortConfig}
+                                                onSort={handleNumSort}
+                                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.opening as string)}
+                                            />
+                                        </TableCell>
                                     )}
 
                                     {/* Stock In Header - Clicking toggles inwardMode. Shown only in Normal Mode */}
@@ -2151,9 +2181,6 @@ const InStockReport: React.FC = () => {
                                     {!inwardMode && !outwardMode && !processMode && (
                                         <TableCell
                                             align="right"
-                                            onClick={() => {
-                                                handleSetOutwardMode(true);
-                                            }}
                                             sx={{
                                                 width: 120,
                                                 minWidth: 120,
@@ -2162,17 +2189,27 @@ const InStockReport: React.FC = () => {
                                                 fontWeight: 600,
                                                 py: 1.5,
                                                 borderRight: "1px solid #cbd5e1",
-                                                cursor: "pointer",
-                                                userSelect: "none",
-                                                textDecoration: "none",
-                                                transition: "background-color 0.2s",
-                                                "&:hover": {
-                                                    backgroundColor: "#1e40af"
-                                                }
+                                                userSelect: "none"
                                             }}
                                         >
                                             <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
-                                                STOCK OUTWARDS <KeyboardArrowDownIcon fontSize="small" />
+                                                <SortableHeaderLabel
+                                                    label="STOCK OUTWARDS"
+                                                    columnKey={qtyKeys.out as string}
+                                                    sortConfig={numSortConfig}
+                                                    onSort={handleNumSort}
+                                                    onOpenFilter={(e) => openNumFilter(e, qtyKeys.out as string)}
+                                                />
+                                                <IconButton
+                                                    size="small"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleSetOutwardMode(true);
+                                                    }}
+                                                    sx={{ color: "#fff", p: 0.2 }}
+                                                >
+                                                    <KeyboardArrowDownIcon fontSize="small" />
+                                                </IconButton>
                                             </Box>
                                         </TableCell>
                                     )}
@@ -2262,7 +2299,13 @@ const InStockReport: React.FC = () => {
                                     {/* Closing Stock is shown in Normal Mode */}
                                     {!inwardMode && !outwardMode && !processMode && (
                                         <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5 }}>
-                                            CLOSING STOCK
+                                            <SortableHeaderLabel
+                                                label="CLOSING STOCK"
+                                                columnKey={qtyKeys.closing as string}
+                                                sortConfig={numSortConfig}
+                                                onSort={handleNumSort}
+                                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.closing as string)}
+                                            />
                                         </TableCell>
                                     )}
                                 </TableRow>
@@ -2813,7 +2856,7 @@ const InStockReport: React.FC = () => {
                     </TableContainer>
 
                     <CommonPagination
-                        totalRows={filteredData.length}
+                        totalRows={numFilteredAndSortedRows.length}
                         page={page}
                         rowsPerPage={rowsPerPage}
                         onPageChange={setPage}
@@ -3087,6 +3130,18 @@ const InStockReport: React.FC = () => {
                     <CircularProgress color="primary" />
                 </Box>
             )}
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </Box>
     );
 };

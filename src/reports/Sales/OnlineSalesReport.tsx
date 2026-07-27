@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
   Box,
   Table,
@@ -426,19 +429,59 @@ const OnlineSalesReportPage: React.FC = () => {
     });
   };
 
+  const {
+    sortConfig: absSortConfig,
+    rangeFilter: absRangeFilter,
+    setRangeFilter: setAbsRangeFilter,
+    filterAnchor: absFilterAnchor,
+    setFilterAnchor: setAbsFilterAnchor,
+    activeHeader: absActiveHeader,
+    handleSort: handleAbsSort,
+    openFilter: openAbsFilter,
+    filteredAndSortedData: absFilteredAndSortedRows,
+    getMinMax: getAbsMinMax,
+    clearRangeFilter: clearAbsRangeFilter,
+  } = useNumericalFilter(useMemo(() => applyFilters(rawAbstract), [rawAbstract, columnFilters]), ["Item_Count", "Total_Invoice_value"]);
+
+  const {
+    sortConfig: expSortConfig,
+    rangeFilter: expRangeFilter,
+    setRangeFilter: setExpRangeFilter,
+    filterAnchor: expFilterAnchor,
+    setFilterAnchor: setExpFilterAnchor,
+    activeHeader: expActiveHeader,
+    handleSort: handleExpSort,
+    openFilter: openExpFilter,
+    filteredAndSortedData: expFilteredAndSortedRows,
+    getMinMax: getExpMinMax,
+    clearRangeFilter: clearExpRangeFilter,
+  } = useNumericalFilter(useMemo(() => applyFilters(rawExpanded), [rawExpanded, columnFilters]), ["Bill_Qty", "Rate", "Total_Invoice_value"]);
+
   const filteredAbstract = useMemo(() => {
-    const filtered = applyFilters(rawAbstract);
-    return filtered.sort((a, b) =>
+    if (absSortConfig) {
+      return absFilteredAndSortedRows;
+    }
+    return [...absFilteredAndSortedRows].sort((a, b) =>
       dayjs(b.Ledger_Date).valueOf() - dayjs(a.Ledger_Date).valueOf()
     );
-  }, [rawAbstract, columnFilters]);
+  }, [absFilteredAndSortedRows, absSortConfig]);
 
   const filteredExpanded = useMemo(() => {
-    const filtered = applyFilters(rawExpanded);
-    return filtered.sort((a, b) =>
+    if (expSortConfig) {
+      return expFilteredAndSortedRows;
+    }
+    return [...expFilteredAndSortedRows].sort((a, b) =>
       dayjs(b.Ledger_Date).valueOf() - dayjs(a.Ledger_Date).valueOf()
     );
-  }, [rawExpanded, columnFilters]);
+  }, [expFilteredAndSortedRows, expSortConfig]);
+
+  const isNumericCol = (key: string) => {
+    if (toggleMode === "Abstract") {
+      return ["Item_Count", "Total_Invoice_value"].includes(key);
+    } else {
+      return ["Bill_Qty", "Rate", "Total_Invoice_value"].includes(key);
+    }
+  };
 
 
   /* ================= PAGINATION ================= */
@@ -547,15 +590,42 @@ const OnlineSalesReportPage: React.FC = () => {
               {enabledColumns.map((col) => (
                 <TableCell
                   key={col.key}
+                  align={isNumericCol(col.key) ? "right" : "left"}
                   sx={{
                     color: "#fff",
                     fontSize: "0.75rem",
                     fontWeight: 600,
                     cursor: "pointer",
                   }}
-                  onClick={(e) => handleHeaderClick(e, col.key)}
+                  onClick={(e) => {
+                    if (isNumericCol(col.key)) {
+                      if (toggleMode === "Abstract") {
+                        openAbsFilter(e, col.key);
+                      } else {
+                        openExpFilter(e, col.key);
+                      }
+                    } else {
+                      handleHeaderClick(e, col.key);
+                    }
+                  }}
                 >
-                  {col.label}
+                  {isNumericCol(col.key) ? (
+                    <SortableHeaderLabel
+                      label={col.label}
+                      columnKey={col.key}
+                      sortConfig={toggleMode === "Abstract" ? absSortConfig : expSortConfig}
+                      onSort={toggleMode === "Abstract" ? handleAbsSort : handleExpSort}
+                      onOpenFilter={(e) => {
+                        if (toggleMode === "Abstract") {
+                          openAbsFilter(e, col.key);
+                        } else {
+                          openExpFilter(e, col.key);
+                        }
+                      }}
+                    />
+                  ) : (
+                    col.label
+                  )}
                 </TableCell>
               ))}
             </TableRow>
@@ -580,14 +650,14 @@ const OnlineSalesReportPage: React.FC = () => {
                 if (col.type === "number") {
                   const value = getTotal(rows, col.key);
                   return (
-                    <TableCell key={col.key}>
+                    <TableCell key={col.key} align="right">
                       {col.label === "Amount" || col.label === "Rate"
                         ? formatINR(value)
                         : value.toFixed(2)}
                     </TableCell>
                   );
                 }
-                return <TableCell key={col.key} />;
+                return <TableCell key={col.key} align={isNumericCol(col.key) ? "right" : "left"} />;
               })}
             </TableRow>
           </TableBody>
@@ -605,43 +675,44 @@ const OnlineSalesReportPage: React.FC = () => {
             {paginated.map((row, i) => (
               <TableRow key={i}>
                 {enabledColumns.map((col) => {
+                  const align = isNumericCol(col.key) ? "right" : "left";
                   switch (col.key) {
 
                     case "sno":
                       return (
-                        <TableCell key={col.key}>
+                        <TableCell key={col.key} align={align}>
                           {(pageNo - 1) * rowsPerPage + i + 1}
                         </TableCell>
                       );
 
                     case "Ledger_Date":
                       return (
-                        <TableCell key={col.key}>
+                        <TableCell key={col.key} align={align}>
                           {dayjs(row.Ledger_Date).format("DD/MM/YYYY")}
                         </TableCell>
                       );
 
                     case "invoice_no":
-                      return <TableCell key={col.key}>{row.invoice_no}</TableCell>;
+                      return <TableCell key={col.key} align={align}>{row.invoice_no}</TableCell>;
 
                     case "Retailer_Name":
-                      return <TableCell key={col.key}>{row.Retailer_Name}</TableCell>;
+                      return <TableCell key={col.key} align={align}>{row.Retailer_Name}</TableCell>;
 
                     case "Product_Name":
-                      return <TableCell key={col.key}>{row.Product_Name}</TableCell>;
+                      return <TableCell key={col.key} align={align}>{row.Product_Name}</TableCell>;
 
                     case "Item_Count":
-                      return <TableCell key={col.key}>{row.Item_Count}</TableCell>;
+                      return <TableCell key={col.key} align={align}>{row.Item_Count}</TableCell>;
 
                     case "Bill_Qty":
-                      return <TableCell key={col.key}>{row.Bill_Qty}</TableCell>;
+                      return <TableCell key={col.key} align={align}>{row.Bill_Qty}</TableCell>;
 
                     case "Rate":
-                      return <TableCell key={col.key}>{formatINR(row.Rate)}</TableCell>;
+                      return <TableCell key={col.key} align={align}>{formatINR(row.Rate)}</TableCell>;
 
                     case "Total_Invoice_value":
                       return (
-                        <TableCell key={col.key}>
+                        <TableCell key={col.key} align={align}>
                           {formatINR(
                             toggleMode === "Abstract"
                               ? row.Total_Invoice_value
@@ -652,13 +723,13 @@ const OnlineSalesReportPage: React.FC = () => {
 
                     case "Created_on":
                       return (
-                        <TableCell key={col.key}>
+                        <TableCell key={col.key} align={align}>
                           {formatISTDateTime(row.Created_on)}
                         </TableCell>
                       );
 
                     default:
-                      return <TableCell key={col.key}>{row[col.key]}</TableCell>;
+                      return <TableCell key={col.key} align={align}>{row[col.key]}</TableCell>;
                   }
                 })}
               </TableRow>
@@ -1319,6 +1390,30 @@ const OnlineSalesReportPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <NumericalFilterMenu
+        anchorEl={absFilterAnchor}
+        open={Boolean(absFilterAnchor)}
+        onClose={() => setAbsFilterAnchor(null)}
+        activeHeader={absActiveHeader}
+        min={absActiveHeader ? getAbsMinMax(absActiveHeader).min : 0}
+        max={absActiveHeader ? getAbsMinMax(absActiveHeader).max : 100}
+        rangeFilter={absRangeFilter}
+        onRangeChange={(key, range) => setAbsRangeFilter(p => ({ ...p, [key]: range }))}
+        onClear={clearAbsRangeFilter}
+      />
+
+      <NumericalFilterMenu
+        anchorEl={expFilterAnchor}
+        open={Boolean(expFilterAnchor)}
+        onClose={() => setExpFilterAnchor(null)}
+        activeHeader={expActiveHeader}
+        min={expActiveHeader ? getExpMinMax(expActiveHeader).min : 0}
+        max={expActiveHeader ? getExpMinMax(expActiveHeader).max : 100}
+        rangeFilter={expRangeFilter}
+        onRangeChange={(key, range) => setExpRangeFilter(p => ({ ...p, [key]: range }))}
+        onClear={clearExpRangeFilter}
+      />
     </>
   );
 };

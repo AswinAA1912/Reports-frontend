@@ -3,6 +3,9 @@ import React, {
     useMemo,
     useState,
 } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 
 import {
     Box,
@@ -147,6 +150,20 @@ const TransactionDetailsReport:
             toDate,
         ]);
 
+        const {
+            sortConfig: numSortConfig,
+            rangeFilter: numRangeFilter,
+            setRangeFilter: setNumRangeFilter,
+            filterAnchor: numFilterAnchor,
+            setFilterAnchor: setNumFilterAnchor,
+            activeHeader: numActiveHeader,
+            handleSort: handleNumSort,
+            openFilter: openNumFilter,
+            filteredAndSortedData: numFilteredAndSortedRows,
+            getMinMax,
+            clearRangeFilter,
+        } = useNumericalFilter(rows, ["Debit_Amt", "Credit_Amt"]);
+
         /* ================= PAGINATION ================= */
 
         const paginatedRows =
@@ -158,14 +175,14 @@ const TransactionDetailsReport:
                     ) *
                     rowsPerPage;
 
-                return rows.slice(
+                return numFilteredAndSortedRows.slice(
                     start,
                     start +
                     rowsPerPage
                 );
 
             }, [
-                rows,
+                numFilteredAndSortedRows,
                 page,
                 rowsPerPage,
             ]);
@@ -173,7 +190,7 @@ const TransactionDetailsReport:
         /* ================= TOTALS ================= */
 
         const totalDebit =
-            rows.reduce(
+            numFilteredAndSortedRows.reduce(
                 (
                     sum,
                     row
@@ -187,7 +204,7 @@ const TransactionDetailsReport:
             );
 
         const totalCredit =
-            rows.reduce(
+            numFilteredAndSortedRows.reduce(
                 (
                     sum,
                     row
@@ -227,7 +244,7 @@ const TransactionDetailsReport:
                 );
 
             const totalCredit =
-                rows.reduce(
+                numFilteredAndSortedRows.reduce(
                     (sum, row) =>
                         sum + Number(row.Credit_Amt || 0),
                     0
@@ -236,7 +253,7 @@ const TransactionDetailsReport:
             const netBalance =
                 totalDebit - totalCredit;
 
-            const exportRows = rows.map(
+            const exportRows = numFilteredAndSortedRows.map(
                 (row, index) => ({
                     "S.No":
                         index + 1,
@@ -354,14 +371,14 @@ const TransactionDetailsReport:
         const handleExportPDF = () => {
 
             const totalDebit =
-                rows.reduce(
+                numFilteredAndSortedRows.reduce(
                     (sum, row) =>
                         sum + Number(row.Debit_Amt || 0),
                     0
                 );
 
             const totalCredit =
-                rows.reduce(
+                numFilteredAndSortedRows.reduce(
                     (sum, row) =>
                         sum + Number(row.Credit_Amt || 0),
                     0
@@ -443,7 +460,7 @@ const TransactionDetailsReport:
                 ]],
 
                 body:
-                    rows.map(
+                    numFilteredAndSortedRows.map(
                         (
                             row,
                             index
@@ -710,31 +727,45 @@ const TransactionDetailsReport:
                                                 "Debit Amount",
                                                 "Credit Amount",
                                                 "Ledger Description",
-                                            ].map((header) => (
-                                                <TableCell
-                                                    key={header}
-                                                    align={
-                                                        [
-                                                            "Debit Amount",
-                                                            "Credit Amount",
-                                                        ].includes(header)
-                                                            ? "right"
-                                                            : "left"
-                                                    }
-                                                    sx={{
-                                                        color: "#fff",
-                                                        fontWeight: 700,
-                                                        background: "#1E3A8A",
-                                                        whiteSpace: "nowrap",
-                                                        position: "sticky",
-                                                        top: 0,
-                                                        zIndex: 11,
-                                                        borderBottom: "none",
-                                                    }}
-                                                >
-                                                    {header}
-                                                </TableCell>
-                                            ))}
+                                            ].map((header) => {
+                                                const keyMap: Record<string, string> = {
+                                                    "Debit Amount": "Debit_Amt",
+                                                    "Credit Amount": "Credit_Amt",
+                                                };
+                                                const colKey = keyMap[header];
+                                                const isNumeric = Boolean(colKey);
+
+                                                return (
+                                                    <TableCell
+                                                        key={header}
+                                                        align={isNumeric ? "right" : "left"}
+                                                        onClick={isNumeric ? (e) => openNumFilter(e, colKey) : undefined}
+                                                        sx={{
+                                                            color: "#fff",
+                                                            fontWeight: 700,
+                                                            background: "#1E3A8A",
+                                                            whiteSpace: "nowrap",
+                                                            position: "sticky",
+                                                            top: 0,
+                                                            zIndex: 11,
+                                                            borderBottom: "none",
+                                                            cursor: isNumeric ? "pointer" : "default"
+                                                        }}
+                                                    >
+                                                        {isNumeric ? (
+                                                            <SortableHeaderLabel
+                                                                label={header}
+                                                                columnKey={colKey}
+                                                                sortConfig={numSortConfig}
+                                                                onSort={handleNumSort}
+                                                                onOpenFilter={(e) => openNumFilter(e, colKey)}
+                                                            />
+                                                        ) : (
+                                                            header
+                                                        )}
+                                                    </TableCell>
+                                                );
+                                            })}
                                         </TableRow>
 
                                         {/* TOTAL ROW */}
@@ -913,7 +944,7 @@ const TransactionDetailsReport:
                         <Box mt={2}>
                             <CommonPagination
                                 totalRows={
-                                    rows.length
+                                    numFilteredAndSortedRows.length
                                 }
                                 page={
                                     page
@@ -939,6 +970,18 @@ const TransactionDetailsReport:
                         </Box>
                     </Box>
                 </AppLayout>
+
+                <NumericalFilterMenu
+                    anchorEl={numFilterAnchor}
+                    open={Boolean(numFilterAnchor)}
+                    onClose={() => setNumFilterAnchor(null)}
+                    activeHeader={numActiveHeader}
+                    min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                    max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                    rangeFilter={numRangeFilter}
+                    onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                    onClear={clearRangeFilter}
+                />
             </>
         );
     };

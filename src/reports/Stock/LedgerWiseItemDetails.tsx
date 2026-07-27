@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import { useSearchParams } from "react-router-dom";
 import {
     Box,
@@ -306,6 +309,20 @@ const LedgerItemWiseDetails: React.FC = () => {
         });
     }, [rows, filters, stockFilter]);
 
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(filteredRows, NUMERIC_KEYS);
+
     const enabledColumns = useMemo(
         () =>
             columns
@@ -317,7 +334,7 @@ const LedgerItemWiseDetails: React.FC = () => {
     /* ================= TOTAL ================= */
 
     const getTotal = (key: string) => {
-        const total = filteredRows.reduce(
+        const total = numFilteredAndSortedRows.reduce(
             (s, r) => s + Number(r[key] || 0),
             0
         );
@@ -521,10 +538,10 @@ const LedgerItemWiseDetails: React.FC = () => {
     /* ================= PAGINATION ================= */
 
     const groupedRows = useMemo(() => {
-        if (!groupBy.length) return filteredRows;
-        const groups = groupData(filteredRows);
+        if (!groupBy.length) return numFilteredAndSortedRows;
+        const groups = groupData(numFilteredAndSortedRows);
         return flattenGroups(groups);
-    }, [filteredRows, groupBy, expandedGroups]);
+    }, [numFilteredAndSortedRows, groupBy, expandedGroups]);
 
     const pagedRows = useMemo(() => {
         if (groupBy.length) return groupedRows;
@@ -537,7 +554,7 @@ const LedgerItemWiseDetails: React.FC = () => {
     /* ================= EXPORT ================= */
 
     const handleExportExcel = () => {
-        const worksheet = XLSX.utils.json_to_sheet(filteredRows);
+        const worksheet = XLSX.utils.json_to_sheet(numFilteredAndSortedRows);
         const workbook = XLSX.utils.book_new();
 
         XLSX.utils.book_append_sheet(
@@ -557,7 +574,7 @@ const LedgerItemWiseDetails: React.FC = () => {
 
         autoTable(doc, {
             head: [enabledColumns.map(c => c.label)],
-            body: filteredRows.map(r =>
+            body: numFilteredAndSortedRows.map(r =>
                 enabledColumns.map(c => r[c.key])
             ),
             styles: { fontSize: 7 }
@@ -871,13 +888,28 @@ const LedgerItemWiseDetails: React.FC = () => {
                                     {enabledColumns.map(c => (
                                         <TableCell
                                             key={c.key}
+                                            align={c.isNumeric ? "right" : "left"}
                                             sx={{ color: "#fff", cursor: "pointer" }}
                                             onClick={e => {
-                                                setActiveHeader(c.key);
-                                                setFilterAnchor(e.currentTarget);
+                                                if (c.isNumeric) {
+                                                    openNumFilter(e, c.key);
+                                                } else {
+                                                    setActiveHeader(c.key);
+                                                    setFilterAnchor(e.currentTarget);
+                                                }
                                             }}
                                         >
-                                            {c.label}
+                                            {c.isNumeric ? (
+                                                <SortableHeaderLabel
+                                                    label={c.label}
+                                                    columnKey={c.key}
+                                                    sortConfig={numSortConfig}
+                                                    onSort={handleNumSort}
+                                                    onOpenFilter={(e) => openNumFilter(e, c.key)}
+                                                />
+                                            ) : (
+                                                c.label
+                                            )}
                                         </TableCell>
                                     ))}
                                 </TableRow>
@@ -886,7 +918,7 @@ const LedgerItemWiseDetails: React.FC = () => {
                                     <TableCell>Total</TableCell>
 
                                     {enabledColumns.map(c => (
-                                        <TableCell key={c.key}>
+                                        <TableCell key={c.key} align={c.isNumeric ? "right" : "left"}>
                                             {c.isNumeric ? getTotal(c.key) : ""}
                                         </TableCell>
                                     ))}
@@ -960,7 +992,7 @@ const LedgerItemWiseDetails: React.FC = () => {
 
                                                             if (c.key === groupColumn) {
                                                                 return (
-                                                                    <TableCell key={c.key}>
+                                                                    <TableCell key={c.key} align={c.isNumeric ? "right" : "left"}>
                                                                         <Box pl={row.level * 2}>
                                                                             {row.value} ({row.rows.length})
                                                                         </Box>
@@ -970,13 +1002,13 @@ const LedgerItemWiseDetails: React.FC = () => {
 
                                                             if (c.isNumeric) {
                                                                 return (
-                                                                    <TableCell key={c.key}>
+                                                                    <TableCell key={c.key} align="right">
                                                                         {totals[c.key]}
                                                                     </TableCell>
                                                                 );
                                                             }
 
-                                                            return <TableCell key={c.key}></TableCell>;
+                                                            return <TableCell key={c.key} align={c.isNumeric ? "right" : "left"}></TableCell>;
 
                                                         })}
                                                     </TableRow>
@@ -992,7 +1024,7 @@ const LedgerItemWiseDetails: React.FC = () => {
                                                     </TableCell>
 
                                                     {enabledColumns.map(c => (
-                                                        <TableCell key={c.key}>
+                                                        <TableCell key={c.key} align={c.isNumeric ? "right" : "left"}>
                                                             {row[c.key]}
                                                         </TableCell>
                                                     ))}
@@ -1007,7 +1039,7 @@ const LedgerItemWiseDetails: React.FC = () => {
                     </TableContainer>
 
                     <CommonPagination
-                        totalRows={filteredRows.length}
+                        totalRows={numFilteredAndSortedRows.length}
                         page={page}
                         rowsPerPage={rowsPerPage}
                         onPageChange={setPage}
@@ -1283,6 +1315,18 @@ const LedgerItemWiseDetails: React.FC = () => {
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </>
     );
 };

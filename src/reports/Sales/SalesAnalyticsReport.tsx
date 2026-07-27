@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     Table,
@@ -21,7 +24,6 @@ import {
     DialogContent,
     DialogActions,
     CircularProgress,
-    Slider,
 } from "@mui/material";
 import dayjs from "dayjs";
 import { toast } from "react-toastify";
@@ -179,7 +181,6 @@ const SalesReport: React.FC = () => {
     const [expandedExpandedKeys, setExpandedExpandedKeys] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [stockFilter, setStockFilter] = useState<"hasValues" | "zero" | "all">("hasValues");
-    const [rangeFilter, setRangeFilter] = useState<Record<string, [number, number]>>({});
     const [columnMode, setColumnMode] = useState<Record<string, "total" | "avg">>({});
     const selectedValues =
         activeHeader ? filters.columnFilters[activeHeader!] ?? [] : [];
@@ -463,14 +464,6 @@ const SalesReport: React.FC = () => {
                 if (!values.some(v => v === rowValue)) return false;
             }
 
-            // ✅ RANGE FILTER (NEW 🔥)
-            for (const [key, range] of Object.entries(rangeFilter)) {
-                const val = Number(row[key]);
-                if (!isNaN(val)) {
-                    if (val < range[0] || val > range[1]) return false;
-                }
-            }
-
             // ✅ STOCK FILTER (existing)
             const y1 = Number(row.Y1) || 0;
             const m6 = Number(row.M6) || 0;
@@ -491,7 +484,21 @@ const SalesReport: React.FC = () => {
 
             return true;
         });
-    }, [rawRows, filters, stockFilter, rangeFilter]);
+    }, [rawRows, filters, stockFilter]);
+
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(filteredRows, NUMERIC_KEYS);
 
     /* ================= TOTALS ================= */
 
@@ -549,9 +556,9 @@ const SalesReport: React.FC = () => {
 
     // 2️⃣ GROUP WHOLE DATA
     const groupedRows = useMemo(() => {
-        if (!appliedGroupBy.length) return filteredRows;
-        return buildGroupedData(filteredRows, 0);
-    }, [filteredRows, appliedGroupBy, buildGroupedData]);
+        if (!appliedGroupBy.length) return numFilteredAndSortedRows;
+        return buildGroupedData(numFilteredAndSortedRows, 0);
+    }, [numFilteredAndSortedRows, appliedGroupBy, buildGroupedData]);
 
     const flattenRows = (rows: any[]): any[] => {
         const result: any[] = [];
@@ -579,8 +586,8 @@ const SalesReport: React.FC = () => {
     const paginatedSourceRows = useMemo(() => {
         return appliedGroupBy.length
             ? flattenRows(groupedRows)
-            : filteredRows;
-    }, [groupedRows, filteredRows, appliedGroupBy, expandedKeys]);
+            : numFilteredAndSortedRows;
+    }, [groupedRows, numFilteredAndSortedRows, appliedGroupBy, expandedKeys]);
 
     // ================= FINAL ROWS =================
     const finalRows = useMemo(() => {
@@ -608,24 +615,15 @@ const SalesReport: React.FC = () => {
         [columns]
     );
 
-    const getMinMax = (key: string) => {
-        const nums = rawRows
-            .map(r => Number(r[key]))
-            .filter(v => !isNaN(v));
 
-        return {
-            min: Math.min(...nums),
-            max: Math.max(...nums),
-        };
-    };
 
     /* ================= EXPORTS ================= */
 
     const exportRows = useMemo(() => {
         return appliedGroupBy.length
             ? flattenRows(groupedRows)
-            : filteredRows;
-    }, [groupedRows, filteredRows, appliedGroupBy, expandedKeys]);
+            : numFilteredAndSortedRows;
+    }, [groupedRows, numFilteredAndSortedRows, appliedGroupBy, expandedKeys]);
 
     const handleExportExcel = () => {
         const rows = exportRows.map(row => {
@@ -707,7 +705,7 @@ const SalesReport: React.FC = () => {
         if (!activeHeader) return [];
 
         // 🚨 Apply ALL filters EXCEPT current column
-        const rowsForOptions = rawRows.filter(row => {
+        const rowsForOptions = numFilteredAndSortedRows.filter(row => {
             for (const [key, values] of Object.entries(filters.columnFilters)) {
                 if (key === activeHeader) continue; // ✅ skip current column
                 if (!values.length) continue;
@@ -716,28 +714,18 @@ const SalesReport: React.FC = () => {
                 if (!values.includes(rowValue)) return false;
             }
 
-            // ✅ Apply range filters also except current
-            for (const [key, range] of Object.entries(rangeFilter)) {
-                if (key === activeHeader) continue;
-
-                const val = Number(row[key]);
-                if (!isNaN(val)) {
-                    if (val < range[0] || val > range[1]) return false;
-                }
-            }
-
             return true;
         });
 
         return Array.from(
             new Set(
                 rowsForOptions
-                    .map(r => r[activeHeader])
-                    .filter(v => v !== null && v !== undefined && v !== "")
+                    .map(r => r[activeHeader!])
+                    .filter(Boolean)
                     .map(v => String(v))
             )
         );
-    }, [activeHeader, rawRows, filters, rangeFilter]);
+    }, [activeHeader, numFilteredAndSortedRows, filters]);
 
     const groupableColumns = useMemo(() => {
         return enabledColumns.map(c => ({
@@ -807,7 +795,7 @@ const SalesReport: React.FC = () => {
                                 // ✅ Show group value in grouped column
                                 if (c.key === appliedGroupBy[row.__level]) {
                                     return (
-                                        <TableCell key={c.key} sx={{ fontWeight: 600 }}>
+                                        <TableCell key={c.key} align={c.isNumeric ? "right" : "left"} sx={{ fontWeight: 600 }}>
                                             {row.__value}
                                         </TableCell>
                                     );
@@ -816,14 +804,14 @@ const SalesReport: React.FC = () => {
                                 // ✅ Show totals for numeric columns
                                 if (c.isNumeric) {
                                     return (
-                                        <TableCell key={c.key} sx={{ fontWeight: 600 }}>
+                                        <TableCell key={c.key} align="right" sx={{ fontWeight: 600 }}>
                                             {getGroupTotal(row.__rows, c.key)}
                                         </TableCell>
                                     );
                                 }
 
                                 // ✅ Empty for others
-                                return <TableCell key={c.key} />;
+                                return <TableCell key={c.key} align={c.isNumeric ? "right" : "left"} />;
                             })}
                         </TableRow>
                     </React.Fragment>
@@ -837,10 +825,12 @@ const SalesReport: React.FC = () => {
                     </TableCell>
 
                     {enabledColumns.map(c => {
+                        const align = c.isNumeric ? "right" : "left";
                         if (c.key === "Ledger_Name" && toggleMode === "Abstract") {
                             return (
                                 <TableCell
                                     key={c.key}
+                                    align={align}
                                     sx={{
                                         cursor: "pointer",
                                         color: "#1E3A8A",
@@ -868,7 +858,7 @@ const SalesReport: React.FC = () => {
                         }
 
                         return (
-                            <TableCell key={c.key}>
+                            <TableCell key={c.key} align={align}>
                                 {row[c.key]}
                             </TableCell>
                         );
@@ -948,8 +938,7 @@ const SalesReport: React.FC = () => {
         );
     };
 
-    const activeColumnConfig = columns.find(c => c.key === activeHeader);
-    const isNumberField = activeColumnConfig?.isNumeric ?? false;
+
 
     const handleQuickSave = async () => {
         try {
@@ -1054,7 +1043,7 @@ const SalesReport: React.FC = () => {
         enabledColumns.forEach(c => {
             if (!c.isNumeric) return;
 
-            const values = filteredRows
+            const values = numFilteredAndSortedRows
                 .map(row => Number(row[c.key]))
                 .filter(v => !isNaN(v));
 
@@ -1074,7 +1063,7 @@ const SalesReport: React.FC = () => {
 
         return map;
 
-    }, [filteredRows, enabledColumns, columnMode]);
+    }, [numFilteredAndSortedRows, enabledColumns, columnMode]);
 
     /* ================= RENDER ================= */
 
@@ -1227,6 +1216,7 @@ const SalesReport: React.FC = () => {
                                     {enabledColumns.map(c => (
                                         <TableCell
                                             key={c.key}
+                                            align={c.isNumeric ? "right" : "left"}
                                             sx={{
                                                 color: "#fff",
                                                 backgroundColor: appliedGroupBy.includes(c.key)
@@ -1242,38 +1232,45 @@ const SalesReport: React.FC = () => {
                                                 justifyContent="space-between"
                                                 gap={0.5}
                                             >
-                                                {/* 🔹 COLUMN LABEL (FILTER CLICK) */}
-                                                <Box
-                                                    sx={{ cursor: "pointer", flex: 1 }}
-                                                    onClick={e => {
-                                                        setActiveHeader(c.key);
-                                                        setFilterAnchor(e.currentTarget);
-                                                    }}
-                                                >
-                                                    {c.label}
-                                                </Box>
-
-                                                {/* 🔥 COLUMN MODE TOGGLE */}
-                                                {c.isNumeric && (
-                                                    <Tooltip
-                                                        title={
-                                                            columnMode[c.key] === "avg"
-                                                                ? "Showing Average (Click for Total)"
-                                                                : "Showing Total (Click for Avg)"
-                                                        }
-                                                    >
-                                                        <IconButton
-                                                            size="small"
-                                                            onClick={() => toggleColumnMode(c.key)}
-                                                            sx={{
-                                                                color: "#fff",
-                                                                p: 0.3,
-                                                                opacity: columnMode[c.key] === "avg" ? 1 : 0.7
-                                                            }}
+                                                {c.isNumeric ? (
+                                                    <Box sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                                                        <SortableHeaderLabel
+                                                            label={c.label}
+                                                            columnKey={c.key}
+                                                            sortConfig={numSortConfig}
+                                                            onSort={handleNumSort}
+                                                            onOpenFilter={(e) => openNumFilter(e, c.key)}
+                                                        />
+                                                        <Tooltip
+                                                            title={
+                                                                columnMode[c.key] === "avg"
+                                                                    ? "Showing Average (Click for Total)"
+                                                                    : "Showing Total (Click for Avg)"
+                                                            }
                                                         >
-                                                            <FunctionsIcon fontSize="small" />
-                                                        </IconButton>
-                                                    </Tooltip>
+                                                            <IconButton
+                                                                size="small"
+                                                                onClick={() => toggleColumnMode(c.key)}
+                                                                sx={{
+                                                                    color: "#fff",
+                                                                    p: 0.3,
+                                                                    opacity: columnMode[c.key] === "avg" ? 1 : 0.7
+                                                                }}
+                                                            >
+                                                                <FunctionsIcon fontSize="small" />
+                                                            </IconButton>
+                                                        </Tooltip>
+                                                    </Box>
+                                                ) : (
+                                                    <Box
+                                                        sx={{ cursor: "pointer", flex: 1 }}
+                                                        onClick={e => {
+                                                            setActiveHeader(c.key);
+                                                            setFilterAnchor(e.currentTarget);
+                                                        }}
+                                                    >
+                                                        {c.label}
+                                                    </Box>
                                                 )}
                                             </Box>
                                         </TableCell>
@@ -1286,7 +1283,7 @@ const SalesReport: React.FC = () => {
                                         Total / Avg
                                     </TableCell>
                                     {enabledColumns.map(c => (
-                                        <TableCell key={c.key}>
+                                        <TableCell key={c.key} align={c.isNumeric ? "right" : "left"}>
                                             {c.isNumeric ? totalsMap[c.key] : ""}
                                         </TableCell>
                                     ))}
@@ -1353,109 +1350,6 @@ const SalesReport: React.FC = () => {
                                 sx={{ mb: 1 }}
                             />
 
-                            {/* 🔥 RANGE SLIDER (ONLY NUMBER FIELD) */}
-                            {isNumberField && (() => {
-                                const { min, max } = getMinMax(activeHeader);
-
-                                const currentRange =
-                                    rangeFilter[activeHeader] || [min, max];
-
-                                const handleSliderChange = (newValue: number[]) => {
-                                    setRangeFilter(prev => ({
-                                        ...prev,
-                                        [activeHeader!]: newValue as [number, number],
-                                    }));
-                                };
-
-                                const handleFromChange = (value: string) => {
-                                    let newFrom = Number(value);
-                                    if (isNaN(newFrom)) return;
-
-                                    newFrom = Math.max(min, Math.min(newFrom, currentRange[1]));
-
-                                    handleSliderChange([newFrom, currentRange[1]]);
-                                };
-
-                                const handleToChange = (value: string) => {
-                                    let newTo = Number(value);
-                                    if (isNaN(newTo)) return;
-
-                                    newTo = Math.min(max, Math.max(newTo, currentRange[0]));
-
-                                    handleSliderChange([currentRange[0], newTo]);
-                                };
-
-                                return (
-                                    <Box m={1}>
-                                        {/* 🔥 RANGE HEADER + INPUTS INLINE */}
-                                        <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-
-                                            {/* LABEL */}
-                                            <Typography fontSize={12} sx={{ minWidth: 40 }}>
-                                                Range
-                                            </Typography>
-
-                                            {/* FROM */}
-                                            <TextField
-                                                type="number"
-                                                size="small"
-                                                value={currentRange[0]}
-                                                onChange={(e) => handleFromChange(e.target.value)}
-                                                placeholder="From"
-                                                sx={{
-                                                    width: 65,
-                                                    "& input": {
-                                                        py: 0.4,
-                                                        fontSize: "0.75rem",
-                                                        textAlign: "center"
-                                                    }
-                                                }}
-                                            />
-
-                                            {/* DASH */}
-                                            <Typography fontSize={12}>—</Typography>
-
-                                            {/* TO */}
-                                            <TextField
-                                                type="number"
-                                                size="small"
-                                                value={currentRange[1]}
-                                                onChange={(e) => handleToChange(e.target.value)}
-                                                placeholder="To"
-                                                sx={{
-                                                    width: 65,
-                                                    "& input": {
-                                                        py: 0.4,
-                                                        fontSize: "0.75rem",
-                                                        textAlign: "center"
-                                                    }
-                                                }}
-                                            />
-                                        </Box>
-
-                                        {/* 🔥 SLIDER */}
-                                        <Slider
-                                            value={currentRange}
-                                            min={min}
-                                            max={max}
-                                            step={1}
-                                            size="small"
-                                            onChange={(_, newValue) =>
-                                                handleSliderChange(newValue as number[])
-                                            }
-                                            valueLabelDisplay="auto"
-                                            sx={{
-                                                py: 0,
-                                                "& .MuiSlider-thumb": {
-                                                    width: 12,
-                                                    height: 12,
-                                                }
-                                            }}
-                                        />
-                                    </Box>
-                                );
-                            })()}
-
                             {/* CLEAR */}
                             <MenuItem
                                 onClick={() => {
@@ -1463,12 +1357,6 @@ const SalesReport: React.FC = () => {
                                         const copy = { ...p.columnFilters };
                                         delete copy[activeHeader];
                                         return { ...p, columnFilters: copy };
-                                    });
-
-                                    setRangeFilter(p => {
-                                        const copy = { ...p };
-                                        delete copy[activeHeader];
-                                        return copy;
                                     });
 
                                     setFilterAnchor(null);
@@ -1583,8 +1471,9 @@ const SalesReport: React.FC = () => {
                             .sort((a, b) => a.order - b.order)
                             .map(col => (
                                 <SortableColumnItem
+                                    key={col.key}
                                     column={col}
-                                    showFilter={!!filters.columnFilters[col.key]?.length}
+                                    showFilter={!!filters.columnFilters[col.key]?.length || !!numRangeFilter[col.key]}
                                     onToggle={() =>
                                         setColumns(prev =>
                                             prev.map(c =>
@@ -1743,7 +1632,19 @@ const SalesReport: React.FC = () => {
                         Save
                     </Button>
                 </DialogActions>
-            </Dialog>
+             </Dialog>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </>
     );
 };

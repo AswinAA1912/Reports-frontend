@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     Table,
@@ -749,6 +752,8 @@ const StaffBasedGroupingReport: React.FC = () => {
                             "Others3",
                             "Others4",
                             "Others5",
+                            "Supervisor",
+                            "Ladies_Coolie",
                             "Created_By",
                         ];
 
@@ -782,6 +787,8 @@ const StaffBasedGroupingReport: React.FC = () => {
                             "Delivery_Man",
                             "Others6",
                             "Driver",
+                            "Ladies_Coolie",
+                            "Supervisor",
                             "Created_By",
                         ];
 
@@ -1349,10 +1356,32 @@ const StaffBasedGroupingReport: React.FC = () => {
         return rows;
     }, [rawRows, filters.columnFilters, stockFilter]);
 
+    const numericKeys = useMemo(() => {
+        return columns.filter((c) => c.isNumeric).map((c) => c.key);
+    }, [columns]);
+
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(filteredRows, numericKeys);
+
     /* ================= SORTING ================= */
 
     const sortedRows = useMemo(() => {
-        if (!sortConfig.key) return filteredRows;
+        if (numSortConfig) {
+            return numFilteredAndSortedRows;
+        }
+
+        if (!sortConfig.key) return numFilteredAndSortedRows;
 
         return [...filteredRows].sort((a, b) => {
             const aVal = a[sortConfig.key!];
@@ -1382,7 +1411,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                 ? String(aVal).localeCompare(String(bVal))
                 : String(bVal).localeCompare(String(aVal));
         });
-    }, [filteredRows, sortConfig]);
+    }, [numFilteredAndSortedRows, numSortConfig, sortConfig]);
 
     /* ================= GROUPING ================= */
 
@@ -2220,13 +2249,10 @@ const StaffBasedGroupingReport: React.FC = () => {
                                         return (
                                             <TableCell
                                                 key={c.key}
+                                                align={c.isNumeric ? "right" : "left"}
                                                 sx={{
                                                     color: "#fff",
-                                                    cursor: isQtyHeader
-                                                        ? "pointer"
-                                                        : !c.isNumeric
-                                                            ? "pointer"
-                                                            : "default",
+                                                    cursor: "pointer",
                                                     userSelect: "none",
                                                 }}
                                                 onClick={(e) => {
@@ -2239,6 +2265,8 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                     // Existing filter click
                                                     if (!c.isNumeric) {
                                                         handleHeaderClick(e, c.key);
+                                                    } else {
+                                                        openNumFilter(e, c.key);
                                                     }
                                                 }}
                                             >
@@ -2253,14 +2281,26 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                             alignItems: "center",
                                                             fontWeight:
                                                                 isQtyHeader ? 700 : 500,
+                                                            width: "100%",
                                                         }}
                                                     >
-                                                        {isQtyHeader
-                                                            ? `Total Qty (${useActualQty
-                                                                ? "Act_Qty"
-                                                                : "Qty"
-                                                            })`
-                                                            : c.label}
+                                                        {c.isNumeric ? (
+                                                            <SortableHeaderLabel
+                                                                label={isQtyHeader
+                                                                    ? `Total Qty (${useActualQty ? "Act_Qty" : "Qty"})`
+                                                                    : c.label
+                                                                }
+                                                                columnKey={c.key}
+                                                                sortConfig={numSortConfig}
+                                                                onSort={(key) => {
+                                                                    setSortConfig({ key: null, order: "asc" });
+                                                                    handleNumSort(key);
+                                                                }}
+                                                                onOpenFilter={(e) => openNumFilter(e, c.key)}
+                                                            />
+                                                        ) : (
+                                                            c.label
+                                                        )}
                                                     </Box>
                                                 </Box>
                                             </TableCell>
@@ -2279,7 +2319,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                     {enabledColumns.map((c) => {
                                         if (!c.isNumeric) {
                                             return (
-                                                <TableCell key={c.key}>
+                                                <TableCell key={c.key} align="left">
                                                     -
                                                 </TableCell>
                                             );
@@ -2323,7 +2363,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                 );
 
                                             return (
-                                                <TableCell key={c.key}>
+                                                <TableCell key={c.key} align="right">
                                                     {formatDisplay(totalQty, totalInvoiceCount, true)}
                                                 </TableCell>
                                             );
@@ -2352,7 +2392,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                 );
 
                                             return (
-                                                <TableCell key={c.key}>
+                                                <TableCell key={c.key} align="right">
                                                     {formatDisplay(totalQty, invoiceCount)}
                                                 </TableCell>
                                             );
@@ -2364,7 +2404,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                         );
 
                                         return (
-                                            <TableCell key={c.key}>
+                                            <TableCell key={c.key} align="right">
                                                 {total > 0
                                                     ? total.toFixed(2)
                                                     : "-"}
@@ -2418,7 +2458,7 @@ const StaffBasedGroupingReport: React.FC = () => {
 
                                                             if (c.key === currentGroupKey) {
                                                                 return (
-                                                                    <TableCell key={c.key} sx={{ fontWeight: 700 }}>
+                                                                    <TableCell key={c.key} align={c.isNumeric ? "right" : "left"} sx={{ fontWeight: 700 }}>
                                                                         {row.__value}
                                                                     </TableCell>
                                                                 );
@@ -2459,7 +2499,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                                     );
 
                                                                     return (
-                                                                        <TableCell key={c.key}>
+                                                                        <TableCell key={c.key} align="right">
                                                                             {formatDisplay(totalQty, invoiceCount, true)}
                                                                         </TableCell>
                                                                     );
@@ -2485,7 +2525,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                                     );
 
                                                                     return (
-                                                                        <TableCell key={c.key}>
+                                                                        <TableCell key={c.key} align="right">
                                                                             {formatDisplay(totalQty, invoiceCount)}
                                                                         </TableCell>
                                                                     );
@@ -2499,7 +2539,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                                 );
 
                                                                 return (
-                                                                    <TableCell key={c.key}>
+                                                                    <TableCell key={c.key} align="right">
                                                                         {total > 0
                                                                             ? total.toFixed(2)
                                                                             : "-"}
@@ -2519,82 +2559,85 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                         {!row.__group ? ++serialRef.current : ""}
                                                     </TableCell>
 
-                                                    {enabledColumns.map(c => (
-                                                        <TableCell key={c.key}>
-                                                            {c.key === "Ledger_Date"
-                                                                ? dayjs(row[c.key]).format("DD/MM/YYYY")
+                                                    {enabledColumns.map(c => {
+                                                        const align = c.isNumeric ? "right" : "left";
+                                                        return (
+                                                            <TableCell key={c.key} align={align}>
+                                                                {c.key === "Ledger_Date"
+                                                                    ? dayjs(row[c.key]).format("DD/MM/YYYY")
 
-                                                                : c.isNumeric
-                                                                    ? (() => {
+                                                                    : c.isNumeric
+                                                                        ? (() => {
 
-                                                                        const workColumns = [
-                                                                            "Load_Man",
-                                                                            "Others1",
-                                                                            "Others2",
-                                                                            "Others3",
-                                                                            "Others4",
-                                                                            "Others5",
-                                                                            "Checker",
-                                                                            "Delivery_Man",
-                                                                            "Others6",
-                                                                            "Driver",
-                                                                            "Created_By",
-                                                                        ];
+                                                                            const workColumns = [
+                                                                                "Load_Man",
+                                                                                "Others1",
+                                                                                "Others2",
+                                                                                "Others3",
+                                                                                "Others4",
+                                                                                "Others5",
+                                                                                "Checker",
+                                                                                "Delivery_Man",
+                                                                                "Others6",
+                                                                                "Driver",
+                                                                                "Created_By",
+                                                                            ];
 
-                                                                        const isAbstractNumericKey = toggleMode === "Abstract" && (c.key === "Total" || c.key.includes("."));
-                                                                        const actualKey = isAbstractNumericKey ? `${c.key}_${staffBasedDisplayMode}` : c.key;
-                                                                        const value =
-                                                                            Number(row[actualKey] || 0);
+                                                                            const isAbstractNumericKey = toggleMode === "Abstract" && (c.key === "Total" || c.key.includes("."));
+                                                                            const actualKey = isAbstractNumericKey ? `${c.key}_${staffBasedDisplayMode}` : c.key;
+                                                                            const value =
+                                                                                Number(row[actualKey] || 0);
 
-                                                                        // Show qty + invoice count
-                                                                        if (workColumns.includes(c.key)) {
-                                                                            const invoiceCount =
-                                                                                row.__categoryInvoiceCount?.[
-                                                                                c.key
-                                                                                ] || 0;
+                                                                            // Show qty + invoice count
+                                                                            if (workColumns.includes(c.key)) {
+                                                                                const invoiceCount =
+                                                                                    row.__categoryInvoiceCount?.[
+                                                                                    c.key
+                                                                                    ] || 0;
 
-                                                                            return formatDisplay(value, invoiceCount);
-                                                                        }
-
-
-                                                                        // Qty column
-                                                                        if (c.key === "Qty") {
-                                                                            const displayQty = Number(
-                                                                                useActualQty
-                                                                                    ? row.Act_Qty || 0
-                                                                                    : row.Qty || 0
-                                                                            );
-
-                                                                            const invoiceCount =
-                                                                                row.__qtyInvoiceCount || 0;
-
-                                                                            return formatDisplay(displayQty, invoiceCount, true);
-                                                                        }
-
-                                                                        if (toggleMode === "Abstract") {
-                                                                            if (staffBasedDisplayMode === "qty") {
-                                                                                return value > 0 ? value.toFixed(2) : "-";
-                                                                            } else {
-                                                                                return value > 0 ? value.toFixed(0) : "-";
+                                                                                return formatDisplay(value, invoiceCount);
                                                                             }
-                                                                        }
 
-                                                                        return Number.isFinite(value) &&
-                                                                            value > 0
-                                                                            ? value.toFixed(2)
-                                                                            : "-";
-                                                                    })()
 
-                                                                    : (
-                                                                        row[c.key] !== null &&
-                                                                        row[c.key] !== undefined &&
-                                                                        row[c.key] !== ""
-                                                                    )
-                                                                        ? row[c.key]
-                                                                        : "-"
-                                                            }
-                                                        </TableCell>
-                                                    ))}
+                                                                            // Qty column
+                                                                            if (c.key === "Qty") {
+                                                                                const displayQty = Number(
+                                                                                    useActualQty
+                                                                                        ? row.Act_Qty || 0
+                                                                                        : row.Qty || 0
+                                                                                );
+
+                                                                                const invoiceCount =
+                                                                                    row.__qtyInvoiceCount || 0;
+
+                                                                                return formatDisplay(displayQty, invoiceCount, true);
+                                                                            }
+
+                                                                            if (toggleMode === "Abstract") {
+                                                                                if (staffBasedDisplayMode === "qty") {
+                                                                                    return value > 0 ? value.toFixed(2) : "-";
+                                                                                } else {
+                                                                                    return value > 0 ? value.toFixed(0) : "-";
+                                                                                }
+                                                                            }
+
+                                                                            return Number.isFinite(value) &&
+                                                                                value > 0
+                                                                                ? value.toFixed(2)
+                                                                                : "-";
+                                                                        })()
+
+                                                                        : (
+                                                                            row[c.key] !== null &&
+                                                                            row[c.key] !== undefined &&
+                                                                            row[c.key] !== ""
+                                                                        )
+                                                                            ? row[c.key]
+                                                                            : "-"
+                                                                }
+                                                            </TableCell>
+                                                        );
+                                                    })}
                                                 </TableRow>
                                             );
                                         });
@@ -2959,6 +3002,18 @@ const StaffBasedGroupingReport: React.FC = () => {
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </>
     );
 };

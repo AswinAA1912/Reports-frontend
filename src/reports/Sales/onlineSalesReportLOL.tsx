@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     Table,
@@ -485,10 +488,28 @@ const OnlineSalesReportLOL: React.FC = () => {
         });
     }, [rawRows, filters]);
 
-    const sortedRows = useMemo(() => {
-        if (!sortConfig.key) return filteredRows;
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(filteredRows, NUMERIC_KEYS);
 
-        return [...filteredRows].sort((a, b) => {
+    const sortedRows = useMemo(() => {
+        if (numSortConfig) {
+            return numFilteredAndSortedRows;
+        }
+
+        if (!sortConfig.key) return numFilteredAndSortedRows;
+
+        return [...numFilteredAndSortedRows].sort((a, b) => {
             const aVal = a[sortConfig.key!];
             const bVal = b[sortConfig.key!];
 
@@ -514,7 +535,7 @@ const OnlineSalesReportLOL: React.FC = () => {
                 ? String(aVal).localeCompare(String(bVal))
                 : String(bVal).localeCompare(String(aVal));
         });
-    }, [filteredRows, sortConfig]);
+    }, [numFilteredAndSortedRows, numSortConfig, sortConfig]);
 
     /* ================= GROUPING ================= */
 
@@ -1326,44 +1347,59 @@ const OnlineSalesReportLOL: React.FC = () => {
                                     {enabledColumns.map((c) => (
                                         <TableCell
                                             key={c.key}
+                                            align={c.isNumeric ? "right" : "left"}
                                             sx={{
                                                 color: "#fff",
-                                                cursor: !c.isNumeric ? "pointer" : "default",
+                                                cursor: "pointer",
                                             }}
-                                            onClick={(e) =>
-                                                !c.isNumeric && handleHeaderClick(e, c.key)
-                                            }
+                                            onClick={(e) => {
+                                                if (c.isNumeric) {
+                                                    openNumFilter(e, c.key);
+                                                } else {
+                                                    handleHeaderClick(e, c.key);
+                                                }
+                                            }}
                                         >
-                                            <Box
-                                                display="flex"
-                                                alignItems="center"
-                                                justifyContent="space-between"
-                                            >
-                                                {/* HEADER LABEL (FILTER CLICK) */}
-                                                <Box sx={{ display: "flex", alignItems: "center" }}>
-                                                    {c.label}
-                                                </Box>
-
-                                                {/* SORT ICON (SORT CLICK) */}
-                                                <IconButton
-                                                    size="small"
-                                                    sx={{ color: "#fff", p: 0 }}
-                                                    onClick={(e) => handleSortClick(e, c.key)}
+                                            {c.isNumeric ? (
+                                                <SortableHeaderLabel
+                                                    label={c.label}
+                                                    columnKey={c.key}
+                                                    sortConfig={numSortConfig}
+                                                    onSort={handleNumSort}
+                                                    onOpenFilter={(e) => openNumFilter(e, c.key)}
+                                                />
+                                            ) : (
+                                                <Box
+                                                    display="flex"
+                                                    alignItems="center"
+                                                    justifyContent="space-between"
                                                 >
-                                                    {sortConfig.key === c.key ? (
-                                                        sortConfig.order === "asc" ? (
-                                                            <ArrowDropDownIcon fontSize="small" />
+                                                    <Box sx={{ display: "flex", alignItems: "center" }}>
+                                                        {c.label}
+                                                    </Box>
+                                                    <IconButton
+                                                        size="small"
+                                                        sx={{ color: "#fff", p: 0 }}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleSortClick(e, c.key);
+                                                        }}
+                                                    >
+                                                        {sortConfig.key === c.key ? (
+                                                            sortConfig.order === "asc" ? (
+                                                                <ArrowDropDownIcon fontSize="small" />
+                                                            ) : (
+                                                                <ArrowDropUpIcon fontSize="small" />
+                                                            )
                                                         ) : (
-                                                            <ArrowDropUpIcon fontSize="small" />
-                                                        )
-                                                    ) : (
-                                                        <ArrowDropDownIcon
-                                                            fontSize="small"
-                                                            sx={{ opacity: 0.3 }}
-                                                        />
-                                                    )}
-                                                </IconButton>
-                                            </Box>
+                                                            <ArrowDropDownIcon
+                                                                fontSize="small"
+                                                                sx={{ opacity: 0.3 }}
+                                                            />
+                                                        )}
+                                                    </IconButton>
+                                                </Box>
+                                            )}
                                         </TableCell>
                                     ))}
                                 </TableRow>
@@ -1377,7 +1413,7 @@ const OnlineSalesReportLOL: React.FC = () => {
                                 >
                                     <TableCell>Total</TableCell>
                                     {enabledColumns.map((c) => (
-                                        <TableCell key={c.key}>
+                                        <TableCell key={c.key} align={c.isNumeric ? "right" : "left"}>
                                             {c.isNumeric
                                                 ? CURRENCY_KEYS.includes(c.key)
                                                     ? formatINR(getTotal(c.key))
@@ -1436,7 +1472,7 @@ const OnlineSalesReportLOL: React.FC = () => {
                                                             );
 
                                                             return (
-                                                                <TableCell key={c.key}>
+                                                                <TableCell key={c.key} align="right">
                                                                     {CURRENCY_KEYS.includes(c.key)
                                                                         ? formatINR(total)
                                                                         : total}
@@ -1444,7 +1480,7 @@ const OnlineSalesReportLOL: React.FC = () => {
                                                             );
                                                         }
 
-                                                        return <TableCell key={c.key} />;
+                                                        return <TableCell key={c.key} align={c.isNumeric ? "right" : "left"} />;
                                                     })}
                                                 </TableRow>
                                             );
@@ -1456,13 +1492,16 @@ const OnlineSalesReportLOL: React.FC = () => {
                                                     {!row.__group ? ++serialRef.current : ""}
                                                 </TableCell>
 
-                                                {enabledColumns.map(c => (
-                                                    <TableCell key={c.key}>
-                                                        {c.key === "Ledger_Date"
-                                                            ? dayjs(row[c.key]).format("DD/MM/YYYY")
-                                                            : row[c.key]}
-                                                    </TableCell>
-                                                ))}
+                                                {enabledColumns.map(c => {
+                                                    const align = c.isNumeric ? "right" : "left";
+                                                    return (
+                                                        <TableCell key={c.key} align={align}>
+                                                            {c.key === "Ledger_Date"
+                                                                ? dayjs(row[c.key]).format("DD/MM/YYYY")
+                                                                : row[c.key]}
+                                                        </TableCell>
+                                                    );
+                                                })}
                                             </TableRow>
                                         );
                                     });
@@ -1801,6 +1840,18 @@ const OnlineSalesReportLOL: React.FC = () => {
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </>
     );
 };

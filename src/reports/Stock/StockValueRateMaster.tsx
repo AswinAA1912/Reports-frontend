@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     Table,
@@ -132,7 +135,7 @@ const StockValueRateMasterReport: React.FC = () => {
     };
 
     /* ================= FILTERED DATA ================= */
-    const filteredData = useMemo(() => {
+    const filterProcessedData = useMemo(() => {
         let rows = applyFilters(mergedData);
 
         if (selectedBrand !== "All") {
@@ -140,14 +143,39 @@ const StockValueRateMasterReport: React.FC = () => {
                 (row) => row.POS_Brand_Name === selectedBrand
             );
         }
+        return rows;
+    }, [mergedData, columnFilters, selectedBrand]);
 
-        return rows.sort((a, b) => {
-            const brandCompare = a.POS_Brand_Name.localeCompare(b.POS_Brand_Name);
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(filterProcessedData, ["Min_Rate", "Rate", "CL_Rate"]);
+
+    const filteredData = useMemo(() => {
+        if (numSortConfig) {
+            return numFilteredAndSortedRows;
+        }
+
+        return [...numFilteredAndSortedRows].sort((a, b) => {
+            const brandA = a.POS_Brand_Name || "";
+            const brandB = b.POS_Brand_Name || "";
+            const brandCompare = brandA.localeCompare(brandB);
             if (brandCompare !== 0) return brandCompare;
 
-            return a.Product_Name.localeCompare(b.Product_Name);
+            const nameA = a.Product_Name || "";
+            const nameB = b.Product_Name || "";
+            return nameA.localeCompare(nameB);
         });
-    }, [mergedData, columnFilters, selectedBrand]);
+    }, [numFilteredAndSortedRows, numSortConfig]);
 
     const formatINR = (value: number) => {
         return new Intl.NumberFormat("en-IN", {
@@ -329,9 +357,33 @@ const StockValueRateMasterReport: React.FC = () => {
                                             >
                                                 Product Name
                                             </TableCell>
-                                            <TableCell sx={{ color: "#fff" }}>Min Rate</TableCell>
-                                            <TableCell sx={{ color: "#fff" }}>List Rate</TableCell>
-                                            <TableCell sx={{ color: "#fff" }}>CL Rate</TableCell>
+                                            <TableCell sx={{ color: "#fff" }} align="right">
+                                                <SortableHeaderLabel
+                                                    label="Min Rate"
+                                                    columnKey="Min_Rate"
+                                                    sortConfig={numSortConfig}
+                                                    onSort={handleNumSort}
+                                                    onOpenFilter={(e) => openNumFilter(e, "Min_Rate")}
+                                                />
+                                            </TableCell>
+                                            <TableCell sx={{ color: "#fff" }} align="right">
+                                                <SortableHeaderLabel
+                                                    label="List Rate"
+                                                    columnKey="Rate"
+                                                    sortConfig={numSortConfig}
+                                                    onSort={handleNumSort}
+                                                    onOpenFilter={(e) => openNumFilter(e, "Rate")}
+                                                />
+                                            </TableCell>
+                                            <TableCell sx={{ color: "#fff" }} align="right">
+                                                <SortableHeaderLabel
+                                                    label="CL Rate"
+                                                    columnKey="CL_Rate"
+                                                    sortConfig={numSortConfig}
+                                                    onSort={handleNumSort}
+                                                    onOpenFilter={(e) => openNumFilter(e, "CL_Rate")}
+                                                />
+                                            </TableCell>
                                         </TableRow>
                                     </TableHead>
 
@@ -373,11 +425,11 @@ const StockValueRateMasterReport: React.FC = () => {
 
                                                         <TableCell>{row.Product_Name}</TableCell>
 
-                                                        <TableCell>{formatINR(row.Min_Rate)}</TableCell>
+                                                        <TableCell align="right">{formatINR(row.Min_Rate)}</TableCell>
 
-                                                        <TableCell>{formatINR(row.Rate)}</TableCell>
+                                                        <TableCell align="right">{formatINR(row.Rate)}</TableCell>
 
-                                                        <TableCell>{formatINR(row.CL_Rate)}</TableCell>
+                                                        <TableCell align="right">{formatINR(row.CL_Rate)}</TableCell>
                                                     </TableRow>
                                                 </React.Fragment>
                                             );
@@ -475,6 +527,18 @@ const StockValueRateMasterReport: React.FC = () => {
                         })}
                 </Box>
             </Menu>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </>
     );
 };

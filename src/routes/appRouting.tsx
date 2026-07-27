@@ -26,6 +26,8 @@ import StockValueReport from "../reports/Stock/stockValueReport";
 import StockValueRateMasterReport from "../reports/Stock/StockValueRateMaster";
 import StaffBasedReport from "../reports/StaffBased/staffBasedReport";
 import LOSStaffBasedReport from "../reports/StaffBased/LOSstaffBasedReport";
+import ProductionStaffBasedReport from "../reports/StaffBased/productionStaffBasedReport";
+import ProductionStaffBasedDetails from "../reports/StaffBased/productionStaffBasedDetails";
 import ExpensesReport from "../reports/Expenses/ExpensesReport";
 import CostingReport from "../reports/Expenses/CostingReport";
 import OutstandingReport from "../reports/Expenses/outstandingReport";
@@ -42,6 +44,7 @@ import PendingSaleOrder from "../reports/Sales/PendingSaleOrderReport";
 import InStockReport from "../reports/Stock/InStockReport";
 import SalesDeliveryReport from "../reports/Sales/salesDeliveryReport";
 import RetailerLocations from "./RetailerLocations";
+import RecievablePayableReport from "../reports/Expenses/recievablePayableReport";
 
 interface AppRoutingProps {
   setActiveCategory: (category: string) => void;
@@ -63,6 +66,7 @@ const URLSyncHandler: React.FC<{ setActiveCategory: (cat: string) => void }> = (
       // "/salesinvoice": "Sales Invoice Report",
       "/salesreport": "Online Sales Report",
       "/uniteconomics": "Unit Economics Report",
+      "/recievablePayable": "Receivable & Payable Report",
       "/": "Login",
     };
 
@@ -372,6 +376,32 @@ const AppRouting: React.FC<AppRoutingProps> = ({
         />
 
         <Route
+          path="/productionStaffBased"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <ProductionStaffBasedReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/productionStaffBasedDetails"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <ProductionStaffBasedDetails />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
           path="/expense"
           element={
             <RequireAuth>
@@ -399,6 +429,17 @@ const AppRouting: React.FC<AppRoutingProps> = ({
             <RequireAuth>
               <AppLayout>
                 <OutstandingReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/recievablePayable"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <RecievablePayableReport />
               </AppLayout>
             </RequireAuth>
           }

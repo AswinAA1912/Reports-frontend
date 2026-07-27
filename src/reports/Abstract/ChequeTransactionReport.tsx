@@ -1,4 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     Paper,
@@ -310,10 +313,24 @@ const ChequeTransactionReport: React.FC = () => {
         });
     }, [chequeData, chequeFilters, columnFilters]);
 
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(filteredChequeData, ["debit_amount", "credit_amount"]);
+
     const chequeTotals = useMemo(() => {
         let debitSum = 0;
         let creditSum = 0;
-        filteredChequeData.forEach((item: any) => {
+        numFilteredAndSortedRows.forEach((item: any) => {
             debitSum += Number(item.debit_amount || 0);
             creditSum += Number(item.credit_amount || 0);
         });
@@ -321,18 +338,18 @@ const ChequeTransactionReport: React.FC = () => {
             debit: debitSum,
             credit: creditSum
         };
-    }, [filteredChequeData]);
+    }, [numFilteredAndSortedRows]);
 
     const [chequePage, setChequePage] = useState(1);
     const [chequeRowsPerPage, setChequeRowsPerPage] = useState(100);
 
     const paginatedChequeData = useMemo(() => {
-        return filteredChequeData.slice((chequePage - 1) * chequeRowsPerPage, chequePage * chequeRowsPerPage);
-    }, [filteredChequeData, chequePage, chequeRowsPerPage]);
+        return numFilteredAndSortedRows.slice((chequePage - 1) * chequeRowsPerPage, chequePage * chequeRowsPerPage);
+    }, [numFilteredAndSortedRows, chequePage, chequeRowsPerPage]);
 
     useEffect(() => {
         setChequePage(1);
-    }, [filteredChequeData]);
+    }, [numFilteredAndSortedRows]);
 
     const formatNum = (v: any) => {
         const num = Number(v);
@@ -361,7 +378,7 @@ const ChequeTransactionReport: React.FC = () => {
                 "Credit"
             ]);
 
-            filteredChequeData.forEach((row: any, idx: number) => {
+            numFilteredAndSortedRows.forEach((row: any, idx: number) => {
                 excelData.push([
                     idx + 1,
                     row.receipt_date ? dayjs(row.receipt_date).format("DD-MM-YYYY") : "",
@@ -395,7 +412,7 @@ const ChequeTransactionReport: React.FC = () => {
             doc.text("CHEQUE TRANSACTION DETAILS", 148, 12, { align: "center" });
 
             const headers = [["S.No", "Rec.Date", "Rec.No", "VchType", "Party Name", "Chq.No", "Chq.Date", "Bank.Date", "Debit", "Credit"]];
-            const body = filteredChequeData.map((row: any, idx: number) => [
+            const data = numFilteredAndSortedRows.map((row: any, idx: number) => [
                 idx + 1,
                 row.receipt_date ? dayjs(row.receipt_date).format("DD-MM-YYYY") : "",
                 row.receipt_invoice_no || "",
@@ -411,11 +428,13 @@ const ChequeTransactionReport: React.FC = () => {
             autoTable(doc, {
                 startY: 20,
                 head: headers,
-                body: body,
+                body: data,
                 styles: { fontSize: 8, cellPadding: 1.5 },
                 headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
                 theme: "grid"
             });
+            const pageHeight = doc.internal.pageSize.height;
+            doc.text(`Total: ${formatNum(chequeTotals.debit)} / ${formatNum(chequeTotals.credit)} | Rows: ${numFilteredAndSortedRows.length}`, 14, pageHeight - 10);
 
             doc.save(`Cheque_Transactions_${dayjs().format("YYYYMMDD_HHmmss")}.pdf`);
             toast.success("PDF Exported ✅");
@@ -557,8 +576,32 @@ const ChequeTransactionReport: React.FC = () => {
                                         </TableCell>
                                         <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Chq.Date</TableCell>
                                         <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Bank.Date</TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Debit</TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Credit</TableCell>
+                                        <TableCell
+                                            align="right"
+                                            sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
+                                            onClick={(e) => openNumFilter(e, "debit_amount")}
+                                        >
+                                            <SortableHeaderLabel
+                                                label="Debit"
+                                                columnKey="debit_amount"
+                                                sortConfig={numSortConfig}
+                                                onSort={handleNumSort}
+                                                onOpenFilter={(e) => openNumFilter(e, "debit_amount")}
+                                            />
+                                        </TableCell>
+                                        <TableCell
+                                            align="right"
+                                            sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1", cursor: "pointer" }}
+                                            onClick={(e) => openNumFilter(e, "credit_amount")}
+                                        >
+                                            <SortableHeaderLabel
+                                                label="Credit"
+                                                columnKey="credit_amount"
+                                                sortConfig={numSortConfig}
+                                                onSort={handleNumSort}
+                                                onOpenFilter={(e) => openNumFilter(e, "credit_amount")}
+                                            />
+                                        </TableCell>
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
@@ -601,7 +644,7 @@ const ChequeTransactionReport: React.FC = () => {
                         </TableContainer>
 
                         <CommonPagination
-                            totalRows={filteredChequeData.length}
+                            totalRows={numFilteredAndSortedRows.length}
                             page={chequePage}
                             rowsPerPage={chequeRowsPerPage}
                             onPageChange={setChequePage}
@@ -686,6 +729,18 @@ const ChequeTransactionReport: React.FC = () => {
                     </Box>
                 )}
             </Menu>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </Box>
     );
 };

@@ -990,6 +990,23 @@ const StockValueReport: React.FC = () => {
                                 </TableHead>
 
                                 <TableBody>
+                                    <TableRow sx={{ background: "#F1F5F9", fontWeight: 700 }}>
+                                        <TableCell />
+                                        <TableCell sx={{ fontWeight: 700 }}>TOTAL</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700 }}>
+                                            {data.length}
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700 }}>
+                                            {formatTotalQtyWithBag(
+                                                sum(data, "Bal_Qty"),
+                                                data,
+                                                "Bal_Qty"
+                                            )}
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700 }}>
+                                            {formatINR(sumClosingValue(data))}
+                                        </TableCell>
+                                    </TableRow>
                                     {renderGroups(finalGroups)}
                                 </TableBody>
                             </Table>

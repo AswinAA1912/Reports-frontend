@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
   Box,
   Table,
@@ -101,6 +104,20 @@ const SalesInvoiceReportPage: React.FC = () => {
     return rows;
   }, [rawData, filters]);
 
+  const {
+    sortConfig: numSortConfig,
+    rangeFilter: numRangeFilter,
+    setRangeFilter: setNumRangeFilter,
+    filterAnchor: numFilterAnchor,
+    setFilterAnchor: setNumFilterAnchor,
+    activeHeader: numActiveHeader,
+    handleSort: handleNumSort,
+    openFilter: openNumFilter,
+    filteredAndSortedData: numFilteredAndSortedRows,
+    getMinMax,
+    clearRangeFilter,
+  } = useNumericalFilter(data, ["Total_Before_Tax", "Total_Tax", "Total_Invoice_value"]);
+
   /* ================= DROPDOWNS ================= */
   const invoices = useMemo(
     () =>
@@ -127,7 +144,7 @@ const SalesInvoiceReportPage: React.FC = () => {
   );
 
   /* ================= PAGINATION ================= */
-  const paginatedData = data.slice(
+  const paginatedData = numFilteredAndSortedRows.slice(
     (page - 1) * rowsPerPage ,
     page * rowsPerPage 
   );
@@ -135,7 +152,7 @@ const SalesInvoiceReportPage: React.FC = () => {
   /* ================= SUMMARY ================= */
   const getSummary = (field: keyof SalesInvoiceReport) => {
     if (!summaryType) return 0;
-    const values = data.map((r) => Number(r[field]) || 0);
+    const values = numFilteredAndSortedRows.map((r) => Number(r[field]) || 0);
     const total = values.reduce((a, b) => a + b, 0);
     return summaryType === "sum"
       ? total
@@ -157,13 +174,13 @@ const SalesInvoiceReportPage: React.FC = () => {
 
   /* ================= EXPORT ================= */
   const handleExportPDF = () => {
-    const { headers, data: exportData } = mapForExport(EXPORT_COLUMNS, data);
+    const { headers, data: exportData } = mapForExport(EXPORT_COLUMNS, numFilteredAndSortedRows);
 
     exportToPDF("Sales Invoice Report", headers, exportData);
   };
 
   const handleExportExcel = () => {
-    const { headers, data: exportData } = mapForExport(EXPORT_COLUMNS, data);
+    const { headers, data: exportData } = mapForExport(EXPORT_COLUMNS, numFilteredAndSortedRows);
 
     exportToExcel("Sales Invoice Report", headers, exportData);
   };
@@ -190,9 +207,60 @@ const SalesInvoiceReportPage: React.FC = () => {
                   <TableCell sx={headStyle} onClick={(e) => openFilter(e, "Invoice")}>Invoice</TableCell>
                   <TableCell sx={headStyle} onClick={(e) => openFilter(e, "Customer")}>Customer</TableCell>
                   <TableCell sx={headStyle} onClick={(e) => openFilter(e, "Voucher")}>Voucher</TableCell>
-                  <TableCell align="right" sx={headStyle} onClick={(e) => openFilter(e, "BeforeTax")}>Before Tax</TableCell>
-                  <TableCell align="right" sx={headStyle} onClick={(e) => openFilter(e, "Tax")}>Tax</TableCell>
-                  <TableCell align="right" sx={headStyle} onClick={(e) => openFilter(e, "InvoiceAmount")}>Invoice Amount</TableCell>
+                  <TableCell align="right" sx={{ color: "#fff", fontWeight: 600, fontSize: "0.75rem" }}>
+                    <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                      <SortableHeaderLabel
+                        label="Before Tax"
+                        columnKey="Total_Before_Tax"
+                        sortConfig={numSortConfig}
+                        onSort={handleNumSort}
+                        onOpenFilter={(e) => openNumFilter(e, "Total_Before_Tax")}
+                      />
+                      <Button
+                        size="small"
+                        sx={{ color: "rgba(255,255,255,0.7)", fontSize: "0.6rem", minWidth: 0, p: 0, ml: 0.5, "&:hover": { color: "#fff" } }}
+                        onClick={(e) => openFilter(e, "BeforeTax")}
+                      >
+                        Sum/Avg
+                      </Button>
+                    </Box>
+                  </TableCell>
+                  <TableCell align="right" sx={{ color: "#fff", fontWeight: 600, fontSize: "0.75rem" }}>
+                    <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                      <SortableHeaderLabel
+                        label="Tax"
+                        columnKey="Total_Tax"
+                        sortConfig={numSortConfig}
+                        onSort={handleNumSort}
+                        onOpenFilter={(e) => openNumFilter(e, "Total_Tax")}
+                      />
+                      <Button
+                        size="small"
+                        sx={{ color: "rgba(255,255,255,0.7)", fontSize: "0.6rem", minWidth: 0, p: 0, ml: 0.5, "&:hover": { color: "#fff" } }}
+                        onClick={(e) => openFilter(e, "Tax")}
+                      >
+                        Sum/Avg
+                      </Button>
+                    </Box>
+                  </TableCell>
+                  <TableCell align="right" sx={{ color: "#fff", fontWeight: 600, fontSize: "0.75rem" }}>
+                    <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                      <SortableHeaderLabel
+                        label="Invoice Amount"
+                        columnKey="Total_Invoice_value"
+                        sortConfig={numSortConfig}
+                        onSort={handleNumSort}
+                        onOpenFilter={(e) => openNumFilter(e, "Total_Invoice_value")}
+                      />
+                      <Button
+                        size="small"
+                        sx={{ color: "rgba(255,255,255,0.7)", fontSize: "0.6rem", minWidth: 0, p: 0, ml: 0.5, "&:hover": { color: "#fff" } }}
+                        onClick={(e) => openFilter(e, "InvoiceAmount")}
+                      >
+                        Sum/Avg
+                      </Button>
+                    </Box>
+                  </TableCell>
                 </TableRow>
               </TableHead>
 
@@ -227,7 +295,7 @@ const SalesInvoiceReportPage: React.FC = () => {
           </TableContainer>
 
           <CommonPagination
-            totalRows={data.length}
+            totalRows={numFilteredAndSortedRows.length}
             page={page}
             rowsPerPage={rowsPerPage}
             onPageChange={setPage}
@@ -303,6 +371,18 @@ const SalesInvoiceReportPage: React.FC = () => {
           </Menu>
         </Box>
       </AppLayout>
+
+      <NumericalFilterMenu
+        anchorEl={numFilterAnchor}
+        open={Boolean(numFilterAnchor)}
+        onClose={() => setNumFilterAnchor(null)}
+        activeHeader={numActiveHeader}
+        min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+        max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+        rangeFilter={numRangeFilter}
+        onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+        onClear={clearRangeFilter}
+      />
     </>
   );
 };

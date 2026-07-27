@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     IconButton,
@@ -428,6 +431,20 @@ const StockInHandReport: React.FC = () => {
         qtyKeys
     ]);
 
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(data, ["OB_Bal_Qty", "Pur_Qty", "Sal_Qty", "Bal_Qty", "OB_Act_Qty", "Pur_Act_Qty", "Sal_Act_Qty", "Bal_Act_Qty"]);
+
     const handleTransactionClick = (
         row: stockWiseReport,
         mode: "ABSTRACT" | "EXPANDED"
@@ -549,10 +566,10 @@ const StockInHandReport: React.FC = () => {
 
 
     const finalGroups = useMemo(() => {
-        if (!isExpanded) return buildGroups(data, 0);
+        if (!isExpanded) return buildGroups(numFilteredAndSortedRows, 0);
 
         const map: Record<string, stockWiseReport[]> = {};
-        data.forEach((r: any) => {
+        numFilteredAndSortedRows.forEach((r: any) => {
             const g = r.Godown_Name || "Unknown";
             map[g] ||= [];
             map[g].push(r);
@@ -564,7 +581,7 @@ const StockInHandReport: React.FC = () => {
             level: -1,
             children: buildGroups(rows, 0),
         }));
-    }, [data, isExpanded, groupConfig]);
+    }, [numFilteredAndSortedRows, isExpanded, groupConfig]);
 
     const hasGrouping = groupConfig.length > 0;
 
@@ -738,16 +755,40 @@ const StockInHandReport: React.FC = () => {
                         <TableCell sx={{ color: "#fff", fontWeight: 600 }}>S.No</TableCell>
                         <TableCell sx={{ color: "#fff", fontWeight: 600 }}>Item</TableCell>
                         <TableCell sx={{ color: "#fff", fontWeight: 600 }} align="right">
-                            Opening
+                            <SortableHeaderLabel
+                                label="Opening"
+                                columnKey={qtyKeys.opening as string}
+                                sortConfig={numSortConfig}
+                                onSort={handleNumSort}
+                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.opening as string)}
+                            />
                         </TableCell>
                         <TableCell sx={{ color: "#fff", fontWeight: 600 }} align="right">
-                            In
+                            <SortableHeaderLabel
+                                label="In"
+                                columnKey={qtyKeys.in as string}
+                                sortConfig={numSortConfig}
+                                onSort={handleNumSort}
+                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.in as string)}
+                            />
                         </TableCell>
                         <TableCell sx={{ color: "#fff", fontWeight: 600 }} align="right">
-                            Out
+                            <SortableHeaderLabel
+                                label="Out"
+                                columnKey={qtyKeys.out as string}
+                                sortConfig={numSortConfig}
+                                onSort={handleNumSort}
+                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.out as string)}
+                            />
                         </TableCell>
                         <TableCell sx={{ color: "#fff", fontWeight: 600 }} align="right">
-                            Closing
+                            <SortableHeaderLabel
+                                label="Closing"
+                                columnKey={qtyKeys.closing as string}
+                                sortConfig={numSortConfig}
+                                onSort={handleNumSort}
+                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.closing as string)}
+                            />
                         </TableCell>
                     </TableRow>
                 </TableHead>
@@ -1049,20 +1090,32 @@ const StockInHandReport: React.FC = () => {
                                 </TableBody>
                             </Table>
                         ) : (
-                            renderItemTable(data)
+                             renderItemTable(numFilteredAndSortedRows)
                         )}
                     </TableContainer>
 
                 </Paper>
 
                 <CommonPagination
-                    totalRows={data.length}
+                    totalRows={numFilteredAndSortedRows.length}
                     page={page}
                     rowsPerPage={rowsPerPage}
                     onPageChange={setPage}
                     onRowsPerPageChange={setRowsPerPage}
                 />
             </AppLayout>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </>
     );
 };

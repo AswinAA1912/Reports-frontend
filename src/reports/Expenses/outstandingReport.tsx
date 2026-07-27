@@ -1686,7 +1686,7 @@ const OutstandingReport: React.FC = () => {
                                             <React.Fragment
                                                 key={c.key}
                                             >
-                                                <TableCell>
+                                                <TableCell align={c.isNumeric ? "right" : "left"}>
                                                     {c.isNumeric
                                                         ? CURRENCY_KEYS.includes(
                                                             c.key
@@ -1788,6 +1788,7 @@ const OutstandingReport: React.FC = () => {
                                                                     key={c.key}
                                                                 >
                                                                     <TableCell
+                                                                        align={c.isNumeric ? "right" : "left"}
                                                                         sx={{
                                                                             fontWeight:
                                                                                 isCurrentGroup
@@ -1836,6 +1837,7 @@ const OutstandingReport: React.FC = () => {
                                                             key={c.key}
                                                         >
                                                             <TableCell
+                                                                align={c.isNumeric ? "right" : "left"}
                                                                 sx={{
                                                                     color:
                                                                         c.key === "Bal_Amount"

@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNumericalFilter } from "../../hooks/useNumericalFilter";
+import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     Table,
@@ -231,7 +234,6 @@ const PendingSaleOrder: React.FC = () => {
     const [abstractExpandedKeys, setAbstractExpandedKeys] = useState<string[]>([]);
     const [expandedExpandedKeys, setExpandedExpandedKeys] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
-    const [rangeFilter] = useState<Record<string, [number, number]>>({});
     const selectedValues =
         activeHeader ? filters.columnFilters[activeHeader!] ?? [] : [];
     const [templateConfig, setTemplateConfig] = useState<{
@@ -415,18 +417,23 @@ const PendingSaleOrder: React.FC = () => {
                 if (!values.includes(rowValue)) return false;
             }
 
-
-            // ✅ NUMBER RANGE
-            for (const [key, range] of Object.entries(rangeFilter)) {
-                const val = Number(row[key]);
-                if (!isNaN(val)) {
-                    if (val < range[0] || val > range[1]) return false;
-                }
-            }
-
             return true;
         });
-    }, [rawRows, filters, rangeFilter, showCancelledOnly]);
+    }, [rawRows, filters, showCancelledOnly]);
+
+    const {
+        sortConfig: numSortConfig,
+        rangeFilter: numRangeFilter,
+        setRangeFilter: setNumRangeFilter,
+        filterAnchor: numFilterAnchor,
+        setFilterAnchor: setNumFilterAnchor,
+        activeHeader: numActiveHeader,
+        handleSort: handleNumSort,
+        openFilter: openNumFilter,
+        filteredAndSortedData: numFilteredAndSortedRows,
+        getMinMax,
+        clearRangeFilter,
+    } = useNumericalFilter(filteredRows, NUMERIC_KEYS);
 
     /* ================= TOTALS ================= */
 
@@ -471,9 +478,9 @@ const PendingSaleOrder: React.FC = () => {
 
     // 2️⃣ GROUP WHOLE DATA
     const groupedRows = useMemo(() => {
-        if (!appliedGroupBy.length) return filteredRows;
-        return buildGroupedData(filteredRows, 0);
-    }, [filteredRows, appliedGroupBy, buildGroupedData]);
+        if (!appliedGroupBy.length) return numFilteredAndSortedRows;
+        return buildGroupedData(numFilteredAndSortedRows, 0);
+    }, [numFilteredAndSortedRows, appliedGroupBy, buildGroupedData]);
 
     const flattenRows = (rows: any[]): any[] => {
         const result: any[] = [];
@@ -500,13 +507,13 @@ const PendingSaleOrder: React.FC = () => {
     const totalRowsForPagination = useMemo(() => {
         return appliedGroupBy.length
             ? flattenRows(groupedRows).length
-            : filteredRows.length;
-    }, [groupedRows, filteredRows, appliedGroupBy, expandedKeys]);
+            : numFilteredAndSortedRows.length;
+    }, [groupedRows, numFilteredAndSortedRows, appliedGroupBy, expandedKeys]);
 
     const finalRows = useMemo(() => {
         const rows = appliedGroupBy.length
             ? flattenRows(groupedRows)
-            : filteredRows;
+            : numFilteredAndSortedRows;
 
         return rows.slice(
             (page - 1) * rowsPerPage,
@@ -528,8 +535,8 @@ const PendingSaleOrder: React.FC = () => {
     const exportRows = useMemo(() => {
         return appliedGroupBy.length
             ? flattenRows(groupedRows)
-            : filteredRows;
-    }, [groupedRows, filteredRows, appliedGroupBy, expandedKeys]);
+            : numFilteredAndSortedRows;
+    }, [groupedRows, numFilteredAndSortedRows, appliedGroupBy, expandedKeys]);
 
     const handleExportExcel = () => {
         const rows = exportRows.map(row => {
@@ -808,7 +815,7 @@ const PendingSaleOrder: React.FC = () => {
         if (!activeHeader) return [];
 
         // 🚨 Apply ALL filters EXCEPT current column
-        const rowsForOptions = rawRows.filter(row => {
+        const rowsForOptions = numFilteredAndSortedRows.filter(row => {
             for (const [key, values] of Object.entries(filters.columnFilters)) {
                 if (key === activeHeader) continue;
                 if (!values.length) continue;
@@ -817,28 +824,18 @@ const PendingSaleOrder: React.FC = () => {
                 if (!values.includes(rowValue)) return false;
             }
 
-            // ✅ Apply range filters also except current
-            for (const [key, range] of Object.entries(rangeFilter)) {
-                if (key === activeHeader) continue;
-
-                const val = Number(row[key]);
-                if (!isNaN(val)) {
-                    if (val < range[0] || val > range[1]) return false;
-                }
-            }
-
             return true;
         });
 
         return Array.from(
             new Set(
                 rowsForOptions
-                    .map(r => r[activeHeader])
-                    .filter(v => v !== null && v !== undefined && v !== "")
+                    .map(r => r[activeHeader!])
+                    .filter(Boolean)
                     .map(v => String(v))
             )
         );
-    }, [activeHeader, rawRows, filters, rangeFilter]);
+    }, [activeHeader, numFilteredAndSortedRows, filters]);
 
     const groupableColumns = useMemo(() => {
         return enabledColumns.map(c => ({
@@ -900,7 +897,7 @@ const PendingSaleOrder: React.FC = () => {
                                 // ✅ Show value ONLY for current level column
                                 if (c.key === currentGroupKey) {
                                     return (
-                                        <TableCell key={c.key} sx={{ fontWeight: 700 }}>
+                                        <TableCell key={c.key} align={c.isNumeric ? "right" : "left"} sx={{ fontWeight: 700 }}>
                                             {row.__value}
                                         </TableCell>
                                     );
@@ -909,14 +906,14 @@ const PendingSaleOrder: React.FC = () => {
                                 // ✅ Show totals for numeric columns
                                 if (c.isNumeric) {
                                     return (
-                                        <TableCell key={c.key} sx={{ fontWeight: 600 }}>
+                                        <TableCell key={c.key} align="right" sx={{ fontWeight: 600 }}>
                                             {getGroupTotal(row.__rows, c.key)}
                                         </TableCell>
                                     );
                                 }
 
                                 // ✅ ALL OTHER COLUMNS EMPTY (important)
-                                return <TableCell key={c.key} />;
+                                return <TableCell key={c.key} align={c.isNumeric ? "right" : "left"} />;
                             })}
                         </TableRow>
                     </React.Fragment>
@@ -930,16 +927,17 @@ const PendingSaleOrder: React.FC = () => {
                     </TableCell>
 
                     {enabledColumns.map(c => {
+                        const align = c.isNumeric ? "right" : "left";
                         if (c.key === "Ledger_Date") {
                             return (
-                                <TableCell key={c.key}>
+                                <TableCell key={c.key} align={align}>
                                     {dayjs(row[c.key]).format("DD/MM/YYYY")}
                                 </TableCell>
                             );
                         }
 
                         return (
-                            <TableCell key={c.key}>
+                            <TableCell key={c.key} align={align}>
                                 {row[c.key]}
                             </TableCell>
                         );
@@ -1172,6 +1170,7 @@ const PendingSaleOrder: React.FC = () => {
                                     {enabledColumns.map(c => (
                                         <TableCell
                                             key={c.key}
+                                            align={c.isNumeric ? "right" : "left"}
                                             sx={{
                                                 color: "#fff",
                                                 cursor: "pointer",
@@ -1181,11 +1180,25 @@ const PendingSaleOrder: React.FC = () => {
                                                 fontWeight: appliedGroupBy.includes(c.key) ? 700 : 500,
                                             }}
                                             onClick={e => {
-                                                setActiveHeader(c.key);
-                                                setFilterAnchor(e.currentTarget);
+                                                if (c.isNumeric) {
+                                                    openNumFilter(e, c.key);
+                                                } else {
+                                                    setActiveHeader(c.key);
+                                                    setFilterAnchor(e.currentTarget);
+                                                }
                                             }}
                                         >
-                                            {c.label}
+                                            {c.isNumeric ? (
+                                                <SortableHeaderLabel
+                                                    label={c.label}
+                                                    columnKey={c.key}
+                                                    sortConfig={numSortConfig}
+                                                    onSort={handleNumSort}
+                                                    onOpenFilter={(e) => openNumFilter(e, c.key)}
+                                                />
+                                            ) : (
+                                                c.label
+                                            )}
                                         </TableCell>
                                     ))}
                                 </TableRow>
@@ -1194,7 +1207,7 @@ const PendingSaleOrder: React.FC = () => {
                                 <TableRow sx={{ background: "#f3f4f6" }}>
                                     <TableCell>Total</TableCell>
                                     {enabledColumns.map(c => (
-                                        <TableCell key={c.key}>
+                                        <TableCell key={c.key} align={c.isNumeric ? "right" : "left"}>
                                             {c.isNumeric ? getTotal(c.key) : ""}
                                         </TableCell>
                                     ))}
@@ -1602,6 +1615,18 @@ const PendingSaleOrder: React.FC = () => {
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            <NumericalFilterMenu
+                anchorEl={numFilterAnchor}
+                open={Boolean(numFilterAnchor)}
+                onClose={() => setNumFilterAnchor(null)}
+                activeHeader={numActiveHeader}
+                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
+                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
+                rangeFilter={numRangeFilter}
+                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
+                onClear={clearRangeFilter}
+            />
         </>
     );
 };

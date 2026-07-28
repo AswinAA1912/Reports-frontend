@@ -218,7 +218,7 @@ const PendingSaleOrder: React.FC = () => {
 
     /* ===== FILTERS ===== */
     const [filters, setFilters] = useState<FiltersMap>({
-        Date: { from: today, to: today },
+        Date: { from: "", to: today },
         columnFilters: {},
     });
     /* ===== GROUPING STATE ===== */
@@ -406,6 +406,23 @@ const PendingSaleOrder: React.FC = () => {
                 if (!isCancelled) return false;
             } else {
                 if (isCancelled) return false;
+            }
+
+            // Filter by Date Range (Ledger_Date) when applied via header filter
+            if (filters.Date.from && row.Ledger_Date) {
+                const rowDate = dayjs(row.Ledger_Date);
+                const fromDate = dayjs(filters.Date.from);
+                const toDate = dayjs(filters.Date.to);
+
+                if (fromDate.isValid() && toDate.isValid()) {
+                    const rowDateStr = rowDate.format("YYYY-MM-DD");
+                    const fromDateStr = fromDate.format("YYYY-MM-DD");
+                    const toDateStr = toDate.format("YYYY-MM-DD");
+
+                    if (rowDateStr < fromDateStr || rowDateStr > toDateStr) {
+                        return false;
+                    }
+                }
             }
 
             // ✅ COLUMN FILTERS (SKIP DATE COLUMN)
@@ -1296,22 +1313,43 @@ const PendingSaleOrder: React.FC = () => {
                                     }
                                 />
 
-                                <Button
-                                    size="small"
-                                    variant="contained"
-                                    onClick={() => {
-                                        setFilters(prev => ({
-                                            ...prev,
-                                            Date: {
-                                                from: tempDateFilter.from,
-                                                to: tempDateFilter.to,
-                                            },
-                                        }));
-                                        setFilterAnchor(null);
-                                    }}
-                                >
-                                    Apply
-                                </Button>
+                                <Box display="flex" gap={1}>
+                                    <Button
+                                        size="small"
+                                        variant="contained"
+                                        onClick={() => {
+                                            setFilters(prev => ({
+                                                ...prev,
+                                                Date: {
+                                                    from: tempDateFilter.from,
+                                                    to: tempDateFilter.to,
+                                                },
+                                            }));
+                                            setFilterAnchor(null);
+                                        }}
+                                        sx={{ flex: 1 }}
+                                    >
+                                        Apply
+                                    </Button>
+                                    <Button
+                                        size="small"
+                                        variant="outlined"
+                                        onClick={() => {
+                                            setTempDateFilter({ from: today, to: today });
+                                            setFilters(prev => ({
+                                                ...prev,
+                                                Date: {
+                                                    from: "",
+                                                    to: today,
+                                                },
+                                            }));
+                                            setFilterAnchor(null);
+                                        }}
+                                        sx={{ flex: 1 }}
+                                    >
+                                        Clear
+                                    </Button>
+                                </Box>
 
                             </Box>
                         ) : (

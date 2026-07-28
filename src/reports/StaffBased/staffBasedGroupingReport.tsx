@@ -175,6 +175,22 @@ const SortableColumnRow = ({
     );
 };
 
+const STAFF_CATEGORY_FIELDS = [
+    "Load_Man",
+    "Others1",
+    "Others2",
+    "Others3",
+    "Others4",
+    "Others5",
+    "Checker",
+    "Delivery_Man",
+    "Others6",
+    "Driver",
+    "Ladies_Coolie",
+    "Supervisor",
+    "Created_By",
+];
+
 /* ================= COMPONENT ================= */
 
 const StaffBasedGroupingReport: React.FC = () => {
@@ -314,15 +330,25 @@ const StaffBasedGroupingReport: React.FC = () => {
     }, [filters.Date.from, filters.Date.to]);
 
     const processedAbstractRows = useMemo(() => {
+        const enabledDateKeys = abstractColumns
+            .filter((c) => c.key !== "Staff_Name" && c.key !== "Total" && c.enabled)
+            .map((c) => c.key);
+
         return abstractRows.map((row) => {
             const newRow = { ...row };
             abstractDates.forEach((d) => {
                 newRow[d] = staffBasedDisplayMode === "qty" ? row[`${d}_qty`] : row[`${d}_count`];
             });
-            newRow.Total = staffBasedDisplayMode === "qty" ? row.Total_qty : row.Total_count;
+            
+            if (enabledDateKeys.length > 0) {
+                newRow.Total = enabledDateKeys.reduce((sum, key) => sum + (Number(newRow[key]) || 0), 0);
+            } else {
+                newRow.Total = 0;
+            }
+            
             return newRow;
         });
-    }, [abstractRows, staffBasedDisplayMode, abstractDates]);
+    }, [abstractRows, staffBasedDisplayMode, abstractDates, abstractColumns]);
 
     const rawRows =
         toggleMode === "Expanded"
@@ -1558,16 +1584,15 @@ const StaffBasedGroupingReport: React.FC = () => {
         : sortedRows;
 
     const getTotal = (key: string) => {
-        // Qty column special logic
-        if (key === "Qty") {
+        // Total / Qty column special logic
+        if (key === "Total" || key === "Qty") {
             const enabledNumericColumns =
                 enabledColumns.filter(
                     (c) =>
                         c.enabled &&
+                        c.key !== "Total" &&
                         c.key !== "Qty" &&
-                        c.key !== "Staff_Name" &&
-                        typeof baseRows?.[0]?.[c.key] ===
-                        "number"
+                        c.key !== "Staff_Name"
                 );
 
             return Number(
@@ -1733,21 +1758,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                 const numericVal = Number(value || 0);
                 value = numericVal > 0 ? (staffBasedDisplayMode === "qty" ? numericVal.toFixed(2) : numericVal.toFixed(0)) : "";
             } else if (toggleMode === "Expanded") {
-                const workColumns = [
-                    "Load_Man",
-                    "Others1",
-                    "Others2",
-                    "Others3",
-                    "Others4",
-                    "Others5",
-                    "Checker",
-                    "Delivery_Man",
-                    "Others6",
-                    "Driver",
-                    "Created_By",
-                ];
-
-                if (workColumns.includes(col.key)) {
+                if (STAFF_CATEGORY_FIELDS.includes(col.key)) {
                     const rawVal = Number(row[col.key] || 0);
                     const invoiceCount = row.__categoryInvoiceCount?.[col.key] || 0;
                     if (staffBasedDisplayMode === "qty") {
@@ -2297,6 +2308,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                                     handleNumSort(key);
                                                                 }}
                                                                 onOpenFilter={(e) => openNumFilter(e, c.key)}
+                                                                disableLabelFilterClick={isQtyHeader}
                                                             />
                                                         ) : (
                                                             c.label
@@ -2325,19 +2337,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                             );
                                         }
 
-                                        const workColumns = [
-                                            "Load_Man",
-                                            "Others1",
-                                            "Others2",
-                                            "Others3",
-                                            "Others4",
-                                            "Others5",
-                                            "Checker",
-                                            "Delivery_Man",
-                                            "Others6",
-                                            "Driver",
-                                            "Created_By",
-                                        ];
+                                        const workColumns = STAFF_CATEGORY_FIELDS;
 
                                         // ===== TOTAL QTY =====
                                         if (c.key === "Qty") {
@@ -2465,19 +2465,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                             }
 
                                                             if (c.isNumeric) {
-                                                                const workColumns = [
-                                                                    "Load_Man",
-                                                                    "Others1",
-                                                                    "Others2",
-                                                                    "Others3",
-                                                                    "Others4",
-                                                                    "Others5",
-                                                                    "Checker",
-                                                                    "Delivery_Man",
-                                                                    "Others6",
-                                                                    "Driver",
-                                                                    "Created_By",
-                                                                ];
+                                                                const workColumns = STAFF_CATEGORY_FIELDS;
 
                                                                 // ===== QTY COLUMN =====
                                                                 if (c.key === "Qty") {
@@ -2569,19 +2557,7 @@ const StaffBasedGroupingReport: React.FC = () => {
                                                                     : c.isNumeric
                                                                         ? (() => {
 
-                                                                            const workColumns = [
-                                                                                "Load_Man",
-                                                                                "Others1",
-                                                                                "Others2",
-                                                                                "Others3",
-                                                                                "Others4",
-                                                                                "Others5",
-                                                                                "Checker",
-                                                                                "Delivery_Man",
-                                                                                "Others6",
-                                                                                "Driver",
-                                                                                "Created_By",
-                                                                            ];
+                                                                            const workColumns = STAFF_CATEGORY_FIELDS;
 
                                                                             const isAbstractNumericKey = toggleMode === "Abstract" && (c.key === "Total" || c.key.includes("."));
                                                                             const actualKey = isAbstractNumericKey ? `${c.key}_${staffBasedDisplayMode}` : c.key;

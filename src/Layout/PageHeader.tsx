@@ -24,6 +24,7 @@ import { SettingsService } from "../services/reportSettings.services";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth, Company } from "../auth/authContext";
 import { MenuService } from "../services/menus.service";
+import { handleExternalOrMenuNavigation } from "../utils/navigation";
 
 export type ToggleMode = "Abstract" | "Expanded";
 
@@ -73,7 +74,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { user, companies, switchCompany, logout, isAutoLogin } = useAuth();
+  const { user, token, companies, switchCompany, logout, isAutoLogin } = useAuth();
   const [anchorElCompany, setAnchorElCompany] = useState<null | HTMLElement>(null);
   const openCompanyMenu = Boolean(anchorElCompany);
   const [pages, setPages] = useState<Page[]>([]);
@@ -271,7 +272,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
                       key={p.path}
                       value={p.path}
                       sx={{ fontSize: "0.7rem" }}
-                      onClick={() => navigate(p.path)}
+                      onClick={() => handleExternalOrMenuNavigation(p.path, p.label, navigate, token, user)}
                     >
                       {p.label}
                     </MenuItem>

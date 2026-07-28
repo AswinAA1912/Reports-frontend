@@ -26,12 +26,13 @@ import { useAuth } from "../auth/authContext";
 import Header from "../Layout/Header";
 import { useQuery } from "@tanstack/react-query";
 import { MenuService } from "../services/menus.service";
+import { handleExternalOrMenuNavigation } from "../utils/navigation";
 import { DashBoardSalesGraph } from "../services/graphAnalysis.services";
 
 const HEADER_HEIGHT = 64;
 
 const GroupDashboard: React.FC = () => {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
@@ -409,7 +410,7 @@ const GroupDashboard: React.FC = () => {
               <Box
                 key={menu.id}
                 onClick={() => {
-                  navigate(menu.rUrl);
+                  handleExternalOrMenuNavigation(menu.rUrl, menu.name, navigate, token, user);
                   setOpenDialog(false);
                 }}
                 sx={{

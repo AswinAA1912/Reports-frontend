@@ -127,6 +127,8 @@ const Login: React.FC = () => {
           Name: fullUser.Name,
           companyId: Number(fullUser.Company_id),
           Company_Name: fullUser.Company_Name,
+          Global_User_Id: fullUser.Autheticate_Id,
+          UserTypeId: fullUser.UserTypeId,
         },
         mappedCompanies,      // ✅ now matches Company[]
         companyAPI            // ✅ optional selected company API

@@ -9,6 +9,7 @@ interface SortableHeaderLabelProps {
   sortConfig: { key: string; direction: "asc" | "desc" } | null;
   onSort: (key: string) => void;
   onOpenFilter: (e: React.MouseEvent<HTMLElement>) => void;
+  disableLabelFilterClick?: boolean;
 }
 
 export const SortableHeaderLabel: React.FC<SortableHeaderLabelProps> = ({
@@ -17,6 +18,7 @@ export const SortableHeaderLabel: React.FC<SortableHeaderLabelProps> = ({
   sortConfig,
   onSort,
   onOpenFilter,
+  disableLabelFilterClick = false,
 }) => {
   const isActive = sortConfig?.key === columnKey;
   const direction = sortConfig?.direction;
@@ -32,6 +34,9 @@ export const SortableHeaderLabel: React.FC<SortableHeaderLabelProps> = ({
     >
       <span
         onClick={(e) => {
+          if (disableLabelFilterClick) {
+            return;
+          }
           e.stopPropagation();
           onOpenFilter(e);
         }}

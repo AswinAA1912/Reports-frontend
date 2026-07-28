@@ -17,6 +17,7 @@ export type User = {
   Company_Name?: string | null;
   companyId?: number | null;
   Global_User_Id?: string;
+  UserTypeId?: string | number | null;
 };
 
 export type Company = {
@@ -57,12 +58,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
    */
   useEffect(() => {
     const init = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const authFromUrl = params.get("Auth") || params.get("token");
+      const companyIdFromUrl = params.get("company_id");
+      const usernameFromUrl = params.get("username");
+
+      // Clear search query parameters immediately so they don't persist on page reload or cause errors
+      if (authFromUrl) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
       try {
-        const params = new URLSearchParams(window.location.search);
-
-        const authFromUrl = params.get("Auth");
-        const companyIdFromUrl = params.get("company_id");
-
         const storedAuth = localStorage.getItem("AUTH_ID");
         const storedUser = localStorage.getItem("user");
         const storedCompanies = localStorage.getItem("companies");
@@ -77,6 +83,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           localStorage.setItem("AUTH_ID", authFromUrl);
 
           const username =
+            usernameFromUrl ||
             JSON.parse(localStorage.getItem("user") || "null")?.uniqueName ||
             "admin";
 
@@ -109,12 +116,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             companyId: selectedCompany.id,
             Company_Name: selectedCompany.name,
             Global_User_Id: fullUser.Autheticate_Id,
+            UserTypeId: fullUser.UserTypeId,
           };
 
           setUser(formattedUser);
           localStorage.setItem("user", JSON.stringify(formattedUser));
-
-          window.history.replaceState({}, document.title, window.location.pathname);
         }
 
         /**
@@ -130,9 +136,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             setCompanies(JSON.parse(storedCompanies));
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Auth init error:", err);
-        toast.error("Session restore failed");
+        toast.error(`Session restore failed: ${err?.message || err}`);
       } finally {
         setIsInitializing(false);
       }
@@ -198,6 +204,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           companyId: company.id,
           Company_Name: company.name,
           Global_User_Id: fullUser.Autheticate_Id,
+          UserTypeId: fullUser.UserTypeId,
         };
 
         localStorage.setItem("COMPANY_API", company.api);

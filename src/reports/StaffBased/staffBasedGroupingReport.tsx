@@ -583,6 +583,8 @@ const StaffBasedGroupingReport: React.FC = () => {
                         "Delivery_Man",
                         "Others6",
                         "Driver",
+                        "Ladies_Coolie",
+                        "Supervisor",
                         "Created_By",
                     ];
 

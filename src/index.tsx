@@ -29,6 +29,31 @@ axios.interceptors.request.use(
       }
     }
 
+    // Auto-append company_id to query parameters so copied/pasted URLs preserve company context
+    const currentCompanyId = localStorage.getItem("COMPANY_ID") || (() => {
+      const storedUser = localStorage.getItem("user");
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          return user && user.companyId ? String(user.companyId) : null;
+        } catch (e) {}
+      }
+      return null;
+    })();
+
+    if (currentCompanyId) {
+      if (!config.params) {
+        config.params = {};
+      }
+      if (
+        config.params.company_id === undefined &&
+        config.params.companyId === undefined &&
+        config.params.Company_Id === undefined
+      ) {
+        config.params.company_id = currentCompanyId;
+      }
+    }
+
     if (!config.headers["Authorization"]) {
       const storedAuth = localStorage.getItem("AUTH_ID");
       if (storedAuth) {

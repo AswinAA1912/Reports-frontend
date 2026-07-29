@@ -44,6 +44,8 @@ interface PageHeaderProps {
   /** OPTIONAL TOGGLE */
   toggleMode?: ToggleMode;
   onToggleChange?: (mode: ToggleMode) => void;
+  abstractLabel?: string;
+  expandedLabel?: string;
 
   /** OPTIONAL EXPORT */
   onExportPDF?: () => void;
@@ -63,6 +65,8 @@ export const PAGE_HEADER_HEIGHT_MOBILE = 72;
 const PageHeader: React.FC<PageHeaderProps> = ({
   toggleMode,
   onToggleChange,
+  abstractLabel,
+  expandedLabel,
   onExportPDF,
   onExportExcel,
   settingsSlot,
@@ -434,8 +438,8 @@ const PageHeader: React.FC<PageHeaderProps> = ({
                   },
                 }}
               >
-                <ToggleButton value="Abstract">Abstract</ToggleButton>
-                <ToggleButton value="Expanded">Expanded</ToggleButton>
+                <ToggleButton value="Abstract">{abstractLabel || "Abstract"}</ToggleButton>
+                <ToggleButton value="Expanded">{expandedLabel || "Expanded"}</ToggleButton>
               </ToggleButtonGroup>
             )}
 

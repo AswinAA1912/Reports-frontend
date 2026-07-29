@@ -533,6 +533,36 @@ const StaffBasedReport: React.FC = () => {
                 const reportRows =
                     reportRes.data.data || [];
 
+                // Pre-build a lookup cache for matching transaction names to Cost Center names
+                const matchCache: Record<string, string> = {};
+                const getMatchingCCName = (staffName: string): string => {
+                    if (matchCache[staffName] !== undefined) return matchCache[staffName];
+                    const cleanStaff = staffName.trim().toLowerCase();
+                    
+                    // 1. Exact match
+                    let match = staffList.find((cc: any) => 
+                        String(cc.Cost_Center_Name || "").trim().toLowerCase() === cleanStaff
+                    );
+                    if (!match) {
+                        // 2. Prefix match
+                        match = staffList.find((cc: any) => {
+                            const cleanCC = String(cc.Cost_Center_Name || "").trim().toLowerCase();
+                            return cleanCC.startsWith(cleanStaff) || cleanStaff.startsWith(cleanCC);
+                        });
+                    }
+                    if (!match) {
+                        // 3. Containment match
+                        match = staffList.find((cc: any) => {
+                            const cleanCC = String(cc.Cost_Center_Name || "").trim().toLowerCase();
+                            return cleanCC.includes(cleanStaff) || cleanStaff.includes(cleanCC);
+                        });
+                    }
+                    
+                    const resolved = match ? match.Cost_Center_Name : staffName;
+                    matchCache[staffName] = resolved;
+                    return resolved;
+                };
+
                 /* ================= ABSTRACT ================= */
 
                 if (
@@ -600,8 +630,6 @@ const StaffBasedReport: React.FC = () => {
                         number
                     > = {};
 
-
-
                     reportRows.forEach(
                         (row: any) => {
                             const dateKey =
@@ -629,8 +657,9 @@ const StaffBasedReport: React.FC = () => {
                                         return;
                                     }
 
+                                    const resolvedCCName = getMatchingCCName(staff);
                                     const mapKey =
-                                        `${staff}_${dateKey}`;
+                                        `${resolvedCCName}_${dateKey}`;
 
                                     qtyMap[
                                         mapKey
@@ -1036,7 +1065,9 @@ const StaffBasedReport: React.FC = () => {
                                     if (!staff)
                                         return;
 
-                                    const duplicateKey = `${row.Invoice_no}_${row.Trans_Id}_${field}_${staff}`;
+                                    const resolvedCCName = getMatchingCCName(staff);
+
+                                    const duplicateKey = `${row.Invoice_no}_${row.Trans_Id}_${field}_${resolvedCCName}`;
 
                                     if (
                                         processedStaffs.has(
@@ -1052,7 +1083,7 @@ const StaffBasedReport: React.FC = () => {
                                     /* ================= BASE GROUP KEY ================= */
 
                                     const pivotParts: string[] =
-                                        [staff];
+                                        [resolvedCCName];
 
                                     /* ================= DYNAMIC SPLIT ================= */
 
@@ -1103,7 +1134,7 @@ const StaffBasedReport: React.FC = () => {
                                         );
 
                                         baseRow.Staff_Name =
-                                            staff;
+                                            resolvedCCName;
 
                                         baseRow.Qty = 0;
                                         baseRow.Act_Qty = 0;

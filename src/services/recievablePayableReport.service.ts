@@ -9,18 +9,20 @@ export interface RecievablePayableItem {
   invoice_date: string;
   invoice_no: string;
   Bal_Amount: number;
+  CR_DR?: string;
+  Group_Name?: string;
 }
 
 /* ================= API SERVICES ================= */
 
 export const RecievablePayableReportService = {
-  getReceivables: (params?: { Fromdate?: string }) =>
+  getReceivables: (params?: { Todate?: string }) =>
     axios.get<{ success: boolean; data: RecievablePayableItem[] }>(
       `${getBaseURL()}api/reports/externalAPI/recievable`,
       { params }
     ),
 
-  getPayables: (params?: { Fromdate?: string }) =>
+  getPayables: (params?: { Todate?: string }) =>
     axios.get<{ success: boolean; data: RecievablePayableItem[] }>(
       `${getBaseURL()}api/reports/externalAPI/payable`,
       { params }

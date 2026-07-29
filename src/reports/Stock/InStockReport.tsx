@@ -1,7 +1,4 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { useNumericalFilter } from "../../hooks/useNumericalFilter";
-import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
-import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import {
     Box,
     Paper,
@@ -832,24 +829,7 @@ const InStockReport: React.FC = () => {
         return Object.values(groups);
     }, [filteredDetailedData, enabledConfigColumns, isPivotMode]);
 
-    const {
-        sortConfig: numSortConfig,
-        rangeFilter: numRangeFilter,
-        setRangeFilter: setNumRangeFilter,
-        filterAnchor: numFilterAnchor,
-        setFilterAnchor: setNumFilterAnchor,
-        activeHeader: numActiveHeader,
-        handleSort: handleNumSort,
-        openFilter: openNumFilter,
-        filteredAndSortedData: numFilteredAndSortedRows,
-        getMinMax,
-        clearRangeFilter,
-    } = useNumericalFilter(filteredData, [
-        qtyKeys.opening as string,
-        qtyKeys.in as string,
-        qtyKeys.out as string,
-        qtyKeys.closing as string
-    ]);
+    const numFilteredAndSortedRows = filteredData;
 
     const getTripLabel = React.useCallback((t: any): string => {
         const rawVal = t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id;
@@ -1949,13 +1929,7 @@ const InStockReport: React.FC = () => {
                                     })}
                                     {!inwardMode && !outwardMode && !processMode && (
                                         <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>
-                                            <SortableHeaderLabel
-                                                label="OPENING STOCK"
-                                                columnKey={qtyKeys.opening as string}
-                                                sortConfig={numSortConfig}
-                                                onSort={handleNumSort}
-                                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.opening as string)}
-                                            />
+                                            OPENING STOCK
                                         </TableCell>
                                     )}
 
@@ -2193,13 +2167,7 @@ const InStockReport: React.FC = () => {
                                             }}
                                         >
                                             <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
-                                                <SortableHeaderLabel
-                                                    label="STOCK OUTWARDS"
-                                                    columnKey={qtyKeys.out as string}
-                                                    sortConfig={numSortConfig}
-                                                    onSort={handleNumSort}
-                                                    onOpenFilter={(e) => openNumFilter(e, qtyKeys.out as string)}
-                                                />
+                                                STOCK OUTWARDS
                                                 <IconButton
                                                     size="small"
                                                     onClick={(e) => {
@@ -2299,13 +2267,7 @@ const InStockReport: React.FC = () => {
                                     {/* Closing Stock is shown in Normal Mode */}
                                     {!inwardMode && !outwardMode && !processMode && (
                                         <TableCell align="right" sx={{ width: 120, minWidth: 120, backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5 }}>
-                                            <SortableHeaderLabel
-                                                label="CLOSING STOCK"
-                                                columnKey={qtyKeys.closing as string}
-                                                sortConfig={numSortConfig}
-                                                onSort={handleNumSort}
-                                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.closing as string)}
-                                            />
+                                            CLOSING STOCK
                                         </TableCell>
                                     )}
                                 </TableRow>
@@ -3130,18 +3092,6 @@ const InStockReport: React.FC = () => {
                     <CircularProgress color="primary" />
                 </Box>
             )}
-
-            <NumericalFilterMenu
-                anchorEl={numFilterAnchor}
-                open={Boolean(numFilterAnchor)}
-                onClose={() => setNumFilterAnchor(null)}
-                activeHeader={numActiveHeader}
-                min={numActiveHeader ? getMinMax(numActiveHeader).min : 0}
-                max={numActiveHeader ? getMinMax(numActiveHeader).max : 100}
-                rangeFilter={numRangeFilter}
-                onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
-                onClear={clearRangeFilter}
-            />
         </Box>
     );
 };

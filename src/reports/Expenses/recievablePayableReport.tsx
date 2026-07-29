@@ -14,6 +14,12 @@ import {
     MenuItem,
     Checkbox,
     Autocomplete,
+    Radio,
+    RadioGroup,
+    FormControlLabel,
+    FormControl,
+    FormLabel,
+    Typography,
 } from "@mui/material";
 
 import dayjs from "dayjs";
@@ -55,6 +61,8 @@ const RecievablePayableReport: React.FC = () => {
     const [toDate, setToDate] = useState(today);
     const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
     const [tempGroups, setTempGroups] = useState<string[]>([]);
+    const [groupMode, setGroupMode] = useState<"withGroup" | "withoutGroup">("withGroup");
+    const [tempGroupMode, setTempGroupMode] = useState<"withGroup" | "withoutGroup">("withGroup");
     
     const [accountSearchText, setAccountSearchText] = useState("");
     const [selectedAccountNames, setSelectedAccountNames] = useState<string[]>([]);
@@ -65,6 +73,7 @@ const RecievablePayableReport: React.FC = () => {
             to: today,
         },
         Group: [] as string[],
+        GroupMode: "withGroup" as "withGroup" | "withoutGroup",
     });
 
     /* ================= DATA LOADING ================= */
@@ -99,9 +108,12 @@ const RecievablePayableReport: React.FC = () => {
     useEffect(() => {
         setSelectedGroups([]);
         setTempGroups([]);
+        setGroupMode("withGroup");
+        setTempGroupMode("withGroup");
         setFilters((prev) => ({
             ...prev,
             Group: [],
+            GroupMode: "withGroup",
         }));
     }, [toggleMode]);
 
@@ -116,12 +128,12 @@ const RecievablePayableReport: React.FC = () => {
     // Unique account names list (filtered by selected groups)
     const uniqueAccountNames = useMemo(() => {
         let source = rows;
-        if (filters.Group && filters.Group.length > 0) {
+        if (filters.GroupMode === "withGroup" && filters.Group && filters.Group.length > 0) {
             source = source.filter((r: any) => r.Group_Name && filters.Group.includes(r.Group_Name));
         }
         const names = new Set(source.map((r) => r.Account_name).filter(Boolean));
         return Array.from(names).sort((a, b) => a.localeCompare(b));
-    }, [rows, filters.Group]);
+    }, [rows, filters.Group, filters.GroupMode]);
 
     // Account list filtered by search input inside dropdown menu
     const filteredAccountOptions = useMemo(() => {
@@ -143,7 +155,7 @@ const RecievablePayableReport: React.FC = () => {
         });
 
         // Filter by selected Groups
-        if (filters.Group && filters.Group.length > 0) {
+        if (filters.GroupMode === "withGroup" && filters.Group && filters.Group.length > 0) {
             source = source.filter((r: any) => r.Group_Name && filters.Group.includes(r.Group_Name));
         }
 
@@ -152,7 +164,7 @@ const RecievablePayableReport: React.FC = () => {
             (row) =>
                 row.Account_name && selectedAccountNames.includes(row.Account_name)
         );
-    }, [rows, selectedAccountNames, filters.Group]);
+    }, [rows, selectedAccountNames, filters.Group, filters.GroupMode]);
 
     const {
         sortConfig,
@@ -275,26 +287,85 @@ const RecievablePayableReport: React.FC = () => {
             return;
         }
 
-        const groups = getGroupedDataForExport();
+        const workbook = XLSX.utils.book_new();
         const exportRows: any[] = [];
-        let sNo = 1;
-        const headerRowIndices = new Set<number>();
 
-        groups.forEach((group) => {
-            // Group Header & Totals Row
-            headerRowIndices.add(exportRows.length + 3); // Excel 1-based index (including offset)
-            exportRows.push({
-                "S.No": "",
-                "Account Name": group.groupName,
-                "Invoice Date": "",
-                "Invoice No": "",
-                "Debit Amount": group.subtotalDebit || "",
-                "Credit Amount": group.subtotalCredit || "",
+        if (filters.GroupMode === "withGroup") {
+            const groups = getGroupedDataForExport();
+            let sNo = 1;
+            const headerRowIndices = new Set<number>();
+
+            groups.forEach((group) => {
+                // Group Header & Totals Row
+                headerRowIndices.add(exportRows.length + 2); // Excel 1-based index (including offset)
+                exportRows.push({
+                    "S.No": "",
+                    "Account Name": group.groupName,
+                    "Invoice Date": "",
+                    "Invoice No": "",
+                    "Debit Amount": group.subtotalDebit || "",
+                    "Credit Amount": group.subtotalCredit || "",
+                });
+
+                group.items.forEach((row) => {
+                    exportRows.push({
+                        "S.No": sNo++,
+                        "Account Name": row.Account_name || "",
+                        "Invoice Date": row.invoice_date ? dayjs(row.invoice_date).format("DD/MM/YYYY") : "",
+                        "Invoice No": row.invoice_no || "",
+                        "Debit Amount": row.Debit_Amount || 0,
+                        "Credit Amount": row.Credit_Amount || 0,
+                    });
+                });
             });
 
-            group.items.forEach((row) => {
+            // Grand Total Row
+            exportRows.push({
+                "S.No": "",
+                "Account Name": "Grand Total",
+                "Invoice Date": "",
+                "Invoice No": "",
+                "Debit Amount": totalDebitAmount || 0,
+                "Credit Amount": totalCreditAmount || 0,
+            });
+
+            const worksheet = XLSX.utils.json_to_sheet(exportRows);
+            XLSX.utils.book_append_sheet(workbook, worksheet, reportTitle);
+
+            // Styling cells in excel
+            const range = XLSX.utils.decode_range(worksheet["!ref"] || "");
+            const borderStyle = {
+                top: { style: "thin", color: { rgb: "CFCFCF" } },
+                bottom: { style: "thin", color: { rgb: "CFCFCF" } },
+                left: { style: "thin", color: { rgb: "CFCFCF" } },
+                right: { style: "thin", color: { rgb: "CFCFCF" } }
+            };
+
+            for (let R = range.s.r; R <= range.e.r; ++R) {
+                for (let C = range.s.c; C <= range.e.c; ++C) {
+                    const cell = worksheet[XLSX.utils.encode_cell({ r: R, c: C })];
+                    if (!cell) continue;
+
+                    cell.s = {
+                        font: { name: "Arial", sz: 9 },
+                        border: borderStyle
+                    };
+
+                    const val = String(cell.v || "");
+                    if (headerRowIndices.has(R + 1)) {
+                        cell.s.font = { name: "Arial", sz: 9, bold: true, color: { rgb: "1E3A8A" } };
+                        cell.s.fill = { fgColor: { rgb: "E2E8F0" } };
+                    } else if (val === "Grand Total") {
+                        cell.s.font = { name: "Arial", sz: 9, bold: true };
+                        cell.s.fill = { fgColor: { rgb: "F1F5F9" } };
+                    }
+                }
+            }
+        } else {
+            // Flat list view
+            finalData.forEach((row, index) => {
                 exportRows.push({
-                    "S.No": sNo++,
+                    "S.No": index + 1,
                     "Account Name": row.Account_name || "",
                     "Invoice Date": row.invoice_date ? dayjs(row.invoice_date).format("DD/MM/YYYY") : "",
                     "Invoice No": row.invoice_no || "",
@@ -302,48 +373,44 @@ const RecievablePayableReport: React.FC = () => {
                     "Credit Amount": row.Credit_Amount || 0,
                 });
             });
-        });
 
-        // Grand Total Row
-        exportRows.push({
-            "S.No": "",
-            "Account Name": "Grand Total",
-            "Invoice Date": "",
-            "Invoice No": "",
-            "Debit Amount": totalDebitAmount || 0,
-            "Credit Amount": totalCreditAmount || 0,
-        });
+            // Grand Total Row
+            exportRows.push({
+                "S.No": "",
+                "Account Name": "Grand Total",
+                "Invoice Date": "",
+                "Invoice No": "",
+                "Debit Amount": totalDebitAmount || 0,
+                "Credit Amount": totalCreditAmount || 0,
+            });
 
-        const worksheet = XLSX.utils.json_to_sheet(exportRows);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, reportTitle);
+            const worksheet = XLSX.utils.json_to_sheet(exportRows);
+            XLSX.utils.book_append_sheet(workbook, worksheet, reportTitle);
 
-        // Styling cells in excel
-        const range = XLSX.utils.decode_range(worksheet["!ref"] || "");
-        const borderStyle = {
-            top: { style: "thin", color: { rgb: "CFCFCF" } },
-            bottom: { style: "thin", color: { rgb: "CFCFCF" } },
-            left: { style: "thin", color: { rgb: "CFCFCF" } },
-            right: { style: "thin", color: { rgb: "CFCFCF" } }
-        };
+            // Styling cells in excel
+            const range = XLSX.utils.decode_range(worksheet["!ref"] || "");
+            const borderStyle = {
+                top: { style: "thin", color: { rgb: "CFCFCF" } },
+                bottom: { style: "thin", color: { rgb: "CFCFCF" } },
+                left: { style: "thin", color: { rgb: "CFCFCF" } },
+                right: { style: "thin", color: { rgb: "CFCFCF" } }
+            };
 
-        for (let R = range.s.r; R <= range.e.r; ++R) {
-            for (let C = range.s.c; C <= range.e.c; ++C) {
-                const cell = worksheet[XLSX.utils.encode_cell({ r: R, c: C })];
-                if (!cell) continue;
+            for (let R = range.s.r; R <= range.e.r; ++R) {
+                for (let C = range.s.c; C <= range.e.c; ++C) {
+                    const cell = worksheet[XLSX.utils.encode_cell({ r: R, c: C })];
+                    if (!cell) continue;
 
-                cell.s = {
-                    font: { name: "Arial", sz: 9 },
-                    border: borderStyle
-                };
+                    cell.s = {
+                        font: { name: "Arial", sz: 9 },
+                        border: borderStyle
+                    };
 
-                const val = String(cell.v || "");
-                if (headerRowIndices.has(R + 1)) {
-                    cell.s.font = { name: "Arial", sz: 9, bold: true, color: { rgb: "1E3A8A" } };
-                    cell.s.fill = { fgColor: { rgb: "E2E8F0" } };
-                } else if (val === "Grand Total") {
-                    cell.s.font = { name: "Arial", sz: 9, bold: true };
-                    cell.s.fill = { fgColor: { rgb: "F1F5F9" } };
+                    const val = String(cell.v || "");
+                    if (val === "Grand Total") {
+                        cell.s.font = { name: "Arial", sz: 9, bold: true };
+                        cell.s.fill = { fgColor: { rgb: "F1F5F9" } };
+                    }
                 }
             }
         }
@@ -361,31 +428,84 @@ const RecievablePayableReport: React.FC = () => {
             return;
         }
 
-        const groups = getGroupedDataForExport();
         const doc = new jsPDF("p", "mm", "a4");
         doc.setFontSize(14);
         doc.text(`${reportTitle} - As of ${dayjs(filters.Date.to).format("DD/MM/YYYY")}`, 14, 12);
 
         const tableHeaders = [["S.No", "Account Name", "Invoice Date", "Invoice No", "Debit Amount", "Credit Amount"]];
         const tableBody: any[] = [];
-        let sNo = 1;
-        const headerIndices = new Set<number>();
 
-        groups.forEach((group) => {
-            // Group Header & Totals Row in PDF table body
-            headerIndices.add(tableBody.length);
+        if (filters.GroupMode === "withGroup") {
+            const groups = getGroupedDataForExport();
+            let sNo = 1;
+            const headerIndices = new Set<number>();
+
+            groups.forEach((group) => {
+                // Group Header & Totals Row in PDF table body
+                headerIndices.add(tableBody.length);
+                tableBody.push([
+                    "",
+                    group.groupName,
+                    "",
+                    "",
+                    group.subtotalDebit !== 0 ? group.subtotalDebit.toFixed(2) : "0.00",
+                    group.subtotalCredit !== 0 ? group.subtotalCredit.toFixed(2) : "0.00",
+                ]);
+
+                group.items.forEach((row) => {
+                    tableBody.push([
+                        sNo++,
+                        row.Account_name || "",
+                        row.invoice_date ? dayjs(row.invoice_date).format("DD/MM/YYYY") : "",
+                        row.invoice_no || "",
+                        row.Debit_Amount ? row.Debit_Amount.toFixed(2) : "0.00",
+                        row.Credit_Amount ? row.Credit_Amount.toFixed(2) : "0.00",
+                    ]);
+                });
+            });
+
+            // Add Grand Total Row to PDF body
             tableBody.push([
                 "",
-                group.groupName,
+                "Grand Total",
                 "",
                 "",
-                group.subtotalDebit !== 0 ? group.subtotalDebit.toFixed(2) : "0.00",
-                group.subtotalCredit !== 0 ? group.subtotalCredit.toFixed(2) : "0.00",
+                totalDebitAmount.toFixed(2),
+                totalCreditAmount.toFixed(2),
             ]);
 
-            group.items.forEach((row) => {
+            autoTable(doc, {
+                startY: 18,
+                head: tableHeaders,
+                body: tableBody,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [30, 58, 138] },
+                didParseCell: (cellData) => {
+                    if (cellData.row.index === tableBody.length - 1) {
+                        cellData.cell.styles.fontStyle = "bold";
+                        cellData.cell.styles.fillColor = [241, 245, 249];
+                        if (cellData.column.index === 4 || cellData.column.index === 5) {
+                            cellData.cell.styles.halign = "right";
+                        }
+                    } else if (headerIndices.has(cellData.row.index)) {
+                        cellData.cell.styles.fontStyle = "bold";
+                        cellData.cell.styles.fillColor = [226, 232, 240]; // slate-200
+                        cellData.cell.styles.textColor = [30, 58, 138]; // navy
+                        if (cellData.column.index === 4 || cellData.column.index === 5) {
+                            cellData.cell.styles.halign = "right";
+                        }
+                    } else {
+                        if (cellData.column.index === 4 || cellData.column.index === 5) {
+                            cellData.cell.styles.halign = "right";
+                        }
+                    }
+                }
+            });
+        } else {
+            // Flat list view
+            finalData.forEach((row, index) => {
                 tableBody.push([
-                    sNo++,
+                    index + 1,
                     row.Account_name || "",
                     row.invoice_date ? dayjs(row.invoice_date).format("DD/MM/YYYY") : "",
                     row.invoice_no || "",
@@ -393,45 +513,38 @@ const RecievablePayableReport: React.FC = () => {
                     row.Credit_Amount ? row.Credit_Amount.toFixed(2) : "0.00",
                 ]);
             });
-        });
 
-        // Add Grand Total Row to PDF body
-        tableBody.push([
-            "",
-            "Grand Total",
-            "",
-            "",
-            totalDebitAmount.toFixed(2),
-            totalCreditAmount.toFixed(2),
-        ]);
+            // Add Grand Total Row to PDF body
+            tableBody.push([
+                "",
+                "Grand Total",
+                "",
+                "",
+                totalDebitAmount.toFixed(2),
+                totalCreditAmount.toFixed(2),
+            ]);
 
-        autoTable(doc, {
-            startY: 18,
-            head: tableHeaders,
-            body: tableBody,
-            styles: { fontSize: 8 },
-            headStyles: { fillColor: [30, 58, 138] },
-            didParseCell: (cellData) => {
-                if (cellData.row.index === tableBody.length - 1) {
-                    cellData.cell.styles.fontStyle = "bold";
-                    cellData.cell.styles.fillColor = [241, 245, 249];
-                    if (cellData.column.index === 4 || cellData.column.index === 5) {
-                        cellData.cell.styles.halign = "right";
-                    }
-                } else if (headerIndices.has(cellData.row.index)) {
-                    cellData.cell.styles.fontStyle = "bold";
-                    cellData.cell.styles.fillColor = [226, 232, 240]; // slate-200
-                    cellData.cell.styles.textColor = [30, 58, 138]; // navy
-                    if (cellData.column.index === 4 || cellData.column.index === 5) {
-                        cellData.cell.styles.halign = "right";
-                    }
-                } else {
-                    if (cellData.column.index === 4 || cellData.column.index === 5) {
-                        cellData.cell.styles.halign = "right";
+            autoTable(doc, {
+                startY: 18,
+                head: tableHeaders,
+                body: tableBody,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [30, 58, 138] },
+                didParseCell: (cellData) => {
+                    if (cellData.row.index === tableBody.length - 1) {
+                        cellData.cell.styles.fontStyle = "bold";
+                        cellData.cell.styles.fillColor = [241, 245, 249];
+                        if (cellData.column.index === 4 || cellData.column.index === 5) {
+                            cellData.cell.styles.halign = "right";
+                        }
+                    } else {
+                        if (cellData.column.index === 4 || cellData.column.index === 5) {
+                            cellData.cell.styles.halign = "right";
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
 
         doc.save(`${reportTitle.replace(" ", "_")}_${dayjs().format("DDMMYYYY")}.pdf`);
         toast.success("PDF exported successfully 📄");
@@ -483,6 +596,7 @@ const RecievablePayableReport: React.FC = () => {
                     setDrawerOpen((prev) => {
                         if (!prev) {
                             setTempGroups(selectedGroups);
+                            setTempGroupMode(groupMode);
                         }
                         return !prev;
                     });
@@ -494,28 +608,54 @@ const RecievablePayableReport: React.FC = () => {
                 onApply={() => {
                     setFilters({
                         Date: { to: toDate },
-                        Group: tempGroups,
+                        Group: tempGroupMode === "withGroup" ? tempGroups : [],
+                        GroupMode: tempGroupMode,
                     });
-                    setSelectedGroups(tempGroups);
+                    setSelectedGroups(tempGroupMode === "withGroup" ? tempGroups : []);
+                    setGroupMode(tempGroupMode);
                     setDrawerOpen(false);
                 }}
             >
-                <Autocomplete
-                    multiple
-                    disableCloseOnSelect
-                    options={uniqueGroupNames}
-                    value={tempGroups}
-                    onChange={(_, newValue) => setTempGroups(newValue)}
-                    renderInput={(params) => (
-                        <TextField
-                            {...params}
-                            label="Group Names"
-                            placeholder="Select Groups..."
-                            InputLabelProps={{ shrink: true }}
+                <FormControl sx={{ mb: 2, display: "block" }}>
+                    <FormLabel sx={{ fontWeight: 600, color: "#1E3A8A", fontSize: "0.875rem", display: "block", mb: 0.5 }}>
+                        Grouping Mode
+                    </FormLabel>
+                    <RadioGroup
+                        row
+                        value={tempGroupMode}
+                        onChange={(e) => setTempGroupMode(e.target.value as "withGroup" | "withoutGroup")}
+                    >
+                        <FormControlLabel
+                            value="withGroup"
+                            control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                            label={<Typography sx={{ fontSize: "0.825rem" }}>With Group</Typography>}
                         />
-                    )}
-                    sx={{ mb: 3 }}
-                />
+                        <FormControlLabel
+                            value="withoutGroup"
+                            control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                            label={<Typography sx={{ fontSize: "0.825rem" }}>Without Group</Typography>}
+                        />
+                    </RadioGroup>
+                </FormControl>
+
+                {tempGroupMode === "withGroup" && (
+                    <Autocomplete
+                        multiple
+                        disableCloseOnSelect
+                        options={uniqueGroupNames}
+                        value={tempGroups}
+                        onChange={(_, newValue) => setTempGroups(newValue)}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                label="Group Names"
+                                placeholder="Select Groups..."
+                                InputLabelProps={{ shrink: true }}
+                            />
+                        )}
+                        sx={{ mb: 3 }}
+                    />
+                )}
             </ReportFilterDrawer>
 
             <AppLayout fullWidth>
@@ -588,64 +728,99 @@ const RecievablePayableReport: React.FC = () => {
                                             </TableRow>
                                         )}
 
-                                        {groupedPaginatedData.length > 0 ? (
-                                            (() => {
-                                                let sNoCounter = (page - 1) * rowsPerPage;
-                                                return groupedPaginatedData.map((group, groupIdx) => {
-                                                    const rowsHtml = group.items.map((row, itemIdx) => {
-                                                        sNoCounter++;
+                                        {filters.GroupMode === "withGroup" ? (
+                                            groupedPaginatedData.length > 0 ? (
+                                                (() => {
+                                                    let sNoCounter = (page - 1) * rowsPerPage;
+                                                    return groupedPaginatedData.map((group, groupIdx) => {
+                                                        const rowsHtml = group.items.map((row, itemIdx) => {
+                                                            sNoCounter++;
+                                                            return (
+                                                                <TableRow key={row.Acc_Id + itemIdx} hover>
+                                                                    <TableCell>{sNoCounter}</TableCell>
+                                                                    <TableCell sx={{ fontWeight: 500, color: "#1E293B", wordBreak: "break-word", whiteSpace: "normal" }}>
+                                                                        {row.Account_name}
+                                                                    </TableCell>
+                                                                    <TableCell>
+                                                                        {row.invoice_date
+                                                                            ? dayjs(row.invoice_date).format("DD/MM/YYYY")
+                                                                            : "-"}
+                                                                    </TableCell>
+                                                                    <TableCell sx={{ wordBreak: "break-all", whiteSpace: "normal" }}>{row.invoice_no || "-"}</TableCell>
+                                                                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                                                                        {row.Debit_Amount !== 0 ? formatINR(row.Debit_Amount) : "-"}
+                                                                    </TableCell>
+                                                                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                                                                        {row.Credit_Amount !== 0 ? formatINR(row.Credit_Amount) : "-"}
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            );
+                                                        });
+
                                                         return (
-                                                            <TableRow key={row.Acc_Id + itemIdx} hover>
-                                                                <TableCell>{sNoCounter}</TableCell>
-                                                                <TableCell sx={{ fontWeight: 500, color: "#1E293B", wordBreak: "break-word", whiteSpace: "normal" }}>
-                                                                    {row.Account_name}
-                                                                </TableCell>
-                                                                <TableCell>
-                                                                    {row.invoice_date
-                                                                        ? dayjs(row.invoice_date).format("DD/MM/YYYY")
-                                                                        : "-"}
-                                                                </TableCell>
-                                                                <TableCell sx={{ wordBreak: "break-all", whiteSpace: "normal" }}>{row.invoice_no || "-"}</TableCell>
-                                                                <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                                                    {row.Debit_Amount !== 0 ? formatINR(row.Debit_Amount) : "-"}
-                                                                </TableCell>
-                                                                <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                                                    {row.Credit_Amount !== 0 ? formatINR(row.Credit_Amount) : "-"}
-                                                                </TableCell>
-                                                            </TableRow>
+                                                            <React.Fragment key={group.groupName + groupIdx}>
+                                                                {/* Group Header Row showing totals directly */}
+                                                                <TableRow sx={{ backgroundColor: "#E2E8F0" }}>
+                                                                    <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }} />
+                                                                    <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A", py: 1 }}>
+                                                                        {group.groupName}
+                                                                    </TableCell>
+                                                                    <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }} />
+                                                                    <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }} />
+                                                                    <TableCell align="right" sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }}>
+                                                                        {group.subtotalDebit !== 0 ? formatINR(group.subtotalDebit) : "-"}
+                                                                    </TableCell>
+                                                                    <TableCell align="right" sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }}>
+                                                                        {group.subtotalCredit !== 0 ? formatINR(group.subtotalCredit) : "-"}
+                                                                    </TableCell>
+                                                                </TableRow>
+
+                                                                {/* Group Items */}
+                                                                {rowsHtml}
+                                                            </React.Fragment>
                                                         );
                                                     });
-
-                                                    return (
-                                                        <React.Fragment key={group.groupName + groupIdx}>
-                                                            {/* Group Header Row showing totals directly */}
-                                                            <TableRow sx={{ backgroundColor: "#E2E8F0" }}>
-                                                                <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }} />
-                                                                <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A", py: 1 }}>
-                                                                    {group.groupName}
-                                                                </TableCell>
-                                                                <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }} />
-                                                                <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }} />
-                                                                <TableCell align="right" sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }}>
-                                                                    {group.subtotalDebit !== 0 ? formatINR(group.subtotalDebit) : "-"}
-                                                                </TableCell>
-                                                                <TableCell align="right" sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }}>
-                                                                    {group.subtotalCredit !== 0 ? formatINR(group.subtotalCredit) : "-"}
-                                                                </TableCell>
-                                                            </TableRow>
-
-                                                            {/* Group Items */}
-                                                            {rowsHtml}
-                                                        </React.Fragment>
-                                                    );
-                                                });
-                                            })()
+                                                })()
+                                            ) : (
+                                                <TableRow>
+                                                    <TableCell colSpan={6} align="center" sx={{ py: 6, color: "text.secondary" }}>
+                                                        No records found.
+                                                    </TableCell>
+                                                </TableRow>
+                                            )
                                         ) : (
-                                            <TableRow>
-                                                <TableCell colSpan={6} align="center" sx={{ py: 6, color: "text.secondary" }}>
-                                                    No records found.
-                                                </TableCell>
-                                            </TableRow>
+                                            // Flat list view ("Without Group")
+                                            paginatedRows.length > 0 ? (
+                                                paginatedRows.map((row: any, i) => {
+                                                    const sNo = (page - 1) * rowsPerPage + i + 1;
+                                                    return (
+                                                        <TableRow key={row.Acc_Id + i} hover>
+                                                            <TableCell>{sNo}</TableCell>
+                                                            <TableCell sx={{ fontWeight: 500, color: "#1E293B", wordBreak: "break-word", whiteSpace: "normal" }}>
+                                                                {row.Account_name}
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                {row.invoice_date
+                                                                    ? dayjs(row.invoice_date).format("DD/MM/YYYY")
+                                                                    : "-"}
+                                                            </TableCell>
+                                                            <TableCell sx={{ wordBreak: "break-all", whiteSpace: "normal" }}>{row.invoice_no || "-"}</TableCell>
+                                                            <TableCell align="right" sx={{ fontWeight: 600 }}>
+                                                                {row.Debit_Amount !== 0 ? formatINR(row.Debit_Amount) : "-"}
+                                                            </TableCell>
+                                                            <TableCell align="right" sx={{ fontWeight: 600 }}>
+                                                                {row.Credit_Amount !== 0 ? formatINR(row.Credit_Amount) : "-"}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    );
+                                                })
+                                            ) : (
+                                                <TableRow>
+                                                    <TableCell colSpan={6} align="center" sx={{ py: 6, color: "text.secondary" }}>
+                                                        No records found.
+                                                    </TableCell>
+                                                </TableRow>
+                                            )
                                         )}
                                     </TableBody>
                                 </Table>

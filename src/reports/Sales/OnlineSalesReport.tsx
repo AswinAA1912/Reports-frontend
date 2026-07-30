@@ -533,26 +533,34 @@ const OnlineSalesReportPage: React.FC = () => {
   };
 
   const formatISTDateTime = (dateString: string) => {
-    if (!dateString) return "";
-
+    if (!dateString) return "-";
+    
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return "-";
 
-    const ist = new Date(
-      date.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
-    );
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true
+    });
 
-    const day = String(ist.getDate()).padStart(2, "0");
-    const month = String(ist.getMonth() + 1).padStart(2, "0");
-    const year = ist.getFullYear();
+    const parts = formatter.formatToParts(date);
+    const getPart = (type: string) => parts.find(p => p.type === type)?.value || "";
 
-    let hours = ist.getHours();
-    const minutes = String(ist.getMinutes()).padStart(2, "0");
+    const day = getPart("day");
+    const month = getPart("month");
+    const year = getPart("year");
+    const hour = getPart("hour");
+    const minute = getPart("minute");
+    const dayPeriod = getPart("dayPeriod").toLowerCase();
 
-    const ampm = hours >= 12 ? "p.m." : "a.m.";
+    const ampm = dayPeriod.includes("pm") || dayPeriod.includes("p.m") ? "p.m." : "a.m.";
 
-    hours = hours % 12 || 12;
-
-    return `${day}-${month}-${year} ${String(hours).padStart(2, "0")}.${minutes} ${ampm}`;
+    return `${day}-${month}-${year} ${hour}.${minute} ${ampm}`;
   };
 
   /* ================= TABLE ================= */

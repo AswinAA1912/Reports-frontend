@@ -331,7 +331,7 @@ const CashBoxReport: React.FC = () => {
             case "Created_on":
                 return (
                     <TableCell sx={{ border: "1px solid #cbd5e1" }} key="Created_on">
-                        {formatTime(tx.Created_on)}
+                        {formatCreatedOn(tx.Created_on)}
                     </TableCell>
                 );
             case "Account_name":
@@ -564,6 +564,40 @@ const CashBoxReport: React.FC = () => {
         if (!d.isValid()) return "-";
 
         return d.format("h.mm a");
+    };
+
+    const formatCreatedOn = (dateString: any): string => {
+        if (!dateString) return "-";
+        
+        let str = "";
+        if (dateString instanceof Date) {
+            const y = dateString.getFullYear();
+            const m = String(dateString.getMonth() + 1).padStart(2, "0");
+            const d = String(dateString.getDate()).padStart(2, "0");
+            const h = String(dateString.getHours()).padStart(2, "0");
+            const min = String(dateString.getMinutes()).padStart(2, "0");
+            const s = String(dateString.getSeconds()).padStart(2, "0");
+            str = `${y}-${m}-${d}T${h}:${min}:${s}`;
+        } else {
+            str = String(dateString);
+        }
+
+        const match = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+        if (!match) return "-";
+
+        const [_, yearStr, monthStr, dayStr, hourStr, minuteStr] = match;
+
+        const day = dayStr;
+        const month = monthStr;
+        const year = yearStr;
+
+        let hours = parseInt(hourStr, 10);
+        const minutes = minuteStr;
+        const ampm = hours >= 12 ? "p.m." : "a.m.";
+
+        hours = hours % 12 || 12;
+
+        return `${day}-${month}-${year} ${hours}.${minutes} ${ampm}`;
     };
 
     const toggleGroup = (key: string) => {
@@ -1465,7 +1499,7 @@ const CashBoxReport: React.FC = () => {
                         excelData.push(enabledColumns.map(c => {
                             if (c.key === "sno") return tIdx + 1;
                             if (c.key === "Ledger_Date") return tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : "";
-                            if (c.key === "Created_on") return tx.Created_on ? formatTime(tx.Created_on) : "";
+                            if (c.key === "Created_on") return tx.Created_on ? formatCreatedOn(tx.Created_on) : "";
                             if (c.key === "Account_name") return (Number(tx.Dr_Amount) > 0 ? tx.Credit_Names : (Number(tx.Cr_Amount) > 0 ? tx.Debit_Names : tx.Account_name)) || "";
                             if (c.key === "invoice_no") return tx.invoice_no || "";
                             if (c.key === "Narration") return tx.Narration || tx.Line_Naration || "";
@@ -1718,7 +1752,7 @@ const CashBoxReport: React.FC = () => {
                         pdfBody.push(enabledColumns.map(c => {
                             if (c.key === "sno") return tIdx + 1;
                             if (c.key === "Ledger_Date") return tx.Ledger_Date ? dayjs(tx.Ledger_Date).format("DD-MM-YYYY") : "";
-                            if (c.key === "Created_on") return tx.Created_on ? formatTime(tx.Created_on) : "-";
+                            if (c.key === "Created_on") return tx.Created_on ? formatCreatedOn(tx.Created_on) : "-";
                             if (c.key === "Account_name") return (Number(tx.Dr_Amount) > 0 ? tx.Credit_Names : (Number(tx.Cr_Amount) > 0 ? tx.Debit_Names : tx.Account_name)) || "";
                             if (c.key === "invoice_no") return tx.invoice_no || "";
                             if (c.key === "Narration") return tx.Narration || tx.Line_Naration || "";

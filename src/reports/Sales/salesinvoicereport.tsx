@@ -23,7 +23,7 @@ import PageHeader from "../../Layout/PageHeader";
 import CommonPagination from "../../Components/CommonPagination";
 import { exportToPDF } from "../../utils/exportToPDF";
 import { exportToExcel } from "../../utils/exportToExcel";
-import { mapForExport } from "../../utils/exportMapper";
+import { mapForExport, formatCreatedOn } from "../../utils/exportMapper";
 import {
   SalesInvoiceReport,
   SalesInvoiceReportService,
@@ -268,7 +268,7 @@ const SalesInvoiceReportPage: React.FC = () => {
                 {paginatedData.map((row, i) => (
                   <TableRow key={row.Do_Id}>
                     <TableCell sx={{ fontSize: "0.75rem" }}>{(page - 1) * rowsPerPage  + i + 1}</TableCell>
-                    <TableCell sx={{ fontSize: "0.75rem" }}>{dayjs(row.Created_on).format("DD/MM/YYYY")}</TableCell>
+                    <TableCell sx={{ fontSize: "0.75rem" }}>{formatCreatedOn(row.Created_on)}</TableCell>
                     <TableCell sx={{ fontSize: "0.75rem" }}>{row.Do_Inv_No}</TableCell>
                     <TableCell sx={{ fontSize: "0.75rem" }}>{row.Retailer_Name}</TableCell>
                     <TableCell sx={{ fontSize: "0.75rem" }}>{row.VoucherTypeGet}</TableCell>

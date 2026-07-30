@@ -48,6 +48,37 @@ import AppLayout, {
 import PageHeader from "../../Layout/PageHeader";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import CommonPagination from "../../Components/CommonPagination";
+
+const formatCreatedOn = (dateString: any): string => {
+  if (!dateString) return "-";
+  
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return "-";
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+
+  const parts = formatter.formatToParts(date);
+  const getPart = (type: string) => parts.find(p => p.type === type)?.value || "";
+
+  const day = getPart("day");
+  const month = getPart("month");
+  const year = getPart("year");
+  const hour = getPart("hour");
+  const minute = getPart("minute");
+  const dayPeriod = getPart("dayPeriod").toLowerCase();
+
+  const ampm = dayPeriod.includes("pm") || dayPeriod.includes("p.m") ? "p.m." : "a.m.";
+
+  return `${day}-${month}-${year} ${hour}.${minute} ${ampm}`;
+};
 import { useNumericalFilter } from "../../hooks/useNumericalFilter";
 import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
 
@@ -910,15 +941,11 @@ const StaffBasedCountReport: React.FC =
                         (
                             col
                         ) => {
-                            obj[
-                                col
-                                    .label
-                            ] =
-                                row[
-                                col
-                                    .key
-                                ] ??
-                                "";
+                            if (col.key === "Created_on" && row[col.key]) {
+                                obj[col.label] = formatCreatedOn(row[col.key]);
+                            } else {
+                                obj[col.label] = row[col.key] ?? "";
+                            }
                         }
                     );
 
@@ -1369,10 +1396,9 @@ const StaffBasedCountReport: React.FC =
                                                                 c.key
                                                             }
                                                         >
-                                                            {row[
-                                                                c.key
-                                                            ] ??
-                                                                0}
+                                                             {c.key === "Created_on"
+                                                                 ? formatCreatedOn(row[c.key])
+                                                                 : (row[c.key] ?? 0)}
                                                         </TableCell>
                                                     )
                                                 )}

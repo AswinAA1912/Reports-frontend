@@ -74,6 +74,37 @@ const NUMERIC_KEYS = [
     "Total_Invoice_value",
 ];
 
+const formatCreatedOn = (dateString: any): string => {
+  if (!dateString) return "-";
+  
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return "-";
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+
+  const parts = formatter.formatToParts(date);
+  const getPart = (type: string) => parts.find(p => p.type === type)?.value || "";
+
+  const day = getPart("day");
+  const month = getPart("month");
+  const year = getPart("year");
+  const hour = getPart("hour");
+  const minute = getPart("minute");
+  const dayPeriod = getPart("dayPeriod").toLowerCase();
+
+  const ampm = dayPeriod.includes("pm") || dayPeriod.includes("p.m") ? "p.m." : "a.m.";
+
+  return `${day}-${month}-${year} ${hour}.${minute} ${ampm}`;
+};
+
 /* ================= TYPES ================= */
 
 type ColumnConfig = {
@@ -573,7 +604,13 @@ const PendingSaleOrder: React.FC = () => {
                 }
                 // NORMAL ROW
                 else {
-                    obj[c.label] = row[c.key] ?? "";
+                    if (c.key === "Created_on" && row[c.key]) {
+                        obj[c.label] = formatCreatedOn(row[c.key]);
+                    } else if (c.key === "Ledger_Date" && row[c.key]) {
+                        obj[c.label] = dayjs(row[c.key]).format("DD/MM/YYYY");
+                    } else {
+                        obj[c.label] = row[c.key] ?? "";
+                    }
                 }
             });
 
@@ -611,6 +648,12 @@ const PendingSaleOrder: React.FC = () => {
                     }
                 }
 
+                if (c.key === "Created_on" && row[c.key]) {
+                    return formatCreatedOn(row[c.key]);
+                }
+                if (c.key === "Ledger_Date" && row[c.key]) {
+                    return dayjs(row[c.key]).format("DD/MM/YYYY");
+                }
                 return row[c.key] ?? "";
             })
         );
@@ -949,6 +992,14 @@ const PendingSaleOrder: React.FC = () => {
                             return (
                                 <TableCell key={c.key} align={align}>
                                     {dayjs(row[c.key]).format("DD/MM/YYYY")}
+                                </TableCell>
+                            );
+                        }
+
+                        if (c.key === "Created_on") {
+                            return (
+                                <TableCell key={c.key} align={align}>
+                                    {formatCreatedOn(row[c.key])}
                                 </TableCell>
                             );
                         }

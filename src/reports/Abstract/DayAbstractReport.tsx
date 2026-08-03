@@ -462,8 +462,8 @@ const DayAbstractReport: React.FC = () => {
         row += data3Rows.length + 2;
 
         /* ================= DATA 5 & 6 ================= */
-        const debtors = reportData.Data5?.[0];
-        const creditors = reportData.Data6?.[0];
+        const debtors = reportData.Data6?.[0];
+        const creditors = reportData.Data5?.[0];
 
         XLSX.utils.sheet_add_aoa(ws, [["DATA 5"]], { origin: `A${row}` });
         row += 1;
@@ -695,9 +695,9 @@ const DayAbstractReport: React.FC = () => {
             startY: currentY,
             head: [["Type", "Amount"]],
             body: [
-                ["Receivable", formatAmount(reportData.Data5?.[0]?.Cr_Amount)],
-                ["Payable", formatAmount(reportData.Data5?.[0]?.Dr_Amount)],
-                ["", formatAmount((Number(reportData.Data5?.[0]?.Cr_Amount) || 0) - (Number(reportData.Data5?.[0]?.Dr_Amount) || 0))],
+                ["Receivable", formatAmount(reportData.Data6?.[0]?.Cr_Amount)],
+                ["Payable", formatAmount(reportData.Data6?.[0]?.Dr_Amount)],
+                ["", formatAmount((Number(reportData.Data6?.[0]?.Cr_Amount) || 0) - (Number(reportData.Data6?.[0]?.Dr_Amount) || 0))],
             ],
             styles: { fontSize: 8 },
         });
@@ -712,10 +712,10 @@ const DayAbstractReport: React.FC = () => {
             startY: currentY,
             head: [["Type", "Amount"]],
             body: [
-                ["Opening", formatAmount(reportData.Data6?.[0]?.OB_Amount)],
-                ["Credit", formatAmount(reportData.Data6?.[0]?.Credit_Amt)],
-                ["Debit", formatAmount(reportData.Data6?.[0]?.Debit_Amt)],
-                ["Closing", formatAmount(reportData.Data6?.[0]?.Bal_Amount)],
+                ["Opening", formatAmount(reportData.Data5?.[0]?.OB_Amount)],
+                ["Credit", formatAmount(reportData.Data5?.[0]?.Credit_Amt)],
+                ["Debit", formatAmount(reportData.Data5?.[0]?.Debit_Amt)],
+                ["Closing", formatAmount(reportData.Data5?.[0]?.Bal_Amount)],
             ],
             styles: { fontSize: 8 },
         });
@@ -1661,8 +1661,8 @@ const DayAbstractReport: React.FC = () => {
 
     const renderData5And6 = () => {
 
-        const debtors = reportData?.Data5?.[0];
-        const creditors = reportData?.Data6?.[0];
+        const debtors = reportData?.Data6?.[0];
+        const creditors = reportData?.Data5?.[0];
 
         if (!debtors && !creditors) return null;
 

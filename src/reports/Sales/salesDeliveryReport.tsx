@@ -108,8 +108,8 @@ const SalesDeliveryReport: React.FC = () => {
                     "Printed",
                     "Taken",
                     "Check",
-                    "Dispatch",
                     "Delivery",
+                    "Dispatch",
                     "Shed Sheet",
                     "Metric"
                 ]);
@@ -123,8 +123,8 @@ const SalesDeliveryReport: React.FC = () => {
                         getFunnelValue(rows, "Count", "Printed"),
                         getFunnelValue(rows, "Count", "Taken"),
                         getFunnelValue(rows, "Count", "Check"),
-                        getFunnelValue(rows, "Count", "Dispatch"),
                         getFunnelValue(rows, "Count", "Delivery"),
+                        getFunnelValue(rows, "Count", "Dispatch"),
                         getFunnelValue(rows, "Count", "ShedSheet"),
                         "Count"
                     ]);
@@ -135,8 +135,8 @@ const SalesDeliveryReport: React.FC = () => {
                         getFunnelValue(rows, "Tonnage", "Printed"),
                         getFunnelValue(rows, "Tonnage", "Taken"),
                         getFunnelValue(rows, "Tonnage", "Check"),
-                        getFunnelValue(rows, "Tonnage", "Dispatch"),
                         getFunnelValue(rows, "Tonnage", "Delivery"),
+                        getFunnelValue(rows, "Tonnage", "Dispatch"),
                         getFunnelValue(rows, "Tonnage", "ShedSheet"),
                         "Tonnage"
                     ]);
@@ -150,8 +150,8 @@ const SalesDeliveryReport: React.FC = () => {
                     "Printed",
                     "Taken",
                     "Check",
-                    "Dispatch",
                     "Delivery",
+                    "Dispatch",
                     "Shed Sheet",
                     "Metric"
                 ]);
@@ -162,8 +162,8 @@ const SalesDeliveryReport: React.FC = () => {
                     getFunnelValue(data, "Count", "Printed"),
                     getFunnelValue(data, "Count", "Taken"),
                     getFunnelValue(data, "Count", "Check"),
-                    getFunnelValue(data, "Count", "Dispatch"),
                     getFunnelValue(data, "Count", "Delivery"),
+                    getFunnelValue(data, "Count", "Dispatch"),
                     getFunnelValue(data, "Count", "ShedSheet"),
                     "Count"
                 ]);
@@ -174,8 +174,8 @@ const SalesDeliveryReport: React.FC = () => {
                     getFunnelValue(data, "Tonnage", "Printed"),
                     getFunnelValue(data, "Tonnage", "Taken"),
                     getFunnelValue(data, "Tonnage", "Check"),
-                    getFunnelValue(data, "Tonnage", "Dispatch"),
                     getFunnelValue(data, "Tonnage", "Delivery"),
+                    getFunnelValue(data, "Tonnage", "Dispatch"),
                     getFunnelValue(data, "Tonnage", "ShedSheet"),
                     "Tonnage"
                 ]);
@@ -265,7 +265,7 @@ const SalesDeliveryReport: React.FC = () => {
             let funnelBody: string[][];
 
             if (toggleMode === "Expanded") {
-                funnelHead = [["Date", "Sales Order", "Sales Invoice", "Printed", "Taken", "Check", "Dispatch", "Delivery", "Shed Sheet", "Metric"]];
+                funnelHead = [["Date", "Sales Order", "Sales Invoice", "Printed", "Taken", "Check", "Delivery", "Dispatch", "Shed Sheet", "Metric"]];
                 funnelBody = [];
                 const grouped = groupDataByDate(data);
                 grouped.forEach(({ displayDate, rows }) => {
@@ -276,8 +276,8 @@ const SalesDeliveryReport: React.FC = () => {
                         getFunnelValue(rows, "Count", "Printed"),
                         getFunnelValue(rows, "Count", "Taken"),
                         getFunnelValue(rows, "Count", "Check"),
-                        getFunnelValue(rows, "Count", "Dispatch"),
                         getFunnelValue(rows, "Count", "Delivery"),
+                        getFunnelValue(rows, "Count", "Dispatch"),
                         getFunnelValue(rows, "Count", "ShedSheet"),
                         "Count"
                     ]);
@@ -288,14 +288,14 @@ const SalesDeliveryReport: React.FC = () => {
                         getFunnelValue(rows, "Tonnage", "Printed"),
                         getFunnelValue(rows, "Tonnage", "Taken"),
                         getFunnelValue(rows, "Tonnage", "Check"),
-                        getFunnelValue(rows, "Tonnage", "Dispatch"),
                         getFunnelValue(rows, "Tonnage", "Delivery"),
+                        getFunnelValue(rows, "Tonnage", "Dispatch"),
                         getFunnelValue(rows, "Tonnage", "ShedSheet"),
                         "Tonnage"
                     ]);
                 });
             } else {
-                funnelHead = [["Sales Order", "Sales Invoice", "Printed", "Taken", "Check", "Dispatch", "Delivery", "Shed Sheet", "Metric"]];
+                funnelHead = [["Sales Order", "Sales Invoice", "Printed", "Taken", "Check", "Delivery", "Dispatch", "Shed Sheet", "Metric"]];
                 funnelBody = [
                     [
                         getFunnelValue(data, "Count", "SalesOrder"),
@@ -303,8 +303,8 @@ const SalesDeliveryReport: React.FC = () => {
                         getFunnelValue(data, "Count", "Printed"),
                         getFunnelValue(data, "Count", "Taken"),
                         getFunnelValue(data, "Count", "Check"),
-                        getFunnelValue(data, "Count", "Dispatch"),
                         getFunnelValue(data, "Count", "Delivery"),
+                        getFunnelValue(data, "Count", "Dispatch"),
                         getFunnelValue(data, "Count", "ShedSheet"),
                         "Count"
                     ],
@@ -314,8 +314,8 @@ const SalesDeliveryReport: React.FC = () => {
                         getFunnelValue(data, "Tonnage", "Printed"),
                         getFunnelValue(data, "Tonnage", "Taken"),
                         getFunnelValue(data, "Tonnage", "Check"),
-                        getFunnelValue(data, "Tonnage", "Dispatch"),
                         getFunnelValue(data, "Tonnage", "Delivery"),
+                        getFunnelValue(data, "Tonnage", "Dispatch"),
                         getFunnelValue(data, "Tonnage", "ShedSheet"),
                         "Tonnage"
                     ]
@@ -403,8 +403,8 @@ const SalesDeliveryReport: React.FC = () => {
                                         <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.9rem" }}>Printed</TableCell>
                                         <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.9rem" }}>Taken</TableCell>
                                         <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.9rem" }}>Check</TableCell>
-                                        <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.9rem" }}>Dispatch</TableCell>
                                         <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.9rem" }}>Delivery</TableCell>
+                                        <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.9rem" }}>Dispatch</TableCell>
                                         <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.9rem" }}>Shed Sheet</TableCell>
                                         <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, bgcolor: "#172d6c", width: "120px", fontSize: "0.9rem" }} align="center">Metric</TableCell>
                                     </TableRow>
@@ -435,10 +435,10 @@ const SalesDeliveryReport: React.FC = () => {
                                                             {getFunnelValue(rows, "Count", "Check")}
                                                         </TableCell>
                                                         <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
-                                                            {getFunnelValue(rows, "Count", "Dispatch")}
+                                                            {getFunnelValue(rows, "Count", "Delivery")}
                                                         </TableCell>
                                                         <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
-                                                            {getFunnelValue(rows, "Count", "Delivery")}
+                                                            {getFunnelValue(rows, "Count", "Dispatch")}
                                                         </TableCell>
                                                         <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
                                                             {getFunnelValue(rows, "Count", "ShedSheet")}
@@ -466,10 +466,10 @@ const SalesDeliveryReport: React.FC = () => {
                                                             {getFunnelValue(rows, "Tonnage", "Check")}
                                                         </TableCell>
                                                         <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
-                                                            {getFunnelValue(rows, "Tonnage", "Dispatch")}
+                                                            {getFunnelValue(rows, "Tonnage", "Delivery")}
                                                         </TableCell>
                                                         <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
-                                                            {getFunnelValue(rows, "Tonnage", "Delivery")}
+                                                            {getFunnelValue(rows, "Tonnage", "Dispatch")}
                                                         </TableCell>
                                                         <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
                                                             {getFunnelValue(rows, "Tonnage", "ShedSheet")}
@@ -500,10 +500,10 @@ const SalesDeliveryReport: React.FC = () => {
                                                         {getFunnelValue(data, "Count", "Check")}
                                                     </TableCell>
                                                     <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
-                                                        {getFunnelValue(data, "Count", "Dispatch")}
+                                                        {getFunnelValue(data, "Count", "Delivery")}
                                                     </TableCell>
                                                     <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
-                                                        {getFunnelValue(data, "Count", "Delivery")}
+                                                        {getFunnelValue(data, "Count", "Dispatch")}
                                                     </TableCell>
                                                     <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
                                                         {getFunnelValue(data, "Count", "ShedSheet")}
@@ -531,10 +531,10 @@ const SalesDeliveryReport: React.FC = () => {
                                                         {getFunnelValue(data, "Tonnage", "Check")}
                                                     </TableCell>
                                                     <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
-                                                        {getFunnelValue(data, "Tonnage", "Dispatch")}
+                                                        {getFunnelValue(data, "Tonnage", "Delivery")}
                                                     </TableCell>
                                                     <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
-                                                        {getFunnelValue(data, "Tonnage", "Delivery")}
+                                                        {getFunnelValue(data, "Tonnage", "Dispatch")}
                                                     </TableCell>
                                                     <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #e2e8f0", py: 2, color: "#1e293b", fontSize: "0.85rem" }}>
                                                         {getFunnelValue(data, "Tonnage", "ShedSheet")}

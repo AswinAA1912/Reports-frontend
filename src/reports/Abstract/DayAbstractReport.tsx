@@ -64,10 +64,10 @@ const styleWorksheet = (ws: XLSX.WorkSheet) => {
                 val === "DATA 2" ||
                 val === "DATA 3" ||
                 val === "DATA 4" ||
-                val === "DATA 5" ||
-                val === "DATA 6" ||
+                val === "DATA 5 & 6" ||
                 val === "DATA 7" ||
-                val === "DATA 8"
+                val === "DATA 8" ||
+                val === "DATA 9 & 10"
             );
 
             if (isSectionHeader) {
@@ -465,7 +465,7 @@ const DayAbstractReport: React.FC = () => {
         const debtors = reportData.Data6?.[0];
         const creditors = reportData.Data5?.[0];
 
-        XLSX.utils.sheet_add_aoa(ws, [["DATA 5"]], { origin: `A${row}` });
+        XLSX.utils.sheet_add_aoa(ws, [["DATA 9 & 10"]], { origin: `A${row}` });
         row += 1;
         XLSX.utils.sheet_add_aoa(ws, [[
             "Sundry Creditors Type",
@@ -475,14 +475,14 @@ const DayAbstractReport: React.FC = () => {
         ]], { origin: `A${row}` });
         row += 1;
         const data56Rows = [
-            ["Receivable", creditors?.Cr_Amount || 0, "Receivable", debtors?.Cr_Amount || 0],
-            ["Payable", creditors?.Dr_Amount || 0, "Payable", debtors?.Dr_Amount || 0],
-            ["", (Number(creditors?.Cr_Amount) || 0) - (Number(creditors?.Dr_Amount) || 0), "", (Number(debtors?.Cr_Amount) || 0) - (Number(debtors?.Dr_Amount) || 0)]
+            ["Receivable", reportData.Data10?.[0]?.Recivables || 0, "Receivable", reportData.Data9?.[0]?.Recivables || 0],
+            ["Payable", reportData.Data10?.[0]?.Payables || 0, "Payable", reportData.Data9?.[0]?.Payables || 0],
+            ["", reportData.Data10?.[0]?.Balance || 0, "", reportData.Data9?.[0]?.Balance || 0]
         ];
         XLSX.utils.sheet_add_json(ws, data56Rows, { origin: `A${row}`, skipHeader: true });
         row += data56Rows.length + 2;
 
-        XLSX.utils.sheet_add_aoa(ws, [["DATA 6"]], { origin: `A${row}` });
+        XLSX.utils.sheet_add_aoa(ws, [["DATA 5 & 6"]], { origin: `A${row}` });
         row += 1;
         XLSX.utils.sheet_add_aoa(ws, [[
             "Sundry Creditors Type",
@@ -687,35 +687,45 @@ const DayAbstractReport: React.FC = () => {
 
         currentY = (doc as any).lastAutoTable.finalY + 8;
 
-        /* ================= DATA 5 ================= */
+        /* ================= DATA 9 & 10 ================= */
 
-        addTitle("DATA 5");
+        addTitle("DATA 9 & 10");
 
         autoTable(doc, {
             startY: currentY,
-            head: [["Type", "Amount"]],
+            head: [[
+                "Sundry Creditors Type",
+                "Sundry Creditors Amount",
+                "Sundry Debtors Type",
+                "Sundry Debtors Amount"
+            ]],
             body: [
-                ["Receivable", formatAmount(reportData.Data6?.[0]?.Cr_Amount)],
-                ["Payable", formatAmount(reportData.Data6?.[0]?.Dr_Amount)],
-                ["", formatAmount((Number(reportData.Data6?.[0]?.Cr_Amount) || 0) - (Number(reportData.Data6?.[0]?.Dr_Amount) || 0))],
+                ["Receivable", formatAmount(reportData.Data10?.[0]?.Recivables), "Receivable", formatAmount(reportData.Data9?.[0]?.Recivables)],
+                ["Payable", formatAmount(reportData.Data10?.[0]?.Payables), "Payable", formatAmount(reportData.Data9?.[0]?.Payables)],
+                ["", formatAmount(reportData.Data10?.[0]?.Balance), "", formatAmount(reportData.Data9?.[0]?.Balance)],
             ],
             styles: { fontSize: 8 },
         });
 
         currentY = (doc as any).lastAutoTable.finalY + 8;
 
-        /* ================= DATA 6 ================= */
+        /* ================= DATA 5 & 6 ================= */
 
-        addTitle("DATA 6");
+        addTitle("DATA 5 & 6");
 
         autoTable(doc, {
             startY: currentY,
-            head: [["Type", "Amount"]],
+            head: [[
+                "Sundry Creditors Type",
+                "Sundry Creditors Amount",
+                "Sundry Debtors Type",
+                "Sundry Debtors Amount"
+            ]],
             body: [
-                ["Opening", formatAmount(reportData.Data5?.[0]?.OB_Amount)],
-                ["Credit", formatAmount(reportData.Data5?.[0]?.Credit_Amt)],
-                ["Debit", formatAmount(reportData.Data5?.[0]?.Debit_Amt)],
-                ["Closing", formatAmount(reportData.Data5?.[0]?.Bal_Amount)],
+                ["Opening", formatAmount(reportData.Data5?.[0]?.OB_Amount), "Opening", formatAmount(reportData.Data6?.[0]?.OB_Amount)],
+                ["Credit", formatAmount(reportData.Data5?.[0]?.Credit_Amt), "Credit", formatAmount(reportData.Data6?.[0]?.Credit_Amt)],
+                ["Debit", formatAmount(reportData.Data5?.[0]?.Debit_Amt), "Debit", formatAmount(reportData.Data6?.[0]?.Debit_Amt)],
+                ["Closing", formatAmount(reportData.Data5?.[0]?.Bal_Amount), "Closing", formatAmount(reportData.Data6?.[0]?.Bal_Amount)],
             ],
             styles: { fontSize: 8 },
         });
@@ -1663,8 +1673,10 @@ const DayAbstractReport: React.FC = () => {
 
         const debtors = reportData?.Data6?.[0];
         const creditors = reportData?.Data5?.[0];
+        const debtorBalances = reportData?.Data9?.[0];
+        const creditorBalances = reportData?.Data10?.[0];
 
-        if (!debtors && !creditors) return null;
+        if (!debtors && !creditors && !debtorBalances && !creditorBalances) return null;
 
         return (
             <Box
@@ -1750,7 +1762,7 @@ const DayAbstractReport: React.FC = () => {
 
                                 <TableCell align="right">
                                     {formatAmount(
-                                        creditors?.Cr_Amount
+                                        creditorBalances?.Recivables
                                     )}
                                 </TableCell>
 
@@ -1760,7 +1772,7 @@ const DayAbstractReport: React.FC = () => {
 
                                 <TableCell align="right">
                                     {formatAmount(
-                                        debtors?.Cr_Amount
+                                        debtorBalances?.Recivables
                                     )}
                                 </TableCell>
                             </TableRow>
@@ -1772,7 +1784,7 @@ const DayAbstractReport: React.FC = () => {
 
                                 <TableCell align="right">
                                     {formatAmount(
-                                        creditors?.Dr_Amount
+                                        creditorBalances?.Payables
                                     )}
                                 </TableCell>
 
@@ -1782,7 +1794,7 @@ const DayAbstractReport: React.FC = () => {
 
                                 <TableCell align="right">
                                     {formatAmount(
-                                        debtors?.Dr_Amount
+                                        debtorBalances?.Payables
                                     )}
                                 </TableCell>
                             </TableRow>
@@ -1794,7 +1806,7 @@ const DayAbstractReport: React.FC = () => {
 
                                 <TableCell align="right">
                                     {formatAmount(
-                                        (Number(creditors?.Cr_Amount) || 0) - (Number(creditors?.Dr_Amount) || 0)
+                                        creditorBalances?.Balance
                                     )}
                                 </TableCell>
 
@@ -1802,7 +1814,7 @@ const DayAbstractReport: React.FC = () => {
 
                                 <TableCell align="right">
                                     {formatAmount(
-                                        (Number(debtors?.Cr_Amount) || 0) - (Number(debtors?.Dr_Amount) || 0)
+                                        debtorBalances?.Balance
                                     )}
                                 </TableCell>
                             </TableRow>

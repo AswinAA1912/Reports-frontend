@@ -65,6 +65,18 @@ export interface DayAbstractData8 {
     Debit_Amount_1: number;
 }
 
+export interface DayAbstractData9 {
+    Recivables: number;
+    Payables: number;
+    Balance: number;
+}
+
+export interface DayAbstractData10 {
+    Recivables: number;
+    Payables: number;
+    Balance: number;
+}
+
 /* ---------------- FINAL RESPONSE TYPE ---------------- */
 
 export interface DayAbstractReportResponse {
@@ -76,6 +88,8 @@ export interface DayAbstractReportResponse {
     Data6: DayAbstractData6[];
     Data7: DayAbstractData7[];
     Data8: DayAbstractData8[];
+    Data9: DayAbstractData9[];
+    Data10: DayAbstractData10[];
 }
 
 /* ---------------- DAY ABSTRACT REPORT SERVICE ---------------- */
@@ -144,6 +158,16 @@ export const DayAbstractReportService = {
             Data8:
                 data.Data8 ||
                 data["Data8"] ||
+                [],
+
+            Data9:
+                data.Data9 ||
+                data["Data9"] ||
+                [],
+
+            Data10:
+                data.Data10 ||
+                data["Data10"] ||
                 [],
         };
     },

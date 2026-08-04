@@ -303,8 +303,8 @@ const RecievablePayableReport: React.FC = () => {
                     "Account Name": group.groupName,
                     "Invoice Date": "",
                     "Invoice No": "",
-                    "Debit Amount": group.subtotalDebit || "",
-                    "Credit Amount": group.subtotalCredit || "",
+                    "Recievable": group.subtotalDebit || "",
+                    "Payable": group.subtotalCredit || "",
                 });
 
                 group.items.forEach((row) => {
@@ -313,20 +313,23 @@ const RecievablePayableReport: React.FC = () => {
                         "Account Name": row.Account_name || "",
                         "Invoice Date": row.invoice_date ? dayjs(row.invoice_date).format("DD/MM/YYYY") : "",
                         "Invoice No": row.invoice_no || "",
-                        "Debit Amount": row.Debit_Amount || 0,
-                        "Credit Amount": row.Credit_Amount || 0,
+                        "Recievable": row.Debit_Amount || 0,
+                        "Payable": row.Credit_Amount || 0,
                     });
                 });
             });
 
             // Grand Total Row
+            const bal = toggleMode === "Abstract"
+                ? totalDebitAmount - totalCreditAmount
+                : totalCreditAmount - totalDebitAmount;
             exportRows.push({
                 "S.No": "",
-                "Account Name": "Grand Total",
+                "Account Name": `Grand Total (Bal: ${formatINR(bal)})`,
                 "Invoice Date": "",
                 "Invoice No": "",
-                "Debit Amount": totalDebitAmount || 0,
-                "Credit Amount": totalCreditAmount || 0,
+                "Recievable": totalDebitAmount || 0,
+                "Payable": totalCreditAmount || 0,
             });
 
             const worksheet = XLSX.utils.json_to_sheet(exportRows);
@@ -355,7 +358,7 @@ const RecievablePayableReport: React.FC = () => {
                     if (headerRowIndices.has(R + 1)) {
                         cell.s.font = { name: "Arial", sz: 9, bold: true, color: { rgb: "1E3A8A" } };
                         cell.s.fill = { fgColor: { rgb: "E2E8F0" } };
-                    } else if (val === "Grand Total") {
+                    } else if (val.startsWith("Grand Total")) {
                         cell.s.font = { name: "Arial", sz: 9, bold: true };
                         cell.s.fill = { fgColor: { rgb: "F1F5F9" } };
                     }
@@ -369,19 +372,22 @@ const RecievablePayableReport: React.FC = () => {
                     "Account Name": row.Account_name || "",
                     "Invoice Date": row.invoice_date ? dayjs(row.invoice_date).format("DD/MM/YYYY") : "",
                     "Invoice No": row.invoice_no || "",
-                    "Debit Amount": row.Debit_Amount || 0,
-                    "Credit Amount": row.Credit_Amount || 0,
+                    "Recievable": row.Debit_Amount || 0,
+                    "Payable": row.Credit_Amount || 0,
                 });
             });
 
             // Grand Total Row
+            const bal = toggleMode === "Abstract"
+                ? totalDebitAmount - totalCreditAmount
+                : totalCreditAmount - totalDebitAmount;
             exportRows.push({
                 "S.No": "",
-                "Account Name": "Grand Total",
+                "Account Name": `Grand Total (Bal: ${formatINR(bal)})`,
                 "Invoice Date": "",
                 "Invoice No": "",
-                "Debit Amount": totalDebitAmount || 0,
-                "Credit Amount": totalCreditAmount || 0,
+                "Recievable": totalDebitAmount || 0,
+                "Payable": totalCreditAmount || 0,
             });
 
             const worksheet = XLSX.utils.json_to_sheet(exportRows);
@@ -407,7 +413,7 @@ const RecievablePayableReport: React.FC = () => {
                     };
 
                     const val = String(cell.v || "");
-                    if (val === "Grand Total") {
+                    if (val.startsWith("Grand Total")) {
                         cell.s.font = { name: "Arial", sz: 9, bold: true };
                         cell.s.fill = { fgColor: { rgb: "F1F5F9" } };
                     }
@@ -432,7 +438,7 @@ const RecievablePayableReport: React.FC = () => {
         doc.setFontSize(14);
         doc.text(`${reportTitle} - As of ${dayjs(filters.Date.to).format("DD/MM/YYYY")}`, 14, 12);
 
-        const tableHeaders = [["S.No", "Account Name", "Invoice Date", "Invoice No", "Debit Amount", "Credit Amount"]];
+        const tableHeaders = [["S.No", "Account Name", "Invoice Date", "Invoice No", "Recievable", "Payable"]];
         const tableBody: any[] = [];
 
         if (filters.GroupMode === "withGroup") {
@@ -465,9 +471,12 @@ const RecievablePayableReport: React.FC = () => {
             });
 
             // Add Grand Total Row to PDF body
+            const bal = toggleMode === "Abstract"
+                ? totalDebitAmount - totalCreditAmount
+                : totalCreditAmount - totalDebitAmount;
             tableBody.push([
                 "",
-                "Grand Total",
+                `Grand Total (Bal: ${formatINR(bal)})`,
                 "",
                 "",
                 totalDebitAmount.toFixed(2),
@@ -515,9 +524,12 @@ const RecievablePayableReport: React.FC = () => {
             });
 
             // Add Grand Total Row to PDF body
+            const bal = toggleMode === "Abstract"
+                ? totalDebitAmount - totalCreditAmount
+                : totalCreditAmount - totalDebitAmount;
             tableBody.push([
                 "",
-                "Grand Total",
+                `Grand Total (Bal: ${formatINR(bal)})`,
                 "",
                 "",
                 totalDebitAmount.toFixed(2),
@@ -693,7 +705,7 @@ const RecievablePayableReport: React.FC = () => {
                                             <TableCell sx={{ ...headerStyle, width: "160px" }}>Invoice No</TableCell>
                                             <TableCell sx={{ ...headerStyle, width: "160px" }} align="right">
                                                 <SortableHeaderLabel
-                                                    label="Debit Amount"
+                                                    label="Recievable"
                                                     columnKey="Debit_Amount"
                                                     sortConfig={sortConfig}
                                                     onSort={handleSort}
@@ -702,7 +714,7 @@ const RecievablePayableReport: React.FC = () => {
                                             </TableCell>
                                             <TableCell sx={{ ...headerStyle, width: "160px" }} align="right">
                                                 <SortableHeaderLabel
-                                                    label="Credit Amount"
+                                                    label="Payable"
                                                     columnKey="Credit_Amount"
                                                     sortConfig={sortConfig}
                                                     onSort={handleSort}
@@ -714,19 +726,24 @@ const RecievablePayableReport: React.FC = () => {
 
                                     <TableBody>
                                         {/* Grand Total Row (Top) */}
-                                        {finalData.length > 0 && (
-                                            <TableRow sx={{ backgroundColor: "#F8FAFC", borderBottom: "2px solid #cbd5e1" }}>
-                                                <TableCell colSpan={4} sx={{ fontWeight: 700, fontSize: "0.8rem", color: "#1E3A8A" }}>
-                                                    Grand Total
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ fontWeight: 700, fontSize: "0.8rem", color: "#1E3A8A" }}>
-                                                    {totalDebitAmount !== 0 ? formatINR(totalDebitAmount) : "-"}
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ fontWeight: 700, fontSize: "0.8rem", color: "#1E3A8A" }}>
-                                                    {totalCreditAmount !== 0 ? formatINR(totalCreditAmount) : "-"}
-                                                </TableCell>
-                                            </TableRow>
-                                        )}
+                                        {finalData.length > 0 && (() => {
+                                            const bal = toggleMode === "Abstract"
+                                                ? totalDebitAmount - totalCreditAmount
+                                                : totalCreditAmount - totalDebitAmount;
+                                            return (
+                                                <TableRow sx={{ backgroundColor: "#F8FAFC", borderBottom: "2px solid #cbd5e1" }}>
+                                                    <TableCell colSpan={4} sx={{ fontWeight: 700, fontSize: "0.8rem", color: "#1E3A8A" }}>
+                                                        Grand Total (Bal: {formatINR(bal)})
+                                                    </TableCell>
+                                                    <TableCell align="right" sx={{ fontWeight: 700, fontSize: "0.8rem", color: "#1E3A8A" }}>
+                                                        {totalDebitAmount !== 0 ? formatINR(totalDebitAmount) : "-"}
+                                                    </TableCell>
+                                                    <TableCell align="right" sx={{ fontWeight: 700, fontSize: "0.8rem", color: "#1E3A8A" }}>
+                                                        {totalCreditAmount !== 0 ? formatINR(totalCreditAmount) : "-"}
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })()}
 
                                         {filters.GroupMode === "withGroup" ? (
                                             groupedPaginatedData.length > 0 ? (

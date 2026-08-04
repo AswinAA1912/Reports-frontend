@@ -28,6 +28,11 @@ export interface stockWiseReport {
     Product_Rate: string;
     Stock_Item: string;
     Godown_Name: string;
+    IN_Qty?: string | number;
+    OUT_Qty?: string | number;
+    IN_Act_Qty?: string | number;
+    OUT_Act_Qty?: string | number;
+    Act_Bal_Qty?: string | number;
     [key: string]: string | number | undefined;
 }
 

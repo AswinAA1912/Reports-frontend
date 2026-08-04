@@ -67,6 +67,22 @@ const StockInHandReport: React.FC = () => {
     const [qtyMode, setQtyMode] = useState<"qty" | "actQty">("qty");
 
     const qtyKeys = useMemo(() => {
+        if (isExpanded) {
+            if (qtyMode === "actQty") {
+                return {
+                    opening: "OB_Act_Qty" as keyof stockWiseReport,
+                    in: "IN_Act_Qty" as keyof stockWiseReport,
+                    out: "OUT_Act_Qty" as keyof stockWiseReport,
+                    closing: "Act_Bal_Qty" as keyof stockWiseReport,
+                };
+            }
+            return {
+                opening: "OB_Bal_Qty" as keyof stockWiseReport,
+                in: "IN_Qty" as keyof stockWiseReport,
+                out: "OUT_Qty" as keyof stockWiseReport,
+                closing: "Bal_Qty" as keyof stockWiseReport,
+            };
+        }
         if (qtyMode === "actQty") {
             return {
                 opening: "OB_Act_Qty" as keyof stockWiseReport,
@@ -81,7 +97,7 @@ const StockInHandReport: React.FC = () => {
             out: "Sal_Qty" as keyof stockWiseReport,
             closing: "Bal_Qty" as keyof stockWiseReport,
         };
-    }, [qtyMode]);
+    }, [qtyMode, isExpanded]);
 
 
     /* ===== LEVEL 2 META (FROM CONFIG) ===== */
@@ -443,7 +459,7 @@ const StockInHandReport: React.FC = () => {
         filteredAndSortedData: numFilteredAndSortedRows,
         getMinMax,
         clearRangeFilter,
-    } = useNumericalFilter(data, ["OB_Bal_Qty", "Pur_Qty", "Sal_Qty", "Bal_Qty", "OB_Act_Qty", "Pur_Act_Qty", "Sal_Act_Qty", "Bal_Act_Qty"]);
+    } = useNumericalFilter(data, ["OB_Bal_Qty", "Pur_Qty", "Sal_Qty", "Bal_Qty", "OB_Act_Qty", "Pur_Act_Qty", "Sal_Act_Qty", "Bal_Act_Qty", "IN_Qty", "OUT_Qty", "IN_Act_Qty", "OUT_Act_Qty", "Act_Bal_Qty"]);
 
     const handleTransactionClick = (
         row: stockWiseReport,

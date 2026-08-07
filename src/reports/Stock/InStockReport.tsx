@@ -1868,6 +1868,23 @@ const InStockReport: React.FC = () => {
         return L + 6;
     };
 
+    const showRetailerColumn = useMemo(() => {
+        return !(
+            popupFilterType === 'IN' || 
+            popupFilterType === 'RETURN' || 
+            inwardTripHeaders.includes(popupFilterType) || 
+            popupFilterType === 'PROCESS' || 
+            popupFilterType === 'PROCESS_IN' || 
+            popupFilterType === 'PROCESS_OUT' || 
+            (inwardMode && popupFilterType.startsWith('Trip'))
+        );
+    }, [popupFilterType, inwardMode, inwardTripHeaders]);
+
+    const totalColSpan = useMemo(() => {
+        const baseColSpan = popupFilterType === "ALL" ? 7 : 4;
+        return baseColSpan + (showRetailerColumn ? 1 : 0) + uniqueRoles.length;
+    }, [popupFilterType, showRetailerColumn, uniqueRoles]);
+
     return (
         <Box sx={{ width: "100%", minHeight: "100vh", bgcolor: "#f8fafc", p: 2, boxSizing: "border-box" }}>
             <PageHeader
@@ -3388,8 +3405,9 @@ const InStockReport: React.FC = () => {
                                         <TableCell align="center" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>S.NO</TableCell>
                                         <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>VOUCHER TYPE</TableCell>
                                         <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>INV NO</TableCell>
-                                        <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>PRODUCT NAME</TableCell>
-                                        <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>RETAILER NAME</TableCell>
+                                        {showRetailerColumn && (
+                                            <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>RETAILER NAME</TableCell>
+                                        )}
                                         {popupFilterType === "ALL" ? (
                                             <>
                                                 <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>IN QTY</TableCell>
@@ -3410,7 +3428,7 @@ const InStockReport: React.FC = () => {
                                 <TableBody>
                                     {filteredPopupRows.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={popupFilterType === "ALL" ? 9 + uniqueRoles.length : 6 + uniqueRoles.length} align="center" sx={{ py: 4, color: "#64748b" }}>
+                                            <TableCell colSpan={totalColSpan} align="center" sx={{ py: 4, color: "#64748b" }}>
                                                 No transactions found.
                                             </TableCell>
                                         </TableRow>
@@ -3421,8 +3439,7 @@ const InStockReport: React.FC = () => {
                                                 <TableCell align="center">-</TableCell>
                                                 <TableCell>TOTAL</TableCell>
                                                 <TableCell></TableCell>
-                                                <TableCell></TableCell>
-                                                <TableCell></TableCell>
+                                                {showRetailerColumn && <TableCell></TableCell>}
                                                 {popupFilterType === "ALL" ? (
                                                     <>
                                                         <TableCell align="right">
@@ -3469,7 +3486,7 @@ const InStockReport: React.FC = () => {
                                                             {showDateHeader && (
                                                                 <TableRow sx={{ backgroundColor: "#e2e8f0" }}>
                                                                     <TableCell 
-                                                                        colSpan={popupFilterType === "ALL" ? 9 + uniqueRoles.length : 6 + uniqueRoles.length} 
+                                                                        colSpan={totalColSpan} 
                                                                         sx={{ fontWeight: 800, color: "#1e293b", py: 0.8 }}
                                                                     >
                                                                         DATE: {currentDateStr}
@@ -3480,8 +3497,7 @@ const InStockReport: React.FC = () => {
                                                                 <TableCell align="center" sx={{ fontWeight: 600, color: "#64748b" }}>{sno++}</TableCell>
                                                                 <TableCell>{r.module || r.Module || r.Voucher_Type || r.voucher_name || r.Stock_Voucher_Name || "-"}</TableCell>
                                                                 <TableCell>{getRowInvNoDisplay(r)}</TableCell>
-                                                                <TableCell>{r.Product_Name || r.product_name || r.Stock_Item_Ledger_Name || popupProductInfo?.productName || "-"}</TableCell>
-                                                                <TableCell>{r.Retailer_Name || "-"}</TableCell>
+                                                                {showRetailerColumn && <TableCell>{r.Retailer_Name || "-"}</TableCell>}
                                                                 {popupFilterType === "ALL" ? (
                                                                     <>
                                                                         <TableCell align="right" sx={{ fontWeight: 600, color: inQty > 0 ? "#15803d" : "#475569" }}>

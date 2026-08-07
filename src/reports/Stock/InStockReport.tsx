@@ -86,6 +86,33 @@ const DEFAULT_CONFIGURABLE_COLUMNS: ColumnConfig[] = [
     { key: "Godown_Name", label: "Godown Name", enabled: false, order: 16 }
 ];
 
+const parseStaffInvolved = (staffStr: string): Record<string, string> => {
+    const rolesMap: Record<string, string[]> = {};
+    if (!staffStr) return {};
+    const parts = staffStr.split(',');
+    parts.forEach(part => {
+        const trimmed = part.trim();
+        const match = trimmed.match(/^(.*?)\s*\((.*?)\)$/);
+        if (match) {
+            const val = match[1].trim();
+            const role = match[2].trim();
+            if (val && role) {
+                if (!rolesMap[role]) {
+                    rolesMap[role] = [];
+                }
+                if (!rolesMap[role].includes(val)) {
+                    rolesMap[role].push(val);
+                }
+            }
+        }
+    });
+    const parsed: Record<string, string> = {};
+    Object.keys(rolesMap).forEach(role => {
+        parsed[role] = rolesMap[role].join(', ');
+    });
+    return parsed;
+};
+
 const InStockReport: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
     const [columnsConfig, setColumnsConfig] = useState<ColumnConfig[]>(() => {
@@ -290,7 +317,9 @@ const InStockReport: React.FC = () => {
     const [popupProductInfo, setPopupProductInfo] = useState<{ productId: number; productName: string; godownId: number; godownName: string } | null>(null);
     const [popupFilterType, setPopupFilterType] = useState<string>('ALL');
 
-    const handleQuantityClick = async (productId: number | string | undefined, productName: string, filterType: string = 'ALL') => {
+    const [moduleFilter, setModuleFilter] = useState<string>('ALL');
+
+    const handleQuantityClick = async (productId: number | string | undefined, productName: string, filterType: string = 'ALL', tripNo?: number | string) => {
         if (!productId || !selectedGodown) return;
         const gId = Number(selectedGodown.godown_id);
         const pId = Number(productId);
@@ -304,12 +333,38 @@ const InStockReport: React.FC = () => {
         setPopupOpen(true);
         setPopupLoading(true);
         try {
-            const res = await godownItemTransactionService.getGodownItemTransactions({
-                fromDate,
-                toDate,
-                Product_Id: pId,
-                Godown_Id: gId
-            });
+            let res;
+            if (outwardMode) {
+                res = await godownItemTransactionService.getGodownItemOutExpandable({
+                    fromDate,
+                    toDate,
+                    Product_Id: pId,
+                    Godown_Id: gId,
+                    Trip_No: tripNo ? Number(tripNo) : undefined
+                });
+            } else if (inwardMode) {
+                res = await godownItemTransactionService.getGodownItemInExpandable({
+                    fromDate,
+                    toDate,
+                    Product_Id: pId,
+                    Godown_Id: gId,
+                    Trip_No: tripNo ? Number(tripNo) : undefined
+                });
+            } else if (processMode && filterType.startsWith('PROCESS')) {
+                res = await godownItemTransactionService.getGodownItemProcess({
+                    fromDate,
+                    toDate,
+                    Product_Id: pId,
+                    Godown_Id: gId
+                });
+            } else {
+                res = await godownItemTransactionService.getGodownItemTransactions({
+                    fromDate,
+                    toDate,
+                    Product_Id: pId,
+                    Godown_Id: gId
+                });
+            }
             setPopupRows(res.data?.data || []);
         } catch (err) {
             console.error("Failed to load popup transactions:", err);
@@ -320,13 +375,205 @@ const InStockReport: React.FC = () => {
         }
     };
 
+    const getRowTripInfo = (r: any) => {
+        // 1. Check direct fields on r
+        const hasDirectTrip = (
+            (r.Trip_No !== null && r.Trip_No !== undefined && String(r.Trip_No).trim() !== "") ||
+            (r.trip_no !== null && r.trip_no !== undefined && String(r.trip_no).trim() !== "") ||
+            (r.Trip_Id !== null && r.Trip_Id !== undefined && String(r.Trip_Id).trim() !== "") ||
+            (r.trip_id !== null && r.trip_id !== undefined && String(r.trip_id).trim() !== "") ||
+            (r.Trip_Voucher_Number !== null && r.Trip_Voucher_Number !== undefined && String(r.Trip_Voucher_Number).trim() !== "") ||
+            (r.trip_voucher_number !== null && r.trip_voucher_number !== undefined && String(r.trip_voucher_number).trim() !== "")
+        );
+        
+        if (hasDirectTrip) {
+            const rawVal = r.Trip_No ?? r.trip_no ?? r.Trip_Voucher_Number ?? r.trip_voucher_number ?? r.Trip_Id ?? r.trip_id;
+            const str = String(rawVal).trim();
+            let label = str.toLowerCase().startsWith("trip") ? str : `Trip - ${str}`;
+            const loadman = r.Loadman_Name || r.loadman_name;
+            if (loadman) {
+                label = `${label} - ${String(loadman).trim()}`;
+            }
+            return { isTrip: true, tripLabel: label };
+        }
+
+        // 2. Check matched record in processApiData
+        if (popupProductInfo) {
+            const godownName = String(popupProductInfo.godownName || "").toLowerCase().trim();
+            const productIdStr = String(popupProductInfo.productId).trim();
+            const key1 = `${productIdStr}_${godownName}`;
+            let recs = mappedProcessData.mapByProductAndGodown[key1] || [];
+            if (recs.length === 0) {
+                const rawRecs = mappedProcessData.mapByProductIdOnly[productIdStr];
+                if (rawRecs) {
+                    recs = rawRecs.filter((pr: any) => {
+                        const rGodown = String(pr.godown_name || "").toLowerCase().trim();
+                        return !rGodown || rGodown === godownName;
+                    });
+                }
+            }
+            const invoiceNo = r.Do_Inv_No || r.invoice_no;
+            const matchingRawRecord = recs.find(x => x.module_voucher_number === invoiceNo);
+            if (matchingRawRecord) {
+                const hasTripField = (
+                    matchingRawRecord.trip_voucher_number !== null ||
+                    matchingRawRecord.trip_id !== null ||
+                    (matchingRawRecord.Trip_No !== null && matchingRawRecord.Trip_No !== undefined && String(matchingRawRecord.Trip_No).trim() !== "") ||
+                    (matchingRawRecord.trip_no !== null && matchingRawRecord.trip_no !== undefined && String(matchingRawRecord.trip_no).trim() !== "")
+                );
+                if (hasTripField) {
+                    const rawVal = matchingRawRecord.Trip_No || matchingRawRecord.trip_no || matchingRawRecord.trip_voucher_number || matchingRawRecord.trip_id;
+                    const str = String(rawVal).trim();
+                    let label = str.toLowerCase().startsWith("trip") ? str : `Trip - ${str}`;
+                    const loadman = matchingRawRecord.Loadman_Name || matchingRawRecord.loadman_name;
+                    if (loadman) {
+                        label = `${label} - ${String(loadman).trim()}`;
+                    }
+                    return { isTrip: true, tripLabel: label };
+                }
+            }
+        }
+
+        return { isTrip: false, tripLabel: "" };
+    };
+
+    const getRowQuantities = (r: any) => {
+        const isOB = (r.Do_Inv_No || r.invoice_no) === "OB" || String(r.Particulars || r.Narration || "").toLowerCase().includes("opening balance");
+        const isSJ = String(r.Narration || r.Particulars || "").toLowerCase().includes("stock journal") || 
+                     String(r.Voucher_Type || r.voucher_name || "").toLowerCase().includes("stock journal") ||
+                     String(r.module || r.Module || "").toLowerCase().includes("stock journal") ||
+                     r.Direction !== undefined;
+        
+        // Check if pending delivery
+        const isPending = String(r.Record_Type || "").toUpperCase() === "PENDING_DELIVERY" || String(r.Record_Type || "").toUpperCase() === "PENDING" || popupFilterType === "PENDING DELIVERY";
+        
+        let stockIn = Number(r.Stock_In_Qty ?? r.In_Qty ?? r.Bill_Qty ?? 0);
+        let stockOut = Number(r.Stock_Out_Qty ?? r.Out_Qty ?? r.Bill_Qty ?? 0);
+
+        if (r.Direction === "IN") {
+            stockIn = Number(r.Qty || 0);
+            stockOut = 0;
+        } else if (r.Direction === "OUT") {
+            stockIn = 0;
+            stockOut = Number(r.Qty || 0);
+        }
+
+        // Fallbacks for specific modes if standard columns are missing
+        if (stockIn === 0 && stockOut === 0) {
+            const qtyVal = Number(r.QTY ?? r.qty ?? r.KGS ?? r.kgs ?? 0);
+            if (inwardMode) {
+                stockIn = qtyVal;
+            } else if (outwardMode) {
+                stockOut = qtyVal;
+            } else {
+                // If neither mode is active, check stock_direction if available
+                const direction = String(r.stock_direction || "").toUpperCase();
+                if (direction === "IN") {
+                    stockIn = qtyVal;
+                } else if (direction === "OUT") {
+                    stockOut = qtyVal;
+                } else {
+                    // Fallback to both if direction is unknown
+                    stockIn = qtyVal;
+                    stockOut = qtyVal;
+                }
+            }
+        }
+
+        let inQty = 0;
+        let processQty = 0;
+        let outQty = 0;
+        let pendingQty = 0;
+
+        if (isOB) {
+            inQty = stockIn;
+        } else if (isSJ) {
+            processQty = stockIn - stockOut;
+            inQty = stockIn;
+            outQty = stockOut;
+        } else if (isPending) {
+            pendingQty = stockOut;
+        } else {
+            // Regular transaction
+            if (stockIn > 0) {
+                inQty = stockIn;
+            }
+            if (stockOut > 0) {
+                outQty = stockOut;
+            }
+        }
+
+        return { inQty, processQty, outQty, pendingQty };
+    };
+
+    const getRowQtyForFilter = (r: any, filterType: string) => {
+        const { inQty, processQty, outQty, pendingQty } = getRowQuantities(r);
+        
+        if (filterType === "OB") {
+            return inQty;
+        }
+        if (filterType === "IN") {
+            return inQty;
+        }
+        if (filterType === "OUT") {
+            return outQty;
+        }
+        if (filterType === "PROCESS") {
+            return processQty;
+        }
+        if (filterType === "PROCESS_IN") {
+            return inQty;
+        }
+        if (filterType === "PROCESS_OUT") {
+            return outQty;
+        }
+        if (filterType === "RETURN") {
+            return inQty;
+        }
+        if (filterType === "PENDING DELIVERY") {
+            return pendingQty;
+        }
+        if (filterType.startsWith("Trip")) {
+            return inwardMode ? inQty : outQty;
+        }
+        
+        return inwardMode ? inQty : outQty;
+    };
+
+    const getDynamicQtyHeader = () => {
+        if (popupFilterType === "OB") return "OPENING QTY";
+        if (popupFilterType === "IN" || popupFilterType === "RETURN" || inwardTripHeaders.includes(popupFilterType)) return "IN QTY";
+        if (popupFilterType === "OUT" || outwardTripHeaders.includes(popupFilterType)) return "OUT QTY";
+        if (popupFilterType === "PENDING DELIVERY") return "PENDING QTY";
+        if (popupFilterType === "PROCESS") return "PROCESS QTY";
+        if (popupFilterType === "PROCESS_IN") return "PROCESS IN QTY";
+        if (popupFilterType === "PROCESS_OUT") return "PROCESS OUT QTY";
+        return "QTY";
+    };
+
+    const getRowInvNoDisplay = (r: any) => {
+        const invNo = r.Do_Inv_No || r.invoice_no || r.Invoice_No;
+        const tripNo = r.Trip_No || r.trip_no || r.Trip_Voucher_Number || r.trip_voucher_number;
+        if (invNo && tripNo) {
+            const tripStr = String(tripNo).trim().toLowerCase().startsWith("trip") ? String(tripNo).trim() : `Trip - ${tripNo}`;
+            return `${invNo} (${tripStr})`;
+        }
+        if (invNo) return invNo;
+        if (tripNo) {
+            return String(tripNo).trim().toLowerCase().startsWith("trip") ? String(tripNo).trim() : `Trip - ${tripNo}`;
+        }
+        return "-";
+    };
+
     const ledgerRows = useMemo(() => {
         let running = 0;
         const sorted = [...popupRows].sort(
-            (a, b) => new Date(a.Ledger_Date).getTime() - new Date(b.Ledger_Date).getTime()
+            (a, b) => new Date(a.Do_Date || a.Ledger_Date || a.Process_Date).getTime() - new Date(b.Do_Date || b.Ledger_Date || b.Process_Date).getTime()
         );
         return sorted.map((row) => {
-            running += Number(row.In_Qty || 0) - Number(row.Out_Qty || 0);
+            const stockIn = Number(row.Stock_In_Qty ?? row.In_Qty ?? row.Bill_Qty ?? 0);
+            const stockOut = Number(row.Stock_Out_Qty ?? row.Out_Qty ?? row.Bill_Qty ?? 0);
+            running += stockIn - stockOut;
             return {
                 ...row,
                 runningBalance: running
@@ -336,26 +583,32 @@ const InStockReport: React.FC = () => {
 
     const filteredPopupRows = useMemo(() => {
         return ledgerRows.filter((r) => {
-            const isOB = r.invoice_no === "OB" || String(r.Particulars || "").toLowerCase() === "opening balance";
-            const isSJ = String(r.Particulars || "").toLowerCase() === "stock journal";
+            const isOB = (r.Do_Inv_No || r.invoice_no || r.Invoice_No) === "OB" || String(r.Particulars || r.Narration || "").toLowerCase().includes("opening balance");
+            const isSJ = String(r.Narration || r.Particulars || "").toLowerCase().includes("stock journal") || 
+                         String(r.Voucher_Type || r.voucher_name || "").toLowerCase().includes("stock journal") ||
+                         String(r.module || r.Module || "").toLowerCase().includes("stock journal") ||
+                         r.Direction !== undefined;
+            const isPending = String(r.Record_Type || "").toUpperCase() === "PENDING_DELIVERY" || String(r.Record_Type || "").toUpperCase() === "PENDING" || popupFilterType === "PENDING DELIVERY";
+
+            const { inQty, outQty } = getRowQuantities(r);
 
             if (popupFilterType === "OB") {
                 return isOB;
             }
             if (popupFilterType === "IN") {
-                return Number(r.In_Qty || 0) > 0 && !isOB && !isSJ;
+                return !isOB && !isSJ && !isPending && inQty > 0;
             }
             if (popupFilterType === "OUT") {
-                return Number(r.Out_Qty || 0) > 0 && !isSJ;
+                return !isSJ && !isPending && outQty > 0;
             }
             if (popupFilterType === "PROCESS") {
                 return isSJ;
             }
             if (popupFilterType === "PROCESS_IN") {
-                return isSJ && Number(r.In_Qty || 0) > 0;
+                return isSJ && inQty > 0;
             }
             if (popupFilterType === "PROCESS_OUT") {
-                return isSJ && Number(r.Out_Qty || 0) > 0;
+                return isSJ && outQty > 0;
             }
 
             // Lookup corresponding raw record from processApiData for trip / return / delivery filtering
@@ -373,52 +626,108 @@ const InStockReport: React.FC = () => {
                         });
                     }
                 }
-                const matchingRawRecord = recs.find(x => x.module_voucher_number === r.invoice_no);
-                if (matchingRawRecord) {
-                    const isTrip = (pr: any) => {
-                        return (
-                            pr.trip_voucher_number !== null ||
-                            pr.trip_id !== null ||
-                            (pr.Trip_No !== null && pr.Trip_No !== undefined && String(pr.Trip_No).trim() !== "") ||
-                            (pr.trip_no !== null && pr.trip_no !== undefined && String(pr.trip_no).trim() !== "")
-                        );
-                    };
-                    const getTripLabel = (pr: any): string => {
-                        const rawVal = pr.Trip_No || pr.trip_no || pr.trip_voucher_number || pr.trip_id;
-                        if (!rawVal) return "N/A";
-                        const str = String(rawVal).trim();
-                        if (str.toLowerCase().startsWith("trip")) {
-                            return str;
-                        }
-                        return `Trip - ${str}`;
-                    };
+                const invoiceNo = r.Do_Inv_No || r.invoice_no;
+                const matchingRawRecord = recs.find(x => x.module_voucher_number === invoiceNo);
+                
+                const isTrip = (pr: any) => {
+                    return (
+                        pr.trip_voucher_number !== null ||
+                        pr.trip_id !== null ||
+                        (pr.Trip_No !== null && pr.Trip_No !== undefined && String(pr.Trip_No).trim() !== "") ||
+                        (pr.trip_no !== null && pr.trip_no !== undefined && String(pr.trip_no).trim() !== "")
+                    );
+                };
+                const getTripLabel = (pr: any): string => {
+                    const rawVal = pr.Trip_No || pr.trip_no || pr.trip_voucher_number || pr.trip_id;
+                    if (!rawVal) return "N/A";
+                    const str = String(rawVal).trim();
+                    let label = str.toLowerCase().startsWith("trip") ? str : `Trip - ${str}`;
+                    const loadman = pr.Loadman_Name || pr.loadman_name;
+                    if (loadman) {
+                        label = `${label} - ${String(loadman).trim()}`;
+                    }
+                    return label;
+                };
 
-                    if (popupFilterType === "RETURN") {
+                const directTripInfo = getRowTripInfo(r);
+
+                if (popupFilterType === "RETURN") {
+                    if (matchingRawRecord) {
                         return matchingRawRecord.stock_direction?.toUpperCase() === "IN" && !isTrip(matchingRawRecord);
                     }
-                    if (popupFilterType === "PENDING DELIVERY") {
+                    return !isOB && !isSJ && !isPending && !directTripInfo.isTrip && Number(r.Stock_In_Qty ?? r.In_Qty ?? r.Bill_Qty ?? 0) > 0;
+                }
+                if (popupFilterType === "PENDING DELIVERY") {
+                    if (matchingRawRecord) {
                         return matchingRawRecord.stock_direction?.toUpperCase() === "OUT" && !isTrip(matchingRawRecord);
                     }
-                    if (popupFilterType.startsWith("Trip")) {
-                        return isTrip(matchingRawRecord) && getTripLabel(matchingRawRecord) === popupFilterType;
-                    }
+                    return isPending;
                 }
+                if (popupFilterType.startsWith("Trip")) {
+                    const cleanLabel = (lbl: string) => {
+                        const parts = lbl.split(" - ");
+                        return parts.slice(0, 2).join(" - ").trim().toLowerCase();
+                    };
+                    if (directTripInfo.isTrip && cleanLabel(directTripInfo.tripLabel) === cleanLabel(popupFilterType)) {
+                        return true;
+                    }
+                    if (matchingRawRecord) {
+                        return isTrip(matchingRawRecord) && cleanLabel(getTripLabel(matchingRawRecord)) === cleanLabel(popupFilterType);
+                    }
+                    return false;
+                }
+            }
+
+            if ((popupFilterType === 'OUT' || (outwardMode && popupFilterType.startsWith('Trip'))) && moduleFilter !== 'ALL') {
+                const rowModule = String(r.module || r.Module || r.voucher_name || r.Voucher_Type || "").toUpperCase().trim();
+                return rowModule.includes(moduleFilter);
             }
 
             return true;
         });
-    }, [ledgerRows, popupFilterType, popupProductInfo, mappedProcessData]);
+    }, [ledgerRows, popupFilterType, popupProductInfo, mappedProcessData, outwardMode, moduleFilter]);
+
+    const uniqueRoles = useMemo(() => {
+        const rolesSet = new Set<string>();
+        filteredPopupRows.forEach(row => {
+            if (row.Staff_Involved) {
+                const parts = row.Staff_Involved.split(',');
+                parts.forEach((part: string) => {
+                    const match = part.trim().match(/^(.*?)\s*\((.*?)\)$/);
+                    if (match) {
+                        rolesSet.add(match[2].trim());
+                    }
+                });
+            }
+        });
+        return Array.from(rolesSet).sort();
+    }, [filteredPopupRows]);
 
     const popupTotals = useMemo(() => {
-        let totalIn = 0;
-        let totalOut = 0;
+        let totalInQty = 0;
+        let totalProcessQty = 0;
+        let totalOutQty = 0;
+        let totalPendingQty = 0;
+        let totalFilteredQty = 0;
+
         filteredPopupRows.forEach(r => {
-            totalIn += Number(r.In_Qty || 0);
-            totalOut += Number(r.Out_Qty || 0);
+            const { inQty, processQty, outQty, pendingQty } = getRowQuantities(r);
+            totalInQty += inQty;
+            totalProcessQty += processQty;
+            totalOutQty += outQty;
+            totalPendingQty += pendingQty;
+            
+            totalFilteredQty += getRowQtyForFilter(r, popupFilterType);
         });
-        const finalBalance = filteredPopupRows.length > 0 ? filteredPopupRows[filteredPopupRows.length - 1].runningBalance : 0;
-        return { totalIn, totalOut, finalBalance };
-    }, [filteredPopupRows]);
+
+        return {
+            totalInQty,
+            totalProcessQty,
+            totalOutQty,
+            totalPendingQty,
+            totalFilteredQty
+        };
+    }, [filteredPopupRows, popupFilterType, popupProductInfo, mappedProcessData]);
 
     const handleSetInwardMode = (val: boolean) => {
         setInwardMode(val);
@@ -447,13 +756,14 @@ const InStockReport: React.FC = () => {
     // Reset page to 1 when filters change
     useEffect(() => {
         setPage(1);
-    }, [searchText, selectedBrand, rowsPerPage, selectedGodown]);
+    }, [searchText, selectedBrand, rowsPerPage, selectedGodown, moduleFilter]);
 
     // Reset modes when selected godown changes
     useEffect(() => {
         setInwardMode(false);
         setOutwardMode(false);
         setProcessMode(false);
+        setModuleFilter('ALL');
     }, [selectedGodown]);
 
     // Fetch overall godowns list
@@ -478,24 +788,66 @@ const InStockReport: React.FC = () => {
     const loadDetailedStock = async (godownId: string | number) => {
         try {
             setLoading(true);
-            const res = await godownwisestockreportservice.getGodownwiseReports({
-                Godown_Id: godownId,
-                Fromdate: dayjs(fromDate).format("YYYY-MM-DD"),
-                Todate: dayjs(toDate).format("YYYY-MM-DD"),
-            });
-            const apiRows = res.data?.data || [];
-            setDetailedStockData(apiRows);
-
-            try {
-                const processRes = await stockInOutProcessService.getStockInOutProcess({
+            const [res, processRes] = await Promise.all([
+                godownwisestockreportservice.getGodownwiseReports({
+                    Godown_Id: godownId,
+                    Fromdate: dayjs(fromDate).format("YYYY-MM-DD"),
+                    Todate: dayjs(toDate).format("YYYY-MM-DD"),
+                }),
+                stockInOutProcessService.getStockInOutProcess({
                     Todate: dayjs(toDate).format("YYYY-MM-DD"),
                     Fromdate: dayjs(fromDate).format("YYYY-MM-DD"),
-                });
-                setProcessApiData(processRes.data?.data || []);
-            } catch (err) {
-                console.error("Failed to load stock in out process details:", err);
-                setProcessApiData([]);
-            }
+                }).catch(err => {
+                    console.error("Failed to load stock in out process details:", err);
+                    return { data: { data: [] } };
+                })
+            ]);
+
+            const apiRows = res.data?.data || [];
+            const processData = processRes.data?.data || [];
+            setProcessApiData(processData);
+
+            // Merge items from processData that are not present in apiRows
+            const godownIdStr = String(godownId);
+            const extraRows: stockWiseReport[] = [];
+            const existingProductIds = new Set(apiRows.map(r => Number(r.Product_Id)));
+
+            processData.forEach((t: any) => {
+                if (String(t.godown_id) === godownIdStr) {
+                    const pId = Number(t.item_id);
+                    if (pId && !existingProductIds.has(pId)) {
+                        existingProductIds.add(pId);
+                        extraRows.push({
+                            Product_Id: pId,
+                            stock_item_name: t.item_name,
+                            Stock_Item: t.item_name,
+                            Brand: "Others",
+                            Group_Name: "Others",
+                            OB_Bal_Qty: 0,
+                            Pur_Qty: 0,
+                            Sal_Qty: 0,
+                            Bal_Qty: 0,
+                            OB_Act_Qty: 0,
+                            Pur_Act_Qty: 0,
+                            Sal_Act_Qty: 0,
+                            Bal_Act_Qty: 0,
+                            OB_Qty: 0,
+                            IN_Qty: 0,
+                            Out_Qty: 0,
+                            CL_QTY: 0,
+                            ACt_OB_Qty: 0,
+                            ACt_In_Qty: 0,
+                            Process_Act_IN_OUT_Qty: 0,
+                            ACt_Out_Qty: 0,
+                            CL_ACt_QTY: 0,
+                            Process_IN_OUT_Qty: 0
+                        } as any);
+                    }
+                }
+            });
+
+            const mergedRows = [...apiRows, ...extraRows];
+            setDetailedStockData(mergedRows);
 
             if (apiRows.length) {
                 const FIXED_KEYS = [
@@ -665,6 +1017,15 @@ const InStockReport: React.FC = () => {
                 );
             };
 
+            if (moduleFilter !== 'ALL') {
+                records = records.filter(r => {
+                    const rowModule = String(r.module || r.Module || r.voucher_name || r.Voucher_Type || "").toUpperCase().trim();
+                    return rowModule.includes(moduleFilter);
+                });
+            }
+
+            const hasModuleTransactions = records.length > 0;
+
             const trips = records.filter(
                 (r) =>
                     r.stock_direction?.toUpperCase() === "IN" &&
@@ -714,10 +1075,11 @@ const InStockReport: React.FC = () => {
                 procOutQty,
                 outwardQty,
                 outTrips,
-                deliveryQty
+                deliveryQty,
+                hasModuleTransactions
             };
         };
-    }, [mappedProcessData, selectedGodown]);
+    }, [mappedProcessData, selectedGodown, moduleFilter]);
 
 
 
@@ -742,6 +1104,11 @@ const InStockReport: React.FC = () => {
 
             if (!matchesSearch || !matchesBrand) return false;
 
+            if (moduleFilter !== 'ALL') {
+                const { hasModuleTransactions } = getProductDetails(item);
+                if (!hasModuleTransactions) return false;
+            }
+
             if (inwardMode) {
                 const { stockInQty } = getProductDetails(item);
                 const totalStockIn = processApiData.length > 0 ? stockInQty : Number(item[qtyKeys.in] || 0);
@@ -761,7 +1128,7 @@ const InStockReport: React.FC = () => {
 
             return true;
         });
-    }, [detailedStockData, searchText, selectedBrand, inwardMode, processMode, outwardMode, getProductDetails, qtyKeys, processApiData]);
+    }, [detailedStockData, searchText, selectedBrand, inwardMode, processMode, outwardMode, getProductDetails, qtyKeys, processApiData, moduleFilter]);
 
     const filteredData = useMemo(() => {
         if (!isPivotMode) return filteredDetailedData;
@@ -835,10 +1202,12 @@ const InStockReport: React.FC = () => {
         const rawVal = t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id;
         if (!rawVal) return "N/A";
         const str = String(rawVal).trim();
-        if (str.toLowerCase().startsWith("trip")) {
-            return str;
+        let label = str.toLowerCase().startsWith("trip") ? str : `Trip - ${str}`;
+        const loadman = t.Loadman_Name || t.loadman_name;
+        if (loadman) {
+            label = `${label} - ${String(loadman).trim()}`;
         }
-        return `Trip - ${str}`;
+        return label;
     }, []);
 
     const getQtyForTrip = React.useCallback((tripsList: any[], label: string): number => {
@@ -1783,6 +2152,26 @@ const InStockReport: React.FC = () => {
                             </FormControl>
                         </Box>
 
+                        {outwardMode && (
+                            <FormControl size="small" sx={{ minWidth: 150 }}>
+                                <InputLabel id="main-module-dropdown-label" sx={{ fontSize: "0.82rem", fontWeight: 600, color: "#475569" }}>
+                                    Filter by Module
+                                </InputLabel>
+                                <Select
+                                    labelId="main-module-dropdown-label"
+                                    id="main-module-dropdown-select"
+                                    value={moduleFilter}
+                                    onChange={(e) => setModuleFilter(e.target.value)}
+                                    input={<OutlinedInput label="Filter by Module" />}
+                                    sx={{ bgcolor: "#fff", borderRadius: 1, fontSize: "0.8rem", height: 36 }}
+                                >
+                                    <MenuItem value="ALL" sx={{ fontSize: "0.8rem", fontWeight: 600 }}>All</MenuItem>
+                                    <MenuItem value="SALES" sx={{ fontSize: "0.8rem", fontWeight: 600 }}>Sales</MenuItem>
+                                    <MenuItem value="GODOWN TRANSFER" sx={{ fontSize: "0.8rem", fontWeight: 600 }}>Godown Transfer</MenuItem>
+                                </Select>
+                            </FormControl>
+                        )}
+
                         <TextField
                             size="small"
                             placeholder="Search product..."
@@ -1973,8 +2362,8 @@ const InStockReport: React.FC = () => {
                                                         key={tripLabel}
                                                         align="right"
                                                         sx={{
-                                                            width: 120,
-                                                            minWidth: 120,
+                                                            width: 200,
+                                                            minWidth: 200,
                                                             backgroundColor: "#1E3A8A",
                                                             color: "#fff",
                                                             fontWeight: 600,
@@ -2155,6 +2544,9 @@ const InStockReport: React.FC = () => {
                                     {!inwardMode && !outwardMode && !processMode && (
                                         <TableCell
                                             align="right"
+                                            onClick={() => {
+                                                handleSetOutwardMode(true);
+                                            }}
                                             sx={{
                                                 width: 120,
                                                 minWidth: 120,
@@ -2163,21 +2555,17 @@ const InStockReport: React.FC = () => {
                                                 fontWeight: 600,
                                                 py: 1.5,
                                                 borderRight: "1px solid #cbd5e1",
-                                                userSelect: "none"
+                                                cursor: "pointer",
+                                                userSelect: "none",
+                                                textDecoration: "none",
+                                                transition: "background-color 0.2s",
+                                                "&:hover": {
+                                                    backgroundColor: "#1e40af"
+                                                }
                                             }}
                                         >
                                             <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
-                                                STOCK OUTWARDS
-                                                <IconButton
-                                                    size="small"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleSetOutwardMode(true);
-                                                    }}
-                                                    sx={{ color: "#fff", p: 0.2 }}
-                                                >
-                                                    <KeyboardArrowDownIcon fontSize="small" />
-                                                </IconButton>
+                                                STOCK OUTWARDS <KeyboardArrowDownIcon fontSize="small" />
                                             </Box>
                                         </TableCell>
                                     )}
@@ -2192,8 +2580,8 @@ const InStockReport: React.FC = () => {
                                                         key={tripLabel}
                                                         align="right"
                                                         sx={{
-                                                            width: 120,
-                                                            minWidth: 120,
+                                                            width: 200,
+                                                            minWidth: 200,
                                                             backgroundColor: "#1E3A8A",
                                                             color: "#fff",
                                                             fontWeight: 600,
@@ -2295,7 +2683,7 @@ const InStockReport: React.FC = () => {
                                                 {inwardTripHeaders.map((tripLabel) => {
                                                     if (hiddenInwardColumns.includes(tripLabel)) return null;
                                                     return (
-                                                        <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 110, minWidth: 110 }}>
+                                                        <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 200, minWidth: 200 }}>
                                                             {formatQtyVal(inwardTripTotals[tripLabel])}
                                                         </TableCell>
                                                     );
@@ -2350,7 +2738,7 @@ const InStockReport: React.FC = () => {
                                                 {outwardTripHeaders.map((tripLabel) => {
                                                     if (hiddenOutwardColumns.includes(tripLabel)) return null;
                                                     return (
-                                                        <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 110, minWidth: 110 }}>
+                                                        <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 200, minWidth: 200 }}>
                                                             {formatQtyVal(outwardTripTotals[tripLabel])}
                                                         </TableCell>
                                                     );
@@ -2429,7 +2817,7 @@ const InStockReport: React.FC = () => {
                                                                 key={col.key}
                                                                 onClick={() => {
                                                                     if (isProduct && pId) {
-                                                                        handleQuantityClick(pId, String(item.stock_item_name || item.Stock_Item || val), 'ALL');
+                                                                        handleQuantityClick(pId, String(item.stock_item_name || item.Stock_Item || val), inwardMode ? 'IN' : processMode ? 'PROCESS' : outwardMode ? 'OUT' : 'ALL');
                                                                     }
                                                                 }}
                                                                 sx={{
@@ -2452,21 +2840,13 @@ const InStockReport: React.FC = () => {
                                                     {!inwardMode && !outwardMode && !processMode && (
                                                         <TableCell
                                                             align="right"
-                                                            onClick={() => {
-                                                                if (openingStock !== 0) {
-                                                                    handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'OB');
-                                                                }
-                                                            }}
                                                             sx={{
                                                                 borderRight: "1px solid #e2e8f0",
                                                                 fontWeight: 600,
                                                                 pr: 2,
-                                                                color: openingStock !== 0 ? "#2563eb" : "#475569",
-                                                                cursor: openingStock !== 0 ? "pointer" : "default",
-                                                                textDecoration: openingStock !== 0 ? "underline" : "none",
+                                                                color: "#475569",
                                                                 width: 120,
-                                                                minWidth: 120,
-                                                                "&:hover": openingStock !== 0 ? { color: "#1d4ed8" } : {}
+                                                                minWidth: 120
                                                             }}
                                                         >
                                                             {formatQtyVal(openingStock)}
@@ -2511,7 +2891,9 @@ const InStockReport: React.FC = () => {
                                                                         align="right"
                                                                         onClick={() => {
                                                                             if (qty !== 0) {
-                                                                                handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, tripLabel);
+                                                                                const matchingTripRecord = trips.find(t => getTripLabel(t) === tripLabel);
+                                                                                const tripNo = matchingTripRecord?.Trip_No || matchingTripRecord?.trip_no || matchingTripRecord?.Trip_Voucher_Number;
+                                                                                handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, tripLabel, tripNo);
                                                                             }
                                                                         }}
                                                                         sx={{
@@ -2521,8 +2903,8 @@ const InStockReport: React.FC = () => {
                                                                             color: qty > 0 ? "#2563eb" : "#94a3b8",
                                                                             cursor: qty !== 0 ? "pointer" : "default",
                                                                             textDecoration: qty !== 0 ? "underline" : "none",
-                                                                            width: 110,
-                                                                            minWidth: 110,
+                                                                            width: 200,
+                                                                            minWidth: 200,
                                                                             "&:hover": qty !== 0 ? { color: "#1d4ed8" } : {}
                                                                         }}
                                                                     >
@@ -2716,7 +3098,9 @@ const InStockReport: React.FC = () => {
                                                                         align="right"
                                                                         onClick={() => {
                                                                             if (qty !== 0) {
-                                                                                handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, tripLabel);
+                                                                                const matchingTripRecord = outTrips.find(t => getTripLabel(t) === tripLabel);
+                                                                                const tripNo = matchingTripRecord?.Trip_No || matchingTripRecord?.trip_no || matchingTripRecord?.Trip_Voucher_Number;
+                                                                                handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, tripLabel, tripNo);
                                                                             }
                                                                         }}
                                                                         sx={{
@@ -2726,8 +3110,8 @@ const InStockReport: React.FC = () => {
                                                                             color: qty > 0 ? "#2563eb" : "#94a3b8",
                                                                             cursor: qty !== 0 ? "pointer" : "default",
                                                                             textDecoration: qty !== 0 ? "underline" : "none",
-                                                                            width: 110,
-                                                                            minWidth: 110,
+                                                                            width: 200,
+                                                                            minWidth: 200,
                                                                             "&:hover": qty !== 0 ? { color: "#1d4ed8" } : {}
                                                                         }}
                                                                     >
@@ -2787,22 +3171,13 @@ const InStockReport: React.FC = () => {
                                                     {!inwardMode && !outwardMode && !processMode && (
                                                         <TableCell
                                                             align="right"
-                                                            onClick={() => {
-                                                                const qtyVal = getRecalculatedClosingStock(item);
-                                                                if (qtyVal !== 0) {
-                                                                    handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'ALL');
-                                                                }
-                                                            }}
                                                             sx={{
                                                                 fontWeight: 700,
                                                                 pr: 2,
                                                                 backgroundColor: getRecalculatedClosingStock(item) > 0 ? "#dcfce7" : "transparent",
-                                                                color: getRecalculatedClosingStock(item) > 0 ? "#2563eb" : "#475569",
-                                                                cursor: getRecalculatedClosingStock(item) !== 0 ? "pointer" : "default",
-                                                                textDecoration: getRecalculatedClosingStock(item) !== 0 ? "underline" : "none",
+                                                                color: getRecalculatedClosingStock(item) > 0 ? "#15803d" : "#475569",
                                                                 width: 120,
-                                                                minWidth: 120,
-                                                                "&:hover": getRecalculatedClosingStock(item) !== 0 ? { color: "#1d4ed8" } : {}
+                                                                minWidth: 120
                                                             }}
                                                         >
                                                             {formatQtyVal(getRecalculatedClosingStock(item))}
@@ -2970,7 +3345,7 @@ const InStockReport: React.FC = () => {
             <Dialog
                 open={popupOpen}
                 onClose={() => setPopupOpen(false)}
-                maxWidth="md"
+                maxWidth="lg"
                 fullWidth
                 PaperProps={{
                     sx: {
@@ -3006,72 +3381,140 @@ const InStockReport: React.FC = () => {
                             <CircularProgress color="primary" />
                         </Box>
                     ) : (
-                        <>
-                            {/* Transactions Table */}
-                            <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid #cbd5e1", borderRadius: 2, maxHeight: 350 }}>
-                                <Table size="small" stickyHeader sx={{ "& .MuiTableCell-root": { py: 1.2 } }}>
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell align="center" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>S.NO</TableCell>
-                                            <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>DATE</TableCell>
-                                            <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>VOUCHER TYPE</TableCell>
-                                            <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>VOUCHER NO</TableCell>
-                                            <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>RETAILER</TableCell>
-                                            <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>IN QTY</TableCell>
-                                            <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>OUT QTY</TableCell>
-                                            <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>CLS</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {filteredPopupRows.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={8} align="center" sx={{ py: 4, color: "#64748b" }}>
-                                                    No transactions found.
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : (
+                        <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid #cbd5e1", borderRadius: 2, maxHeight: 350 }}>
+                            <Table size="small" stickyHeader sx={{ "& .MuiTableCell-root": { py: 0.8, fontSize: "0.775rem" } }}>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell align="center" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>S.NO</TableCell>
+                                        <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>VOUCHER TYPE</TableCell>
+                                        <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>INV NO</TableCell>
+                                        <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>PRODUCT NAME</TableCell>
+                                        <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>RETAILER NAME</TableCell>
+                                        {popupFilterType === "ALL" ? (
                                             <>
-                                                {/* Total Row */}
-                                                <TableRow sx={{ bgcolor: "#eff6ff", "& .MuiTableCell-root": { fontWeight: 700, color: "#1e40af", borderBottom: "2px solid #cbd5e1" } }}>
-                                                    <TableCell align="center">-</TableCell>
-                                                    <TableCell>TOTAL</TableCell>
-                                                    <TableCell></TableCell>
-                                                    <TableCell></TableCell>
-                                                    <TableCell></TableCell>
-                                                    <TableCell align="right">
-                                                        {popupTotals.totalIn.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                                    </TableCell>
-                                                    <TableCell align="right">
-                                                        {popupTotals.totalOut.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                                    </TableCell>
-                                                    <TableCell align="right">
-                                                        {popupTotals.finalBalance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                                    </TableCell>
-                                                </TableRow>
-                                                {filteredPopupRows.map((r, i) => (
-                                                    <TableRow key={i} hover sx={{ "&:hover": { bgcolor: "#f1f5f9" } }}>
-                                                        <TableCell align="center" sx={{ fontWeight: 600, color: "#64748b" }}>{i + 1}</TableCell>
-                                                        <TableCell>{dayjs(r.Ledger_Date).format("DD/MM/YYYY")}</TableCell>
-                                                        <TableCell>{r.voucher_name || "-"}</TableCell>
-                                                        <TableCell>{r.invoice_no || "-"}</TableCell>
-                                                        <TableCell>{r.Retailer_Name || "-"}</TableCell>
-                                                        <TableCell align="right" sx={{ color: Number(r.In_Qty || 0) > 0 ? "#16a34a" : "#64748b", fontWeight: Number(r.In_Qty || 0) > 0 ? 600 : 400 }}>
-                                                            {Number(r.In_Qty || 0) > 0 ? Number(r.In_Qty).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : "-"}
-                                                        </TableCell>
-                                                        <TableCell align="right" sx={{ color: Number(r.Out_Qty || 0) > 0 ? "#dc2626" : "#64748b", fontWeight: Number(r.Out_Qty || 0) > 0 ? 600 : 400 }}>
-                                                            {Number(r.Out_Qty || 0) > 0 ? Number(r.Out_Qty).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : "-"}
-                                                        </TableCell>
-                                                        <TableCell align="right" sx={{ fontWeight: 600, color: "#1e293b" }}>
-                                                            {Number(r.runningBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ))}
+                                                <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>IN QTY</TableCell>
+                                                <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>PROCES QTY</TableCell>
+                                                <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>OUT QTY</TableCell>
+                                                <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>PENDING QTY</TableCell>
                                             </>
+                                        ) : (
+                                            <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>
+                                                {getDynamicQtyHeader()}
+                                            </TableCell>
                                         )}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                        </>
+                                        {uniqueRoles.map((role) => (
+                                            <TableCell key={role} sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>{role.toUpperCase()}</TableCell>
+                                        ))}
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {filteredPopupRows.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={popupFilterType === "ALL" ? 9 + uniqueRoles.length : 6 + uniqueRoles.length} align="center" sx={{ py: 4, color: "#64748b" }}>
+                                                No transactions found.
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        <>
+                                            {/* Total Row */}
+                                            <TableRow sx={{ bgcolor: "#eff6ff", "& .MuiTableCell-root": { fontWeight: 700, color: "#1e40af", borderBottom: "2px solid #cbd5e1" } }}>
+                                                <TableCell align="center">-</TableCell>
+                                                <TableCell>TOTAL</TableCell>
+                                                <TableCell></TableCell>
+                                                <TableCell></TableCell>
+                                                <TableCell></TableCell>
+                                                {popupFilterType === "ALL" ? (
+                                                    <>
+                                                        <TableCell align="right">
+                                                            {popupTotals.totalInQty === 0 ? "-" : popupTotals.totalInQty.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                        </TableCell>
+                                                        <TableCell align="right">
+                                                            {popupTotals.totalProcessQty === 0 ? "-" : popupTotals.totalProcessQty.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                        </TableCell>
+                                                        <TableCell align="right">
+                                                            {popupTotals.totalOutQty === 0 ? "-" : popupTotals.totalOutQty.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                        </TableCell>
+                                                        <TableCell align="right">
+                                                            {popupTotals.totalPendingQty === 0 ? "-" : popupTotals.totalPendingQty.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                        </TableCell>
+                                                    </>
+                                                ) : (
+                                                    <TableCell align="right">
+                                                        {popupTotals.totalFilteredQty === 0 ? "-" : popupTotals.totalFilteredQty.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                    </TableCell>
+                                                )}
+                                                {uniqueRoles.map((role) => (
+                                                    <TableCell key={role}></TableCell>
+                                                ))}
+                                            </TableRow>
+                                            {(() => {
+                                                let prevDateStr: string | null = null;
+                                                let sno = 1;
+                                                return filteredPopupRows.map((r, i) => {
+                                                    const currentDateStr = dayjs(r.Do_Date || r.Ledger_Date || r.Stock_Ledger_Date || r.Process_Date).format("DD-MM-YYYY");
+                                                    const showDateHeader = currentDateStr !== prevDateStr;
+                                                    prevDateStr = currentDateStr;
+
+                                                    const staffMap = parseStaffInvolved(r.Staff_Involved || "");
+                                                    const { inQty, processQty, outQty, pendingQty } = getRowQuantities(r);
+                                                    const filteredQty = getRowQtyForFilter(r, popupFilterType);
+                                                    
+                                                    const formatVal = (val: number) => {
+                                                        if (val === 0) return "-";
+                                                        return val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                                                    };
+
+                                                    return (
+                                                        <React.Fragment key={i}>
+                                                            {showDateHeader && (
+                                                                <TableRow sx={{ backgroundColor: "#e2e8f0" }}>
+                                                                    <TableCell 
+                                                                        colSpan={popupFilterType === "ALL" ? 9 + uniqueRoles.length : 6 + uniqueRoles.length} 
+                                                                        sx={{ fontWeight: 800, color: "#1e293b", py: 0.8 }}
+                                                                    >
+                                                                        DATE: {currentDateStr}
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            )}
+                                                            <TableRow hover sx={{ "&:hover": { bgcolor: "#f1f5f9" } }}>
+                                                                <TableCell align="center" sx={{ fontWeight: 600, color: "#64748b" }}>{sno++}</TableCell>
+                                                                <TableCell>{r.module || r.Module || r.Voucher_Type || r.voucher_name || r.Stock_Voucher_Name || "-"}</TableCell>
+                                                                <TableCell>{getRowInvNoDisplay(r)}</TableCell>
+                                                                <TableCell>{r.Product_Name || r.product_name || r.Stock_Item_Ledger_Name || popupProductInfo?.productName || "-"}</TableCell>
+                                                                <TableCell>{r.Retailer_Name || "-"}</TableCell>
+                                                                {popupFilterType === "ALL" ? (
+                                                                    <>
+                                                                        <TableCell align="right" sx={{ fontWeight: 600, color: inQty > 0 ? "#15803d" : "#475569" }}>
+                                                                            {formatVal(inQty)}
+                                                                        </TableCell>
+                                                                        <TableCell align="right" sx={{ fontWeight: 600, color: processQty !== 0 ? "#2563eb" : "#475569" }}>
+                                                                            {formatVal(processQty)}
+                                                                        </TableCell>
+                                                                        <TableCell align="right" sx={{ fontWeight: 600, color: outQty > 0 ? "#b91c1c" : "#475569" }}>
+                                                                            {formatVal(outQty)}
+                                                                        </TableCell>
+                                                                        <TableCell align="right" sx={{ fontWeight: 600, color: pendingQty > 0 ? "#d97706" : "#475569" }}>
+                                                                            {formatVal(pendingQty)}
+                                                                        </TableCell>
+                                                                    </>
+                                                                ) : (
+                                                                    <TableCell align="right" sx={{ fontWeight: 600, color: "#1e293b" }}>
+                                                                        {formatVal(filteredQty)}
+                                                                    </TableCell>
+                                                                )}
+                                                                {uniqueRoles.map((role) => (
+                                                                    <TableCell key={role}>{staffMap[role] || "-"}</TableCell>
+                                                                ))}
+                                                            </TableRow>
+                                                        </React.Fragment>
+                                                    );
+                                                });
+                                            })()}
+                                        </>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
                     )}
                 </DialogContent>
             </Dialog>

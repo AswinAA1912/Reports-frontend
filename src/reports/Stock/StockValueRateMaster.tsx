@@ -16,7 +16,13 @@ import {
     MenuItem,
     TextField,
     Chip,
-    Stack
+    Stack,
+    Radio,
+    RadioGroup,
+    FormControlLabel,
+    FormControl,
+    FormLabel,
+    Typography
 } from "@mui/material";
 import dayjs from "dayjs";
 import PageHeader from "../../Layout/PageHeader";
@@ -39,6 +45,7 @@ const StockValueRateMasterReport: React.FC = () => {
     const [loading, setLoading] = useState(false);
 
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const [activeFilter, setActiveFilter] = useState<number>(1);
 
     const [columnFilters, setColumnFilters] = useState<Record<string, any>>({
         Ledger_Date: {
@@ -93,7 +100,9 @@ const StockValueRateMasterReport: React.FC = () => {
             stockMap.set(String(s.Product_Id), Number(s.CL_Rate));
         });
 
-        return posRates.map((p) => {
+        const filteredRates = posRates.filter((p) => Number(p.Is_Active_Decative ?? 0) === activeFilter);
+
+        return filteredRates.map((p) => {
             const clRate = stockMap.get(String(p.Item_Id)) || 0;
 
             return {
@@ -104,7 +113,7 @@ const StockValueRateMasterReport: React.FC = () => {
                 CL_Rate: clRate,
             };
         });
-    }, [posRates, stockValues]);
+    }, [posRates, stockValues, activeFilter]);
 
     // ****FILTER***** //
 
@@ -290,7 +299,28 @@ const StockValueRateMasterReport: React.FC = () => {
                     }))
                 }
                 onApply={() => setDrawerOpen(false)}
-            />
+            >
+                <FormControl sx={{ mb: 2, display: "block" }}>
+                    <FormLabel sx={{ fontWeight: 600, color: "#1E3A8A", fontSize: "0.875rem", display: "block", mb: 0.5 }}>
+                        Status
+                    </FormLabel>
+                    <RadioGroup
+                        value={activeFilter}
+                        onChange={(e) => setActiveFilter(Number(e.target.value))}
+                    >
+                        <FormControlLabel
+                            value={1}
+                            control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                            label={<Typography sx={{ fontSize: "0.825rem" }}>Active</Typography>}
+                        />
+                        <FormControlLabel
+                            value={0}
+                            control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                            label={<Typography sx={{ fontSize: "0.825rem" }}>Inactive</Typography>}
+                        />
+                    </RadioGroup>
+                </FormControl>
+            </ReportFilterDrawer>
 
             <AppLayout fullWidth>
                 <Box sx={{ mt: 1 }}>

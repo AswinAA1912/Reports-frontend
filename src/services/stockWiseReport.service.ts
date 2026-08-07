@@ -138,5 +138,37 @@ export const godownItemTransactionService = {
             `${getBaseURL()}api/reports/godownexpenseReport`,
             { params }
         ),
+    getGodownItemProcess: (params: {
+        fromDate: string;
+        toDate: string;
+        Product_Id: number;
+        Godown_Id: number;
+    }) =>
+        axios.get<{ success: boolean; data: any[] }>(
+            `${getBaseURL()}api/reports/godownitemprocess`,
+            { params }
+        ),
+    getGodownItemOutExpandable: (params: {
+        fromDate: string;
+        toDate: string;
+        Product_Id: number;
+        Godown_Id: number;
+        Trip_No?: number;
+    }) =>
+        axios.get<{ success: boolean; data: any[] }>(
+            `${getBaseURL()}api/reports/godownitemOutexpandable`,
+            { params }
+        ),
+    getGodownItemInExpandable: (params: {
+        fromDate: string;
+        toDate: string;
+        Product_Id: number;
+        Godown_Id: number;
+        Trip_No?: number;
+    }) =>
+        axios.get<{ success: boolean; data: any[] }>(
+            `${getBaseURL()}api/reports/godownitemInexpandable`,
+            { params }
+        ),
 };
 

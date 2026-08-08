@@ -194,9 +194,9 @@ const InStockReport: React.FC = () => {
     const [tempToDate, setTempToDate] = useState(today);
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [qtyMode, setQtyMode] = useState<"qty" | "actQty">(() => {
+    const [qtyMode, setQtyMode] = useState<"qty" | "actQty" | "bags">(() => {
         const saved = sessionStorage.getItem("inStockQtyMode");
-        return (saved as "qty" | "actQty") || "qty";
+        return (saved as "qty" | "actQty" | "bags") || "qty";
     });
 
     useEffect(() => {
@@ -231,6 +231,28 @@ const InStockReport: React.FC = () => {
             };
         }
     }, [qtyMode]);
+
+    const getItemWeight = (item: stockWiseReport): number => {
+        const bagWeightStr = String(item.Bag || item.bag || "").replace(/[^0-9.]/g, '');
+        const bagWeight = parseFloat(bagWeightStr) || 0;
+        if (bagWeight > 0) return bagWeight;
+        const match = String(item.stock_item_name || item.Stock_Item || "").match(/(\d+(?:\.\d+)?)\s*(?:KG|kg)/);
+        if (match) return parseFloat(match[1]);
+        return 1;
+    };
+
+    const getPopupItemWeight = (): number => {
+        if (!popupProductInfo) return 1;
+        const matchingItem = detailedStockData.find(
+            x => Number(x.Product_Id) === Number(popupProductInfo.productId)
+        );
+        if (matchingItem) {
+            return getItemWeight(matchingItem);
+        }
+        const match = String(popupProductInfo.productName).match(/(\d+(?:\.\d+)?)\s*(?:KG|kg)/);
+        if (match) return parseFloat(match[1]);
+        return 1;
+    };
 
     const [selectedGodown, setSelectedGodown] = useState<StockAbstractData4 | null>(null);
     const [searchText, setSearchText] = useState("");
@@ -503,7 +525,13 @@ const InStockReport: React.FC = () => {
             }
         }
 
-        return { inQty, processQty, outQty, pendingQty };
+        const weight = qtyMode === "bags" ? getPopupItemWeight() : 1;
+        return { 
+            inQty: qtyMode === "bags" ? Math.round(inQty / weight) : inQty / weight, 
+            processQty: qtyMode === "bags" ? Math.round(processQty / weight) : processQty / weight, 
+            outQty: qtyMode === "bags" ? Math.round(outQty / weight) : outQty / weight, 
+            pendingQty: qtyMode === "bags" ? Math.round(pendingQty / weight) : pendingQty / weight 
+        };
     };
 
     const getRowQtyForFilter = (r: any, filterType: string) => {
@@ -1210,11 +1238,12 @@ const InStockReport: React.FC = () => {
         return label;
     }, []);
 
-    const getQtyForTrip = React.useCallback((tripsList: any[], label: string): number => {
-        return tripsList
+    const getQtyForTrip = React.useCallback((tripsList: any[], label: string, itemWeight: number = 1): number => {
+        const total = tripsList
             .filter(t => getTripLabel(t) === label)
             .reduce((sum, t) => sum + Number(t.quantity || 0), 0);
-    }, [getTripLabel]);
+        return qtyMode === "bags" ? Math.round(total / itemWeight) : total;
+    }, [getTripLabel, qtyMode]);
 
     // Unique inward trip headers in filteredData
     const inwardTripHeaders = useMemo(() => {
@@ -1297,7 +1326,7 @@ const InStockReport: React.FC = () => {
             let sum = 0;
             filteredData.forEach(item => {
                 const { trips } = getProductDetails(item);
-                sum += getQtyForTrip(trips, label);
+                sum += getQtyForTrip(trips, label, getItemWeight(item));
             });
             totals[label] = sum;
         });
@@ -1311,7 +1340,7 @@ const InStockReport: React.FC = () => {
             let sum = 0;
             filteredData.forEach(item => {
                 const { outTrips } = getProductDetails(item);
-                sum += getQtyForTrip(outTrips, label);
+                sum += getQtyForTrip(outTrips, label, getItemWeight(item));
             });
             totals[label] = sum;
         });
@@ -1341,12 +1370,30 @@ const InStockReport: React.FC = () => {
     }, [numFilteredAndSortedRows, page, rowsPerPage]);
 
     // Detailed quantities helpers
-    const getOpeningStock = (item: stockWiseReport) => Number(item[qtyKeys.opening] || 0);
-    const getStockInTotal = (item: stockWiseReport) => Number(item[qtyKeys.in] || 0);
-    const getStockOutTotal = (item: stockWiseReport) => Number(item[qtyKeys.out] || 0);
-    const getClosingStock = (item: stockWiseReport) => Number(item[qtyKeys.closing] || 0);
-    const getProcIn = (item: stockWiseReport) => Number(item[qtyKeys.procIn] || 0);
-    const getProcOut = (item: stockWiseReport) => Number(item[qtyKeys.procOut] || 0);
+    const getOpeningStock = (item: stockWiseReport) => {
+        const base = Number(item[qtyKeys.opening] || 0);
+        return qtyMode === "bags" ? Math.round(base / getItemWeight(item)) : base;
+    };
+    const getStockInTotal = (item: stockWiseReport) => {
+        const base = Number(item[qtyKeys.in] || 0);
+        return qtyMode === "bags" ? Math.round(base / getItemWeight(item)) : base;
+    };
+    const getStockOutTotal = (item: stockWiseReport) => {
+        const base = Number(item[qtyKeys.out] || 0);
+        return qtyMode === "bags" ? Math.round(base / getItemWeight(item)) : base;
+    };
+    const getClosingStock = (item: stockWiseReport) => {
+        const base = Number(item[qtyKeys.closing] || 0);
+        return qtyMode === "bags" ? Math.round(base / getItemWeight(item)) : base;
+    };
+    const getProcIn = (item: stockWiseReport) => {
+        const base = Number(item[qtyKeys.procIn] || 0);
+        return qtyMode === "bags" ? Math.round(base / getItemWeight(item)) : base;
+    };
+    const getProcOut = (item: stockWiseReport) => {
+        const base = Number(item[qtyKeys.procOut] || 0);
+        return qtyMode === "bags" ? Math.round(base / getItemWeight(item)) : base;
+    };
 
     // Calculate totals for the selected godown's filtered data
     const detailedTotals = useMemo(() => {
@@ -1373,12 +1420,18 @@ const InStockReport: React.FC = () => {
             const { trips, returnQty, stockInQty, procInQty, procOutQty, outwardQty, outTrips, deliveryQty } = getProductDetails(item);
 
             if (processApiData.length > 0) {
-                const itemTripQty = trips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+                const weight = getItemWeight(item);
+                const itemTripQtyBase = trips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+                const itemTripQty = qtyMode === "bags" ? Math.round(itemTripQtyBase / weight) : itemTripQtyBase;
+
                 const itemReturnQty = returnQty;
                 const itemStockIn = stockInQty;
                 const itemProcIn = procInQty;
                 const itemProcOut = procOutQty;
-                const itemOutTripQty = outTrips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+                const itemOutTripQtyBase = outTrips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+                const itemOutTripQty = qtyMode === "bags" ? Math.round(itemOutTripQtyBase / weight) : itemOutTripQtyBase;
+
                 const itemDeliveryQty = deliveryQty;
                 const itemStockOut = outwardQty;
 
@@ -1436,7 +1489,7 @@ const InStockReport: React.FC = () => {
             let sum = 0;
             inwardTripHeaders.forEach((tripLabel) => {
                 if (!hiddenInwardColumns.includes(tripLabel)) {
-                    sum += getQtyForTrip(trips, tripLabel);
+                    sum += getQtyForTrip(trips, tripLabel, getItemWeight(item));
                 }
             });
             if (!hiddenInwardColumns.includes("RETURN")) {
@@ -1460,7 +1513,7 @@ const InStockReport: React.FC = () => {
             let sum = 0;
             outwardTripHeaders.forEach((tripLabel) => {
                 if (!hiddenOutwardColumns.includes(tripLabel)) {
-                    sum += getQtyForTrip(outTrips, tripLabel);
+                    sum += getQtyForTrip(outTrips, tripLabel, getItemWeight(item));
                 }
             });
             if (!hiddenOutwardColumns.includes("PENDING DELIVERY")) {
@@ -2901,7 +2954,7 @@ const InStockReport: React.FC = () => {
                                                         <>
                                                             {inwardTripHeaders.map((tripLabel) => {
                                                                 if (hiddenInwardColumns.includes(tripLabel)) return null;
-                                                                const qty = getQtyForTrip(trips, tripLabel);
+                                                                const qty = getQtyForTrip(trips, tripLabel, getItemWeight(item));
                                                                 return (
                                                                     <TableCell
                                                                         key={tripLabel}
@@ -3108,7 +3161,7 @@ const InStockReport: React.FC = () => {
                                                         <>
                                                             {outwardTripHeaders.map((tripLabel) => {
                                                                 if (hiddenOutwardColumns.includes(tripLabel)) return null;
-                                                                const qty = getQtyForTrip(outTrips, tripLabel);
+                                                                const qty = getQtyForTrip(outTrips, tripLabel, getItemWeight(item));
                                                                 return (
                                                                     <TableCell
                                                                         key={tripLabel}

@@ -69,10 +69,10 @@ interface ReportFilterDrawerProps {
     unitValue?: "kgs_ton" | "bags";
     onUnitChange?: (value: "kgs_ton" | "bags") => void;
 
-    // QTY MODE FILTER (Qty vs Act Qty)
+    // QTY MODE FILTER (Qty vs Act Qty vs Bags)
     showQtyModeFilter?: boolean;
-    qtyModeValue?: "qty" | "actQty";
-    onQtyModeChange?: (value: "qty" | "actQty") => void;
+    qtyModeValue?: "qty" | "actQty" | "bags" | string;
+    onQtyModeChange?: (value: any) => void;
 
     // PRODUCTION STAFF BASED REPORT VALUE DISPLAY MODE
     showProductionDisplayMode?: boolean;
@@ -449,7 +449,7 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                             <RadioGroup
                                 value={qtyModeValue || "qty"}
                                 onChange={(e) =>
-                                    onQtyModeChange(e.target.value as "qty" | "actQty")
+                                    onQtyModeChange(e.target.value as any)
                                 }
                             >
                                 <FormControlLabel
@@ -461,6 +461,11 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                                     value="actQty"
                                     control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
                                     label={<Typography sx={{ fontSize: "0.825rem" }}>Act Qty</Typography>}
+                                />
+                                <FormControlLabel
+                                    value="bags"
+                                    control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                                    label={<Typography sx={{ fontSize: "0.825rem" }}>Bags</Typography>}
                                 />
                             </RadioGroup>
                         </FormControl>

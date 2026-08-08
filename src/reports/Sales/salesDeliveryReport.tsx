@@ -10,6 +10,8 @@ import {
     TableRow,
     Typography,
     CircularProgress,
+    MenuItem,
+    TextField,
 } from "@mui/material";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
@@ -19,7 +21,7 @@ import { toast } from "react-toastify";
 import PageHeader from "../../Layout/PageHeader";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import AppLayout, { useToggleMode } from "../../Layout/appLayout";
-import { SalesDeliveryReportService, SalesDeliveryItem } from "../../services/salesDeliveryReport.service";
+import { SalesDeliveryReportService, SalesDeliveryItem, GodownItem } from "../../services/salesDeliveryReport.service";
 
 const getFunnelValue = (
     data: SalesDeliveryItem[],
@@ -56,12 +58,30 @@ const SalesDeliveryReport: React.FC = () => {
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [data, setData] = useState<SalesDeliveryItem[]>([]);
     const [loading, setLoading] = useState(false);
-    const [filters, setFilters] = useState({
+    const [godowns, setGodowns] = useState<GodownItem[]>([]);
+    const [selectedGodownId, setSelectedGodownId] = useState<string>("");
+    const [filters, setFilters] = useState<{
+        Date: { from: string; to: string };
+        Godown_Id?: string;
+    }>({
         Date: {
             from: today,
             to: today,
         },
+        Godown_Id: "",
     });
+
+    useEffect(() => {
+        const loadGodowns = async () => {
+            try {
+                const res = await SalesDeliveryReportService.getGodowns();
+                setGodowns(res.data.data || []);
+            } catch (err) {
+                console.error("Error loading godowns:", err);
+            }
+        };
+        loadGodowns();
+    }, []);
 
     useEffect(() => {
         loadData();
@@ -77,6 +97,7 @@ const SalesDeliveryReport: React.FC = () => {
             const res = await fetchFn({
                 Fromdate: filters.Date.from,
                 Todate: filters.Date.to,
+                Godown_Id: filters.Godown_Id || undefined,
             });
             setData(res.data.data || []);
         } catch (err: any) {
@@ -87,6 +108,9 @@ const SalesDeliveryReport: React.FC = () => {
             setLoading(false);
         }
     };
+
+    const selectedGodown = godowns.find((g) => String(g.Godown_Id) === String(filters.Godown_Id));
+    const godownSuffix = selectedGodown?.Godown_Name ? ` - ${selectedGodown.Godown_Name}` : "";
 
     // Excel Export
     const handleExportExcel = () => {
@@ -99,7 +123,7 @@ const SalesDeliveryReport: React.FC = () => {
             const excelData: any[][] = [];
             
             if (toggleMode === "Expanded") {
-                excelData.push(["SALES DELIVERY FUNNEL TRACKING - DAYWISE"]);
+                excelData.push([`SALES DELIVERY FUNNEL TRACKING - DAYWISE${godownSuffix}`]);
                 excelData.push([]);
                 excelData.push([
                     "Date",
@@ -142,7 +166,7 @@ const SalesDeliveryReport: React.FC = () => {
                     ]);
                 });
             } else {
-                excelData.push(["SALES DELIVERY FUNNEL TRACKING"]);
+                excelData.push([`SALES DELIVERY FUNNEL TRACKING${godownSuffix}`]);
                 excelData.push([]);
                 excelData.push([
                     "Sales Order",
@@ -257,8 +281,8 @@ const SalesDeliveryReport: React.FC = () => {
             doc.setFont("helvetica", "bold");
             
             const title = toggleMode === "Expanded" 
-                ? "SALES DELIVERY FUNNEL TRACKING DAYWISE REPORT" 
-                : "SALES DELIVERY FUNNEL TRACKING REPORT";
+                ? `SALES DELIVERY FUNNEL TRACKING DAYWISE REPORT${godownSuffix}` 
+                : `SALES DELIVERY FUNNEL TRACKING REPORT${godownSuffix}`;
             doc.text(title, 148, 15, { align: "center" });
 
             let funnelHead: string[][];
@@ -375,15 +399,32 @@ const SalesDeliveryReport: React.FC = () => {
                 onApply={() => {
                     setFilters({
                         Date: { from: fromDate, to: toDate },
+                        Godown_Id: selectedGodownId,
                     });
                     setDrawerOpen(false);
                 }}
-            />
+            >
+                <TextField
+                    select
+                    label="Godown"
+                    fullWidth
+                    value={selectedGodownId}
+                    onChange={(e) => setSelectedGodownId(e.target.value)}
+                    sx={{ mb: 2 }}
+                >
+                    <MenuItem value="">All</MenuItem>
+                    {godowns.map((g) => (
+                        <MenuItem key={g.Godown_Id} value={g.Godown_Id}>
+                            {g.Godown_Name || "Unnamed Godown"}
+                        </MenuItem>
+                    ))}
+                </TextField>
+            </ReportFilterDrawer>
 
             <AppLayout fullWidth>
                 <Box px={3} pb={4} pt={4}>
                     <Typography variant="subtitle1" fontWeight="bold" color="#1e3a8a" mb={2} sx={{ letterSpacing: 0.5 }}>
-                        {toggleMode === "Expanded" ? "SALES DELIVERY FUNNEL TRACKING - DAYWISE" : "SALES DELIVERY FUNNEL TRACKING"}
+                        {toggleMode === "Expanded" ? `SALES DELIVERY FUNNEL TRACKING - DAYWISE${godownSuffix}` : `SALES DELIVERY FUNNEL TRACKING${godownSuffix}`}
                     </Typography>
 
                     {loading ? (

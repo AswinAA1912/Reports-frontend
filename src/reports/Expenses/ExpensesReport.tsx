@@ -788,10 +788,9 @@ const ExpensesReport = () => {
 
                                 {/* RIGHT SUMMARY */}
                                 <Box
-                                    display="flex"
-                                    gap={3}
+                                    display="grid"
+                                    gridTemplateColumns="160px 160px 220px"
                                     alignItems="center"
-                                    flexWrap="wrap"
                                 >
                                     <Typography fontWeight={700}>
                                         DR: {formatINR(summary?.dr ?? 0)}
@@ -842,7 +841,11 @@ const ExpensesReport = () => {
                                                 <Typography ml={1}>{group.name}</Typography>
                                             </Box>
 
-                                            <Box display="flex" gap={2} alignItems="center" flexWrap="wrap">
+                                            <Box
+                                                display="grid"
+                                                gridTemplateColumns="160px 160px 220px"
+                                                alignItems="center"
+                                            >
 
                                                 <Typography fontWeight={600}>
                                                     DR: {formatINR(group.dr)}
@@ -889,8 +892,11 @@ const ExpensesReport = () => {
                                                             <Typography ml={1}>{sub.name}</Typography>
                                                         </Box>
 
-                                                        <Box display="flex" gap={2} alignItems="center" flexWrap="wrap">
-
+                                                        <Box
+                                                            display="grid"
+                                                            gridTemplateColumns="160px 160px 220px"
+                                                            alignItems="center"
+                                                        >
                                                             <Typography>
                                                                 DR: {formatINR(sub.dr)}
                                                             </Typography>
@@ -902,7 +908,6 @@ const ExpensesReport = () => {
                                                             <Typography fontWeight={600} color={sub.balance >= 0 ? "green" : "red"}>
                                                                 BAL: {formatINR(Math.abs(sub.balance))} {sub.balance >= 0 ? "DR" : "CR"}
                                                             </Typography>
-
                                                         </Box>
                                                     </Box>
 

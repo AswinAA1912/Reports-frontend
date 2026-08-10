@@ -34,6 +34,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import SettingsIcon from "@mui/icons-material/Settings";
+import GroupWorkIcon from "@mui/icons-material/GroupWork";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import CloseIcon from "@mui/icons-material/Close";
 import AddIcon from "@mui/icons-material/Add";
@@ -86,6 +87,16 @@ const DEFAULT_CONFIGURABLE_COLUMNS: ColumnConfig[] = [
     { key: "Godown_Name", label: "Godown Name", enabled: false, order: 16 }
 ];
 
+const GROUPBY_OPTIONS = [
+    { key: "Brand", label: "Brand Name" },
+    { key: "Group_Name", label: "Group Name" },
+    { key: "Stock_Group", label: "Stock Group" },
+    { key: "S_Sub_Group_1", label: "Sub Group 1" },
+    { key: "Grade_Item_Group", label: "Grade Item Group" },
+    { key: "POS_Group", label: "POS Group" },
+    { key: "Godown_Name", label: "Godown Name" }
+];
+
 const parseStaffInvolved = (staffStr: string): Record<string, string> => {
     const rolesMap: Record<string, string[]> = {};
     if (!staffStr) return {};
@@ -120,6 +131,7 @@ const InStockReport: React.FC = () => {
         return saved ? JSON.parse(saved) : DEFAULT_CONFIGURABLE_COLUMNS;
     });
     const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
+    const [groupByAnchor, setGroupByAnchor] = useState<null | HTMLElement>(null);
 
     useEffect(() => {
         sessionStorage.setItem("inStockColumns", JSON.stringify(columnsConfig));
@@ -257,10 +269,19 @@ const InStockReport: React.FC = () => {
     const [selectedGodown, setSelectedGodown] = useState<StockAbstractData4 | null>(null);
     const [searchText, setSearchText] = useState("");
     const [selectedBrand, setSelectedBrand] = useState<string>("All");
+    const [groupByColumn, setGroupByColumn] = useState<string>(() => {
+        return sessionStorage.getItem("inStockGroupByColumn") || "Stock_Group";
+    });
+
+    useEffect(() => {
+        sessionStorage.setItem("inStockGroupByColumn", groupByColumn);
+    }, [groupByColumn]);
 
     // Pagination states
     const [page, setPage] = useState(1);
     const [rowsPerPage, setRowsPerPage] = useState(100);
+
+    const [viewMode, setViewMode] = useState<"cumulative" | "trip">("cumulative");
 
     // Dynamic header split-up modes
     const [inwardMode, setInwardMode] = useState(false);
@@ -301,6 +322,46 @@ const InStockReport: React.FC = () => {
     const [godownListData, setGodownListData] = useState<StockAbstractData4[]>([]);
     const [detailedStockData, setDetailedStockData] = useState<stockWiseReport[]>([]);
     const [processApiData, setProcessApiData] = useState<any[]>([]);
+
+    const [godownFilterAnchor, setGodownFilterAnchor] = useState<null | HTMLElement>(null);
+    const [godownFilterSearch, setGodownFilterSearch] = useState("");
+    const [selectedGodowns, setSelectedGodowns] = useState<string[]>([]);
+
+    const uniqueGodownNames = useMemo(() => {
+        const activeGodowns = (godownListData || []).filter(g => {
+            if (qtyMode === "actQty") {
+                return Number(g.ACt_OB_Qty || 0) !== 0 ||
+                    Number(g.ACt_In_Qty || 0) !== 0 ||
+                    Number(g.ACt_Out_Qty || 0) !== 0 ||
+                    Number(g.CL_ACt_QTY || 0) !== 0;
+            }
+            return Number(g.OB_Qty || 0) !== 0 ||
+                Number(g.IN_Qty || 0) !== 0 ||
+                Number(g.Out_Qty || 0) !== 0 ||
+                Number(g.CL_QTY || 0) !== 0;
+        });
+        const names = activeGodowns.map(g => g.godown_name).filter(Boolean);
+        return Array.from(new Set(names)).sort();
+    }, [godownListData, qtyMode]);
+
+    const filteredGodowns = useMemo(() => {
+        return (godownListData || []).filter(g => {
+            if (selectedGodowns.length > 0 && !selectedGodowns.includes(g.godown_name)) {
+                return false;
+            }
+            if (qtyMode === "actQty") {
+                return Number(g.ACt_OB_Qty || 0) !== 0 ||
+                    Number(g.ACt_In_Qty || 0) !== 0 ||
+                    Number(g.ACt_Out_Qty || 0) !== 0 ||
+                    Number(g.CL_ACt_QTY || 0) !== 0;
+            }
+            return Number(g.OB_Qty || 0) !== 0 ||
+                Number(g.IN_Qty || 0) !== 0 ||
+                Number(g.Out_Qty || 0) !== 0 ||
+                Number(g.CL_QTY || 0) !== 0;
+        });
+    }, [godownListData, selectedGodowns, qtyMode]);
+
 
     // Map stockinoutprocess API data by item_id and godown_name
     const mappedProcessData = useMemo(() => {
@@ -397,7 +458,27 @@ const InStockReport: React.FC = () => {
         }
     };
 
-    const getRowTripInfo = (r: any) => {
+    const getTripOrTakenLabel = React.useCallback((t: any, isOutward: boolean): string => {
+        const rawVal = t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id;
+        if (!rawVal) return "N/A";
+        const str = String(rawVal).trim();
+        const prefix = isOutward ? "Taken" : "Trip";
+
+        let label = "";
+        if (str.toLowerCase().startsWith("trip") || str.toLowerCase().startsWith("taken")) {
+            label = str.replace(/^(trip|taken)/i, prefix);
+        } else {
+            label = `${prefix} - ${str}`;
+        }
+
+        const loadman = t.Loadman_Name || t.loadman_name;
+        if (loadman) {
+            label = `${label} - ${String(loadman).trim()}`;
+        }
+        return label;
+    }, []);
+
+    const getRowTripOrTakenInfo = (r: any, isOutward: boolean) => {
         // 1. Check direct fields on r
         const hasDirectTrip = (
             (r.Trip_No !== null && r.Trip_No !== undefined && String(r.Trip_No).trim() !== "") ||
@@ -407,16 +488,11 @@ const InStockReport: React.FC = () => {
             (r.Trip_Voucher_Number !== null && r.Trip_Voucher_Number !== undefined && String(r.Trip_Voucher_Number).trim() !== "") ||
             (r.trip_voucher_number !== null && r.trip_voucher_number !== undefined && String(r.trip_voucher_number).trim() !== "")
         );
-        
+
         if (hasDirectTrip) {
             const rawVal = r.Trip_No ?? r.trip_no ?? r.Trip_Voucher_Number ?? r.trip_voucher_number ?? r.Trip_Id ?? r.trip_id;
-            const str = String(rawVal).trim();
-            let label = str.toLowerCase().startsWith("trip") ? str : `Trip - ${str}`;
-            const loadman = r.Loadman_Name || r.loadman_name;
-            if (loadman) {
-                label = `${label} - ${String(loadman).trim()}`;
-            }
-            return { isTrip: true, tripLabel: label };
+            const label = getTripOrTakenLabel({ ...r, Trip_No: rawVal }, isOutward);
+            return { isTrip: true, label };
         }
 
         // 2. Check matched record in processApiData
@@ -445,30 +521,25 @@ const InStockReport: React.FC = () => {
                 );
                 if (hasTripField) {
                     const rawVal = matchingRawRecord.Trip_No || matchingRawRecord.trip_no || matchingRawRecord.trip_voucher_number || matchingRawRecord.trip_id;
-                    const str = String(rawVal).trim();
-                    let label = str.toLowerCase().startsWith("trip") ? str : `Trip - ${str}`;
-                    const loadman = matchingRawRecord.Loadman_Name || matchingRawRecord.loadman_name;
-                    if (loadman) {
-                        label = `${label} - ${String(loadman).trim()}`;
-                    }
-                    return { isTrip: true, tripLabel: label };
+                    const label = getTripOrTakenLabel({ ...matchingRawRecord, Trip_No: rawVal }, isOutward);
+                    return { isTrip: true, label };
                 }
             }
         }
 
-        return { isTrip: false, tripLabel: "" };
+        return { isTrip: false, label: "" };
     };
 
     const getRowQuantities = (r: any) => {
         const isOB = (r.Do_Inv_No || r.invoice_no) === "OB" || String(r.Particulars || r.Narration || "").toLowerCase().includes("opening balance");
-        const isSJ = String(r.Narration || r.Particulars || "").toLowerCase().includes("stock journal") || 
-                     String(r.Voucher_Type || r.voucher_name || "").toLowerCase().includes("stock journal") ||
-                     String(r.module || r.Module || "").toLowerCase().includes("stock journal") ||
-                     r.Direction !== undefined;
-        
-        // Check if pending delivery
-        const isPending = String(r.Record_Type || "").toUpperCase() === "PENDING_DELIVERY" || String(r.Record_Type || "").toUpperCase() === "PENDING" || popupFilterType === "PENDING DELIVERY";
-        
+        const isSJ = String(r.Narration || r.Particulars || "").toLowerCase().includes("stock journal") ||
+            String(r.Voucher_Type || r.voucher_name || "").toLowerCase().includes("stock journal") ||
+            String(r.module || r.Module || "").toLowerCase().includes("stock journal") ||
+            r.Direction !== undefined;
+
+        // Check if pending taken
+        const isPending = String(r.Record_Type || "").toUpperCase() === "PENDING_DELIVERY" || String(r.Record_Type || "").toUpperCase() === "PENDING" || popupFilterType === "PENDING TAKEN";
+
         let stockIn = Number(r.Stock_In_Qty ?? r.In_Qty ?? r.Bill_Qty ?? 0);
         let stockOut = Number(r.Stock_Out_Qty ?? r.Out_Qty ?? r.Bill_Qty ?? 0);
 
@@ -526,17 +597,17 @@ const InStockReport: React.FC = () => {
         }
 
         const weight = qtyMode === "bags" ? getPopupItemWeight() : 1;
-        return { 
-            inQty: qtyMode === "bags" ? Math.round(inQty / weight) : inQty / weight, 
-            processQty: qtyMode === "bags" ? Math.round(processQty / weight) : processQty / weight, 
-            outQty: qtyMode === "bags" ? Math.round(outQty / weight) : outQty / weight, 
-            pendingQty: qtyMode === "bags" ? Math.round(pendingQty / weight) : pendingQty / weight 
+        return {
+            inQty: qtyMode === "bags" ? Math.round(inQty / weight) : inQty / weight,
+            processQty: qtyMode === "bags" ? Math.round(processQty / weight) : processQty / weight,
+            outQty: qtyMode === "bags" ? Math.round(outQty / weight) : outQty / weight,
+            pendingQty: qtyMode === "bags" ? Math.round(pendingQty / weight) : pendingQty / weight
         };
     };
 
     const getRowQtyForFilter = (r: any, filterType: string) => {
         const { inQty, processQty, outQty, pendingQty } = getRowQuantities(r);
-        
+
         if (filterType === "OB") {
             return inQty;
         }
@@ -558,21 +629,21 @@ const InStockReport: React.FC = () => {
         if (filterType === "RETURN") {
             return inQty;
         }
-        if (filterType === "PENDING DELIVERY") {
+        if (filterType === "PENDING TAKEN") {
             return pendingQty;
         }
-        if (filterType.startsWith("Trip")) {
+        if (filterType.startsWith("Taken")) {
             return inwardMode ? inQty : outQty;
         }
-        
+
         return inwardMode ? inQty : outQty;
     };
 
     const getDynamicQtyHeader = () => {
         if (popupFilterType === "OB") return "OPENING QTY";
         if (popupFilterType === "IN" || popupFilterType === "RETURN" || inwardTripHeaders.includes(popupFilterType)) return "IN QTY";
-        if (popupFilterType === "OUT" || outwardTripHeaders.includes(popupFilterType)) return "OUT QTY";
-        if (popupFilterType === "PENDING DELIVERY") return "PENDING QTY";
+        if (popupFilterType === "OUT" || outwardTakenHeaders.includes(popupFilterType)) return "OUT QTY";
+        if (popupFilterType === "PENDING TAKEN") return "PENDING QTY";
         if (popupFilterType === "PROCESS") return "PROCESS QTY";
         if (popupFilterType === "PROCESS_IN") return "PROCESS IN QTY";
         if (popupFilterType === "PROCESS_OUT") return "PROCESS OUT QTY";
@@ -580,17 +651,43 @@ const InStockReport: React.FC = () => {
     };
 
     const getRowInvNoDisplay = (r: any) => {
+        const isOut = String(r.stock_direction || r.Direction || "").toUpperCase() === "OUT";
         const invNo = r.Do_Inv_No || r.invoice_no || r.Invoice_No;
-        const tripNo = r.Trip_No || r.trip_no || r.Trip_Voucher_Number || r.trip_voucher_number;
-        if (invNo && tripNo) {
-            const tripStr = String(tripNo).trim().toLowerCase().startsWith("trip") ? String(tripNo).trim() : `Trip - ${tripNo}`;
-            return `${invNo} (${tripStr})`;
+        const tripNo = r.Trip_No || r.trip_no;
+        const tripVoucherNo = r.Trip_Voucher_Number || r.trip_voucher_number;
+
+        if (isOut) {
+            const tNo = tripNo || tripVoucherNo;
+            if (invNo && tNo) {
+                const tripStr = String(tNo).trim().toLowerCase().startsWith("trip")
+                    ? String(tNo).trim().replace(/trip/i, "Taken")
+                    : String(tNo).trim().toLowerCase().startsWith("taken")
+                        ? String(tNo).trim()
+                        : `Taken - ${tNo}`;
+                return `${invNo} (${tripStr})`;
+            }
+            if (invNo) return invNo;
+            if (tNo) {
+                return String(tNo).trim().toLowerCase().startsWith("trip")
+                    ? String(tNo).trim().replace(/trip/i, "Taken")
+                    : String(tNo).trim().toLowerCase().startsWith("taken")
+                        ? String(tNo).trim()
+                        : `Taken - ${tNo}`;
+            }
+            return "-";
+        } else {
+            const tripStr = tripNo ? (String(tripNo).trim().toLowerCase().startsWith("trip")
+                ? String(tripNo).trim()
+                : `Trip - ${tripNo}`) : "";
+            
+            if (tripStr && tripVoucherNo) {
+                return `${tripStr} (${tripVoucherNo})`;
+            }
+            if (tripStr) return tripStr;
+            if (tripVoucherNo) return tripVoucherNo;
+            if (invNo) return invNo;
+            return "-";
         }
-        if (invNo) return invNo;
-        if (tripNo) {
-            return String(tripNo).trim().toLowerCase().startsWith("trip") ? String(tripNo).trim() : `Trip - ${tripNo}`;
-        }
-        return "-";
     };
 
     const ledgerRows = useMemo(() => {
@@ -609,153 +706,7 @@ const InStockReport: React.FC = () => {
         });
     }, [popupRows]);
 
-    const filteredPopupRows = useMemo(() => {
-        return ledgerRows.filter((r) => {
-            const isOB = (r.Do_Inv_No || r.invoice_no || r.Invoice_No) === "OB" || String(r.Particulars || r.Narration || "").toLowerCase().includes("opening balance");
-            const isSJ = String(r.Narration || r.Particulars || "").toLowerCase().includes("stock journal") || 
-                         String(r.Voucher_Type || r.voucher_name || "").toLowerCase().includes("stock journal") ||
-                         String(r.module || r.Module || "").toLowerCase().includes("stock journal") ||
-                         r.Direction !== undefined;
-            const isPending = String(r.Record_Type || "").toUpperCase() === "PENDING_DELIVERY" || String(r.Record_Type || "").toUpperCase() === "PENDING" || popupFilterType === "PENDING DELIVERY";
 
-            const { inQty, outQty } = getRowQuantities(r);
-
-            if (popupFilterType === "OB") {
-                return isOB;
-            }
-            if (popupFilterType === "IN") {
-                return !isOB && !isSJ && !isPending && inQty > 0;
-            }
-            if (popupFilterType === "OUT") {
-                return !isSJ && !isPending && outQty > 0;
-            }
-            if (popupFilterType === "PROCESS") {
-                return isSJ;
-            }
-            if (popupFilterType === "PROCESS_IN") {
-                return isSJ && inQty > 0;
-            }
-            if (popupFilterType === "PROCESS_OUT") {
-                return isSJ && outQty > 0;
-            }
-
-            // Lookup corresponding raw record from processApiData for trip / return / delivery filtering
-            if (popupProductInfo) {
-                const godownName = String(popupProductInfo.godownName || "").toLowerCase().trim();
-                const productIdStr = String(popupProductInfo.productId).trim();
-                const key1 = `${productIdStr}_${godownName}`;
-                let recs = mappedProcessData.mapByProductAndGodown[key1] || [];
-                if (recs.length === 0) {
-                    const rawRecs = mappedProcessData.mapByProductIdOnly[productIdStr];
-                    if (rawRecs) {
-                        recs = rawRecs.filter((pr: any) => {
-                            const rGodown = String(pr.godown_name || "").toLowerCase().trim();
-                            return !rGodown || rGodown === godownName;
-                        });
-                    }
-                }
-                const invoiceNo = r.Do_Inv_No || r.invoice_no;
-                const matchingRawRecord = recs.find(x => x.module_voucher_number === invoiceNo);
-                
-                const isTrip = (pr: any) => {
-                    return (
-                        pr.trip_voucher_number !== null ||
-                        pr.trip_id !== null ||
-                        (pr.Trip_No !== null && pr.Trip_No !== undefined && String(pr.Trip_No).trim() !== "") ||
-                        (pr.trip_no !== null && pr.trip_no !== undefined && String(pr.trip_no).trim() !== "")
-                    );
-                };
-                const getTripLabel = (pr: any): string => {
-                    const rawVal = pr.Trip_No || pr.trip_no || pr.trip_voucher_number || pr.trip_id;
-                    if (!rawVal) return "N/A";
-                    const str = String(rawVal).trim();
-                    let label = str.toLowerCase().startsWith("trip") ? str : `Trip - ${str}`;
-                    const loadman = pr.Loadman_Name || pr.loadman_name;
-                    if (loadman) {
-                        label = `${label} - ${String(loadman).trim()}`;
-                    }
-                    return label;
-                };
-
-                const directTripInfo = getRowTripInfo(r);
-
-                if (popupFilterType === "RETURN") {
-                    if (matchingRawRecord) {
-                        return matchingRawRecord.stock_direction?.toUpperCase() === "IN" && !isTrip(matchingRawRecord);
-                    }
-                    return !isOB && !isSJ && !isPending && !directTripInfo.isTrip && Number(r.Stock_In_Qty ?? r.In_Qty ?? r.Bill_Qty ?? 0) > 0;
-                }
-                if (popupFilterType === "PENDING DELIVERY") {
-                    if (matchingRawRecord) {
-                        return matchingRawRecord.stock_direction?.toUpperCase() === "OUT" && !isTrip(matchingRawRecord);
-                    }
-                    return isPending;
-                }
-                if (popupFilterType.startsWith("Trip")) {
-                    const cleanLabel = (lbl: string) => {
-                        const parts = lbl.split(" - ");
-                        return parts.slice(0, 2).join(" - ").trim().toLowerCase();
-                    };
-                    if (directTripInfo.isTrip && cleanLabel(directTripInfo.tripLabel) === cleanLabel(popupFilterType)) {
-                        return true;
-                    }
-                    if (matchingRawRecord) {
-                        return isTrip(matchingRawRecord) && cleanLabel(getTripLabel(matchingRawRecord)) === cleanLabel(popupFilterType);
-                    }
-                    return false;
-                }
-            }
-
-            if ((popupFilterType === 'OUT' || (outwardMode && popupFilterType.startsWith('Trip'))) && moduleFilter !== 'ALL') {
-                const rowModule = String(r.module || r.Module || r.voucher_name || r.Voucher_Type || "").toUpperCase().trim();
-                return rowModule.includes(moduleFilter);
-            }
-
-            return true;
-        });
-    }, [ledgerRows, popupFilterType, popupProductInfo, mappedProcessData, outwardMode, moduleFilter]);
-
-    const uniqueRoles = useMemo(() => {
-        const rolesSet = new Set<string>();
-        filteredPopupRows.forEach(row => {
-            if (row.Staff_Involved) {
-                const parts = row.Staff_Involved.split(',');
-                parts.forEach((part: string) => {
-                    const match = part.trim().match(/^(.*?)\s*\((.*?)\)$/);
-                    if (match) {
-                        rolesSet.add(match[2].trim());
-                    }
-                });
-            }
-        });
-        return Array.from(rolesSet).sort();
-    }, [filteredPopupRows]);
-
-    const popupTotals = useMemo(() => {
-        let totalInQty = 0;
-        let totalProcessQty = 0;
-        let totalOutQty = 0;
-        let totalPendingQty = 0;
-        let totalFilteredQty = 0;
-
-        filteredPopupRows.forEach(r => {
-            const { inQty, processQty, outQty, pendingQty } = getRowQuantities(r);
-            totalInQty += inQty;
-            totalProcessQty += processQty;
-            totalOutQty += outQty;
-            totalPendingQty += pendingQty;
-            
-            totalFilteredQty += getRowQtyForFilter(r, popupFilterType);
-        });
-
-        return {
-            totalInQty,
-            totalProcessQty,
-            totalOutQty,
-            totalPendingQty,
-            totalFilteredQty
-        };
-    }, [filteredPopupRows, popupFilterType, popupProductInfo, mappedProcessData]);
 
     const handleSetInwardMode = (val: boolean) => {
         setInwardMode(val);
@@ -949,20 +900,7 @@ const InStockReport: React.FC = () => {
     // Group godown list by parent_godown_name (only including godowns with data)
     const groupedGodowns = useMemo(() => {
         const groups: Record<string, StockAbstractData4[]> = {};
-        const filteredList = (godownListData || []).filter(g => {
-            if (qtyMode === "actQty") {
-                return Number(g.ACt_OB_Qty || 0) !== 0 ||
-                    Number(g.ACt_In_Qty || 0) !== 0 ||
-                    Number(g.ACt_Out_Qty || 0) !== 0 ||
-                    Number(g.CL_ACt_QTY || 0) !== 0;
-            }
-            return Number(g.OB_Qty || 0) !== 0 ||
-                Number(g.IN_Qty || 0) !== 0 ||
-                Number(g.Out_Qty || 0) !== 0 ||
-                Number(g.CL_QTY || 0) !== 0;
-        });
-
-        filteredList.forEach(row => {
+        filteredGodowns.forEach(row => {
             const parent = row.parent_godown_name || "Others";
             if (!groups[parent]) {
                 groups[parent] = [];
@@ -970,7 +908,7 @@ const InStockReport: React.FC = () => {
             groups[parent].push(row);
         });
         return groups;
-    }, [godownListData, qtyMode]);
+    }, [filteredGodowns]);
 
     // Calculate aggregated overall summary of godowns totals
     const grandTotals = useMemo(() => {
@@ -980,7 +918,7 @@ const InStockReport: React.FC = () => {
         let stockOut = 0;
         let closing = 0;
 
-        godownListData.forEach(g => {
+        filteredGodowns.forEach(g => {
             if (qtyMode === "actQty") {
                 opening += Number(g.ACt_OB_Qty || 0);
                 stockIn += Number(g.ACt_In_Qty || 0);
@@ -997,7 +935,7 @@ const InStockReport: React.FC = () => {
         });
 
         return { opening, stockIn, process, stockOut, closing };
-    }, [godownListData, qtyMode]);
+    }, [filteredGodowns, qtyMode]);
 
     // Helper to get mapped details for a product
     const getProductDetails = useMemo(() => {
@@ -1083,17 +1021,25 @@ const InStockReport: React.FC = () => {
                 .filter((r) => r.stock_direction?.toUpperCase() === "OUT")
                 .reduce((sum, r) => sum + Number(r.quantity || 0), 0);
 
-            const outTrips = records.filter(
-                (r) =>
-                    r.stock_direction?.toUpperCase() === "OUT" &&
-                    isTrip(r)
+            const outRecords = records.filter(
+                (r) => r.stock_direction?.toUpperCase() === "OUT"
             );
-            const deliveries = records.filter(
-                (r) =>
-                    r.stock_direction?.toUpperCase() === "OUT" &&
-                    !isTrip(r)
-            );
-            const deliveryQty = deliveries.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+
+            let takenQty = 0;
+            let takenPersonCount = 0;
+            let pendingTakenQty = 0;
+
+            outRecords.forEach((r) => {
+                const qty = Number(r.quantity || 0);
+                const hasTakenByName = r.Taken_By_Name !== null && r.Taken_By_Name !== undefined && String(r.Taken_By_Name).trim() !== "";
+                if (hasTakenByName) {
+                    takenQty += qty;
+                    const persons = String(r.Taken_By_Name).split(",").map(p => p.trim()).filter(Boolean);
+                    takenPersonCount += persons.length;
+                } else {
+                    pendingTakenQty += qty;
+                }
+            });
 
             return {
                 trips,
@@ -1102,8 +1048,9 @@ const InStockReport: React.FC = () => {
                 procInQty,
                 procOutQty,
                 outwardQty,
-                outTrips,
-                deliveryQty,
+                takenQty,
+                takenPersonCount,
+                pendingTakenQty,
                 hasModuleTransactions
             };
         };
@@ -1111,26 +1058,28 @@ const InStockReport: React.FC = () => {
 
 
 
-    // List of unique brands for filtering in detailed view
-    const brands = useMemo(() => {
+    // List of unique group values for filtering chips in detailed view
+    const groupChips = useMemo(() => {
         const set = new Set<string>();
         (detailedStockData || []).forEach(x => {
-            const b = x.Brand || x.Group_Name;
-            if (b) set.add(b);
+            const val = x[groupByColumn];
+            if (val) set.add(String(val));
         });
         return ["All", ...Array.from(set).sort()];
-    }, [detailedStockData]);
+    }, [detailedStockData, groupByColumn]);
 
-    // Filtered data based on search and brand filter
+    // Filtered data based on search and active group value
     const filteredDetailedData = useMemo(() => {
-        return (detailedStockData || []).filter((item) => {
+        const filtered = (detailedStockData || []).filter((item) => {
             const productName = item.stock_item_name || item.Stock_Item || "";
             const brandName = item.Brand || item.Group_Name || "";
+            const groupVal = String(item[groupByColumn] || "");
             const matchesSearch = productName.toLowerCase().includes(searchText.toLowerCase()) ||
-                brandName.toLowerCase().includes(searchText.toLowerCase());
-            const matchesBrand = selectedBrand === "All" || brandName === selectedBrand;
+                brandName.toLowerCase().includes(searchText.toLowerCase()) ||
+                groupVal.toLowerCase().includes(searchText.toLowerCase());
+            const matchesGroup = selectedBrand === "All" || groupVal === selectedBrand;
 
-            if (!matchesSearch || !matchesBrand) return false;
+            if (!matchesSearch || !matchesGroup) return false;
 
             if (moduleFilter !== 'ALL') {
                 const { hasModuleTransactions } = getProductDetails(item);
@@ -1156,7 +1105,26 @@ const InStockReport: React.FC = () => {
 
             return true;
         });
-    }, [detailedStockData, searchText, selectedBrand, inwardMode, processMode, outwardMode, getProductDetails, qtyKeys, processApiData, moduleFilter]);
+
+        // Sort items so identical group values cluster together, and then by enabled columns in order
+        const sortedCols = [...enabledConfigColumns].sort((a, b) => a.order - b.order);
+        return filtered.sort((a, b) => {
+            // First sort by groupByColumn
+            const valGroupByA = String(a[groupByColumn] || "Others").toLowerCase();
+            const valGroupByB = String(b[groupByColumn] || "Others").toLowerCase();
+            const cmpGroupBy = valGroupByA.localeCompare(valGroupByB, undefined, { numeric: true });
+            if (cmpGroupBy !== 0) return cmpGroupBy;
+
+            // Then sort by each enabled column in order
+            for (const col of sortedCols) {
+                const valA = String(a[col.key] || "").toLowerCase();
+                const valB = String(b[col.key] || "").toLowerCase();
+                const cmp = valA.localeCompare(valB, undefined, { numeric: true });
+                if (cmp !== 0) return cmp;
+            }
+            return 0;
+        });
+    }, [detailedStockData, searchText, selectedBrand, groupByColumn, inwardMode, processMode, outwardMode, getProductDetails, qtyKeys, processApiData, moduleFilter, enabledConfigColumns]);
 
     const filteredData = useMemo(() => {
         if (!isPivotMode) return filteredDetailedData;
@@ -1166,14 +1134,14 @@ const InStockReport: React.FC = () => {
         filteredDetailedData.forEach(item => {
             const groupKeyParts: string[] = [];
 
-            // Always group by Brand
-            const brandVal = item.Brand || item.Group_Name || "Others";
-            groupKeyParts.push(brandVal);
+            // Group by the selected groupByColumn
+            const groupVal = String(item[groupByColumn] || "Others");
+            groupKeyParts.push(groupVal);
 
             // Add other enabled columns that are NOT product-specific identifiers
             const excludedKeys = ["stock_item_name", "Stock_Item", "Product_Id", "POS_Item_Name", "Item_Name_Modified"];
             enabledConfigColumns.forEach(col => {
-                if (!excludedKeys.includes(col.key) && col.key !== "Brand" && col.key !== "Group_Name") {
+                if (!excludedKeys.includes(col.key) && col.key !== groupByColumn) {
                     groupKeyParts.push(String(item[col.key] ?? ""));
                 }
             });
@@ -1215,30 +1183,24 @@ const InStockReport: React.FC = () => {
                 "Process_IN_OUT_Qty"
             ];
             numericKeys.forEach(k => {
-                if (item[k] !== undefined && item[k] !== null) {
-                    g[k] = (Number(g[k]) || 0) + (Number(item[k]) || 0);
-                }
+                g[k] = Number(g[k]) + Number(item[k] || 0);
             });
         });
 
-        return Object.values(groups);
-    }, [filteredDetailedData, enabledConfigColumns, isPivotMode]);
+            return Object.values(groups);
+    }, [filteredDetailedData, enabledConfigColumns, isPivotMode, groupByColumn]);
 
     const numFilteredAndSortedRows = filteredData;
 
     const getTripLabel = React.useCallback((t: any): string => {
-        const rawVal = t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id;
-        if (!rawVal) return "N/A";
-        const str = String(rawVal).trim();
-        let label = str.toLowerCase().startsWith("trip") ? str : `Trip - ${str}`;
-        const loadman = t.Loadman_Name || t.loadman_name;
-        if (loadman) {
-            label = `${label} - ${String(loadman).trim()}`;
-        }
-        return label;
-    }, []);
+        return getTripOrTakenLabel(t, false);
+    }, [getTripOrTakenLabel]);
 
     const getQtyForTrip = React.useCallback((tripsList: any[], label: string, itemWeight: number = 1): number => {
+        if (label === "Trip In") {
+            const total = tripsList.reduce((sum, t) => sum + Number(t.quantity || 0), 0);
+            return qtyMode === "bags" ? Math.round(total / itemWeight) : total;
+        }
         const total = tripsList
             .filter(t => getTripLabel(t) === label)
             .reduce((sum, t) => sum + Number(t.quantity || 0), 0);
@@ -1247,6 +1209,9 @@ const InStockReport: React.FC = () => {
 
     // Unique inward trip headers in filteredData
     const inwardTripHeaders = useMemo(() => {
+        if (viewMode === "cumulative") {
+            return ["Trip In"];
+        }
         const set = new Set<string>();
         filteredData.forEach((item) => {
             const { trips } = getProductDetails(item);
@@ -1255,19 +1220,107 @@ const InStockReport: React.FC = () => {
             });
         });
         return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    }, [filteredData, getProductDetails, getTripLabel]);
+    }, [filteredData, getProductDetails, getTripLabel, viewMode]);
 
-    // Unique outward trip headers in filteredData
-    const outwardTripHeaders = useMemo(() => {
+    const getQtyForTaken = React.useCallback((item: stockWiseReport, label: string): { qty: number; persons: number } => {
+        const godownName = String(item.Godown_Name || selectedGodown?.godown_name || "").toLowerCase().trim();
+        const productIds = (item as any).Product_Ids;
+        const pIdsToSearch = Array.isArray(productIds) && productIds.length > 0 ? productIds : [item.Product_Id];
+        let records: any[] = [];
+        pIdsToSearch.forEach((pId) => {
+            if (!pId && pId !== 0) return;
+            const strId = String(pId).trim();
+            const key1 = `${strId}_${godownName}`;
+            let recs = mappedProcessData.mapByProductAndGodown[key1];
+            if (!recs || recs.length === 0) {
+                const rawRecs = mappedProcessData.mapByProductIdOnly[strId];
+                if (rawRecs) {
+                    recs = rawRecs.filter((r: any) => {
+                        const rGodown = String(r.godown_name || "").toLowerCase().trim();
+                        return !rGodown || rGodown === godownName;
+                    });
+                }
+            }
+            if (recs && recs.length > 0) {
+                records = [...records, ...recs];
+            }
+        });
+
+        const outRecords = records.filter(r => r.stock_direction?.toUpperCase() === "OUT");
+
+        if (label === "Taken") {
+            let qty = 0;
+            let personsCount = 0;
+            outRecords.forEach(r => {
+                if (r.Taken_By_Name) {
+                    qty += Number(r.quantity || 0);
+                    const names = String(r.Taken_By_Name).split(",").map(n => n.trim()).filter(Boolean);
+                    personsCount += names.length;
+                }
+            });
+            const finalQty = qtyMode === "bags" ? Math.round(qty / getItemWeight(item)) : qty;
+            return { qty: finalQty, persons: personsCount };
+        } else {
+            const nameToMatch = label.replace(/^Taken\s*-\s*/i, "").trim().toLowerCase();
+            let qty = 0;
+            let personsCount = 0;
+            outRecords.forEach(r => {
+                if (r.Taken_By_Name) {
+                    const names = String(r.Taken_By_Name).split(",").map(n => n.trim()).filter(Boolean);
+                    if (names.some(n => n.toLowerCase() === nameToMatch)) {
+                        qty += Number(r.quantity || 0);
+                        personsCount += 1;
+                    }
+                }
+            });
+            const finalQty = qtyMode === "bags" ? Math.round(qty / getItemWeight(item)) : qty;
+            return { qty: finalQty, persons: personsCount };
+        }
+    }, [selectedGodown, mappedProcessData, qtyMode]);
+
+    // Unique outward taken headers in filteredData
+    const outwardTakenHeaders = useMemo(() => {
+        if (viewMode === "cumulative") {
+            return ["Taken"];
+        }
         const set = new Set<string>();
         filteredData.forEach((item) => {
-            const { outTrips } = getProductDetails(item);
-            outTrips.forEach((t) => {
-                set.add(getTripLabel(t));
+            const godownName = String(item.Godown_Name || selectedGodown?.godown_name || "").toLowerCase().trim();
+            const productIds = (item as any).Product_Ids;
+            const pIdsToSearch = Array.isArray(productIds) && productIds.length > 0 ? productIds : [item.Product_Id];
+            let records: any[] = [];
+            pIdsToSearch.forEach((pId) => {
+                if (!pId && pId !== 0) return;
+                const strId = String(pId).trim();
+                const key1 = `${strId}_${godownName}`;
+                let recs = mappedProcessData.mapByProductAndGodown[key1];
+                if (!recs || recs.length === 0) {
+                    const rawRecs = mappedProcessData.mapByProductIdOnly[strId];
+                    if (rawRecs) {
+                        recs = rawRecs.filter((r: any) => {
+                            const rGodown = String(r.godown_name || "").toLowerCase().trim();
+                            return !rGodown || rGodown === godownName;
+                        });
+                    }
+                }
+                if (recs && recs.length > 0) {
+                    records = [...records, ...recs];
+                }
+            });
+            
+            const outRecords = records.filter(r => r.stock_direction?.toUpperCase() === "OUT");
+            outRecords.forEach(r => {
+                if (r.Taken_By_Name) {
+                    const names = String(r.Taken_By_Name).split(",").map(n => n.trim()).filter(Boolean);
+                    names.forEach(name => {
+                        set.add(`Taken - ${name}`);
+                    });
+                }
             });
         });
         return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    }, [filteredData, getProductDetails, getTripLabel]);
+    }, [filteredData, selectedGodown, mappedProcessData, viewMode]);
+
 
     // Available split-up options for dropdowns
     const allInwardOptions = useMemo(() => {
@@ -1279,8 +1332,8 @@ const InStockReport: React.FC = () => {
     }, []);
 
     const allOutwardOptions = useMemo(() => {
-        return [...outwardTripHeaders, "PENDING DELIVERY"];
-    }, [outwardTripHeaders]);
+        return [...outwardTakenHeaders, "PENDING TAKEN"];
+    }, [outwardTakenHeaders]);
 
     // Currently visible columns derived for dropdown display
     const visibleInwardColumns = useMemo(() => {
@@ -1334,18 +1387,197 @@ const InStockReport: React.FC = () => {
     }, [filteredData, inwardTripHeaders, getProductDetails, getQtyForTrip]);
 
     // Calculate total quantity for each trip in outwardMode
-    const outwardTripTotals = useMemo(() => {
-        const totals: Record<string, number> = {};
-        outwardTripHeaders.forEach(label => {
-            let sum = 0;
+    const outwardTakenTotals = useMemo(() => {
+        const totals: Record<string, { qty: number; persons: number }> = {};
+        outwardTakenHeaders.forEach(label => {
+            let sumQty = 0;
+            let sumPersons = 0;
             filteredData.forEach(item => {
-                const { outTrips } = getProductDetails(item);
-                sum += getQtyForTrip(outTrips, label, getItemWeight(item));
+                const { takenQty, takenPersonCount } = getProductDetails(item);
+                sumQty += qtyMode === "bags" ? Math.round(takenQty / getItemWeight(item)) : takenQty;
+                sumPersons += takenPersonCount;
             });
-            totals[label] = sum;
+            totals[label] = { qty: sumQty, persons: sumPersons };
         });
         return totals;
-    }, [filteredData, outwardTripHeaders, getProductDetails, getQtyForTrip]);
+    }, [filteredData, outwardTakenHeaders, getProductDetails, qtyMode]);
+
+    const getTakenByNameFromStaffInvolved = (staffInvolved: string | null | undefined): string => {
+        if (!staffInvolved) return "";
+        const parts = staffInvolved.split(",");
+        const takenNames: string[] = [];
+        parts.forEach(part => {
+            const trimmed = part.trim();
+            const match = trimmed.match(/^(.*?)\s*\(Taken\)$/i);
+            if (match) {
+                takenNames.push(match[1].trim());
+            }
+        });
+        return takenNames.join(",");
+    };
+
+    const filteredPopupRows = useMemo(() => {
+        return ledgerRows.filter((r) => {
+            const isOB = (r.Do_Inv_No || r.invoice_no || r.Invoice_No) === "OB" || String(r.Particulars || r.Narration || "").toLowerCase().includes("opening balance");
+            const isSJ = String(r.Narration || r.Particulars || "").toLowerCase().includes("stock journal") ||
+                String(r.Voucher_Type || r.voucher_name || "").toLowerCase().includes("stock journal") ||
+                String(r.module || r.Module || "").toLowerCase().includes("stock journal") ||
+                r.Direction !== undefined;
+            const isPending = String(r.Record_Type || "").toUpperCase() === "PENDING_DELIVERY" || String(r.Record_Type || "").toUpperCase() === "PENDING" || popupFilterType === "PENDING TAKEN";
+
+            const { inQty, outQty } = getRowQuantities(r);
+
+            if (popupFilterType === "OB") {
+                return isOB;
+            }
+            if (popupFilterType === "IN") {
+                return !isOB && !isSJ && !isPending && inQty > 0;
+            }
+            if (popupFilterType === "OUT") {
+                return !isSJ && !isPending && outQty > 0;
+            }
+            if (popupFilterType === "PROCESS") {
+                return isSJ;
+            }
+            if (popupFilterType === "PROCESS_IN") {
+                return isSJ && inQty > 0;
+            }
+            if (popupFilterType === "PROCESS_OUT") {
+                return isSJ && outQty > 0;
+            }
+
+            // Lookup corresponding raw record from processApiData for trip / return / delivery filtering
+            if (popupProductInfo) {
+                const godownName = String(popupProductInfo.godownName || "").toLowerCase().trim();
+                const productIdStr = String(popupProductInfo.productId).trim();
+                const key1 = `${productIdStr}_${godownName}`;
+                let recs = mappedProcessData.mapByProductAndGodown[key1] || [];
+                if (recs.length === 0) {
+                    const rawRecs = mappedProcessData.mapByProductIdOnly[productIdStr];
+                    if (rawRecs) {
+                        recs = rawRecs.filter((pr: any) => {
+                            const rGodown = String(pr.godown_name || "").toLowerCase().trim();
+                            return !rGodown || rGodown === godownName;
+                        });
+                    }
+                }
+                const invoiceNo = r.Do_Inv_No || r.invoice_no;
+                const matchingRawRecord = recs.find(x => x.module_voucher_number === invoiceNo);
+
+                const isTrip = (pr: any) => {
+                    return (
+                        pr.trip_voucher_number !== null ||
+                        pr.trip_id !== null ||
+                        (pr.Trip_No !== null && pr.Trip_No !== undefined && String(pr.Trip_No).trim() !== "") ||
+                        (pr.trip_no !== null && pr.trip_no !== undefined && String(pr.trip_no).trim() !== "")
+                    );
+                };
+
+                const isOutwardRecord = outwardMode ||
+                    popupFilterType === "OUT" ||
+                    popupFilterType === "PENDING TAKEN" ||
+                    popupFilterType === "Taken" ||
+                    outwardTakenHeaders.includes(popupFilterType) ||
+                    (popupFilterType === "ALL" && String(r.Direction || r.stock_direction || "").toUpperCase() === "OUT");
+
+                const directTripInfo = getRowTripOrTakenInfo(r, isOutwardRecord);
+                if (popupFilterType === "Trip In") {
+                    if (matchingRawRecord) {
+                        return matchingRawRecord.stock_direction?.toUpperCase() === "IN" && isTrip(matchingRawRecord);
+                    }
+                    return directTripInfo.isTrip;
+                }
+                if (popupFilterType === "RETURN") {
+                    if (matchingRawRecord) {
+                        return matchingRawRecord.stock_direction?.toUpperCase() === "IN" && !isTrip(matchingRawRecord);
+                    }
+                    return !isOB && !isSJ && !isPending && !directTripInfo.isTrip && Number(r.Stock_In_Qty ?? r.In_Qty ?? r.Bill_Qty ?? 0) > 0;
+                }
+                if (popupFilterType === "PENDING TAKEN") {
+                    if (matchingRawRecord) {
+                        const rawTakenName = matchingRawRecord.Taken_By_Name || getTakenByNameFromStaffInvolved(matchingRawRecord.Staff_Involved);
+                        const hasTakenName = rawTakenName !== null && rawTakenName !== undefined && String(rawTakenName).trim() !== "";
+                        return matchingRawRecord.stock_direction?.toUpperCase() === "OUT" && !hasTakenName;
+                    }
+                    const rTakenName = r.Taken_By_Name || getTakenByNameFromStaffInvolved(r.Staff_Involved);
+                    const rHasTakenName = rTakenName !== null && rTakenName !== undefined && String(rTakenName).trim() !== "";
+                    return String(r.Direction || r.stock_direction || "").toUpperCase() === "OUT" && !rHasTakenName;
+                }
+                if (popupFilterType === "Taken") {
+                    if (matchingRawRecord) {
+                        const rawTakenName = matchingRawRecord.Taken_By_Name || getTakenByNameFromStaffInvolved(matchingRawRecord.Staff_Involved);
+                        const hasTakenName = rawTakenName !== null && rawTakenName !== undefined && String(rawTakenName).trim() !== "";
+                        return matchingRawRecord.stock_direction?.toUpperCase() === "OUT" && hasTakenName;
+                    }
+                    const rTakenName = r.Taken_By_Name || getTakenByNameFromStaffInvolved(r.Staff_Involved);
+                    const rHasTakenName = rTakenName !== null && rTakenName !== undefined && String(rTakenName).trim() !== "";
+                    return String(r.Direction || r.stock_direction || "").toUpperCase() === "OUT" && rHasTakenName;
+                }
+                if (popupFilterType.startsWith("Trip") || (popupFilterType.startsWith("Taken") && popupFilterType !== "Taken")) {
+                    const cleanLabel = (lbl: string) => {
+                        const parts = lbl.split(" - ");
+                        return parts.slice(0, 2).join(" - ").trim().toLowerCase();
+                    };
+                    if (directTripInfo.isTrip && cleanLabel(directTripInfo.label) === cleanLabel(popupFilterType)) {
+                        return true;
+                    }
+                    if (matchingRawRecord) {
+                        return isTrip(matchingRawRecord) && cleanLabel(getTripOrTakenLabel(matchingRawRecord, isOutwardRecord)) === cleanLabel(popupFilterType);
+                    }
+                    return false;
+                }
+            }
+
+            if ((popupFilterType === 'OUT' || (outwardMode && popupFilterType.startsWith('Taken'))) && moduleFilter !== 'ALL') {
+                const rowModule = String(r.module || r.Module || r.voucher_name || r.Voucher_Type || "").toUpperCase().trim();
+                return rowModule.includes(moduleFilter);
+            }
+
+            return true;
+        });
+    }, [ledgerRows, popupFilterType, popupProductInfo, mappedProcessData, outwardMode, moduleFilter]);
+
+    const uniqueRoles = useMemo(() => {
+        const rolesSet = new Set<string>();
+        filteredPopupRows.forEach(row => {
+            if (row.Staff_Involved) {
+                const parts = row.Staff_Involved.split(',');
+                parts.forEach((part: string) => {
+                    const match = part.trim().match(/^(.*?)\s*\((.*?)\)$/);
+                    if (match) {
+                        rolesSet.add(match[2].trim());
+                    }
+                });
+            }
+        });
+        return Array.from(rolesSet).sort();
+    }, [filteredPopupRows]);
+
+    const popupTotals = useMemo(() => {
+        let totalInQty = 0;
+        let totalProcessQty = 0;
+        let totalOutQty = 0;
+        let totalPendingQty = 0;
+        let totalFilteredQty = 0;
+
+        filteredPopupRows.forEach(r => {
+            const { inQty, processQty, outQty, pendingQty } = getRowQuantities(r);
+            totalInQty += inQty;
+            totalProcessQty += processQty;
+            totalOutQty += outQty;
+            totalPendingQty += pendingQty;
+
+            totalFilteredQty += getRowQtyForFilter(r, popupFilterType);
+        });
+
+        return {
+            totalInQty,
+            totalProcessQty,
+            totalOutQty,
+            totalPendingQty,
+            totalFilteredQty
+        };
+    }, [filteredPopupRows, popupFilterType, popupProductInfo, mappedProcessData]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -1362,7 +1594,7 @@ const InStockReport: React.FC = () => {
             window.removeEventListener("resize", handleResize);
             clearTimeout(t);
         };
-    }, [filteredData, inwardMode, outwardMode, processMode, columnsConfig, searchText, page, rowsPerPage]);
+    }, [filteredData, inwardMode, outwardMode, processMode, columnsConfig, searchText, page, rowsPerPage, selectedGodown]);
 
     // Slice data for pagination
     const paginatedData = useMemo(() => {
@@ -1401,9 +1633,9 @@ const InStockReport: React.FC = () => {
         let stockIn = 0;
         let procIn = 0;
         let procOut = 0;
-        let tripQtyTotal = 0;
+        let takenQtyTotal = 0;
         let returnQtyTotal = 0;
-        let outTripQtyTotal = 0;
+        let outTakenQtyTotal = 0;
         let deliveryQtyTotal = 0;
         let stockOutTotal = 0;
         let closing = 0;
@@ -1417,27 +1649,25 @@ const InStockReport: React.FC = () => {
             opening += op;
             closing += clQty;
 
-            const { trips, returnQty, stockInQty, procInQty, procOutQty, outwardQty, outTrips, deliveryQty } = getProductDetails(item);
+            const { trips, returnQty, stockInQty, procInQty, procOutQty, outwardQty, takenQty, pendingTakenQty } = getProductDetails(item);
 
             if (processApiData.length > 0) {
                 const weight = getItemWeight(item);
-                const itemTripQtyBase = trips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
-                const itemTripQty = qtyMode === "bags" ? Math.round(itemTripQtyBase / weight) : itemTripQtyBase;
+                const itemTakenQtyBase = trips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+                const itemTakenQty = qtyMode === "bags" ? Math.round(itemTakenQtyBase / weight) : itemTakenQtyBase;
 
                 const itemReturnQty = returnQty;
                 const itemStockIn = stockInQty;
                 const itemProcIn = procInQty;
                 const itemProcOut = procOutQty;
 
-                const itemOutTripQtyBase = outTrips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
-                const itemOutTripQty = qtyMode === "bags" ? Math.round(itemOutTripQtyBase / weight) : itemOutTripQtyBase;
-
-                const itemDeliveryQty = deliveryQty;
+                const itemOutTakenQty = qtyMode === "bags" ? Math.round(takenQty / weight) : takenQty;
+                const itemDeliveryQty = qtyMode === "bags" ? Math.round(pendingTakenQty / weight) : pendingTakenQty;
                 const itemStockOut = outwardQty;
 
-                tripQtyTotal += itemTripQty;
+                takenQtyTotal += itemTakenQty;
                 returnQtyTotal += itemReturnQty;
-                outTripQtyTotal += itemOutTripQty;
+                outTakenQtyTotal += itemOutTakenQty;
                 deliveryQtyTotal += itemDeliveryQty;
                 procIn += itemProcIn;
                 procOut += itemProcOut;
@@ -1454,13 +1684,13 @@ const InStockReport: React.FC = () => {
                 const t1 = Math.round(inQty * 0.5);
                 const t2 = Math.round(inQty * 0.3);
                 const t3 = Math.max(0, inQty - t1 - t2);
-                tripQtyTotal += t1 + t2 + t3;
+                takenQtyTotal += t1 + t2 + t3;
 
                 const o1 = Math.round(outQty * 0.6);
                 const o2 = Math.round(outQty * 0.2);
                 const o3 = Math.round(outQty * 0.1);
                 const del = Math.max(0, outQty - o1 - o2 - o3);
-                outTripQtyTotal += o1 + o2 + o3;
+                outTakenQtyTotal += o1 + o2 + o3;
                 deliveryQtyTotal += del;
             }
         });
@@ -1470,9 +1700,9 @@ const InStockReport: React.FC = () => {
             stockIn,
             procIn,
             procOut,
-            tripQtyTotal,
+            takenQtyTotal,
             returnQtyTotal,
-            outTripQtyTotal,
+            outTakenQtyTotal,
             deliveryQtyTotal,
             stockOutTotal,
             closing,
@@ -1508,16 +1738,14 @@ const InStockReport: React.FC = () => {
 
     // Recalculated row-level Stock Out Quantity summing only visible columns
     const getRecalculatedStockOutQty = React.useCallback((item: stockWiseReport) => {
-        const { outTrips, deliveryQty } = getProductDetails(item);
-        if (outTrips.length > 0 || deliveryQty > 0) {
+        const { takenQty, pendingTakenQty, outwardQty } = getProductDetails(item);
+        if (outwardQty > 0) {
             let sum = 0;
-            outwardTripHeaders.forEach((tripLabel) => {
-                if (!hiddenOutwardColumns.includes(tripLabel)) {
-                    sum += getQtyForTrip(outTrips, tripLabel, getItemWeight(item));
-                }
-            });
-            if (!hiddenOutwardColumns.includes("PENDING DELIVERY")) {
-                sum += deliveryQty;
+            if (!hiddenOutwardColumns.includes("Taken")) {
+                sum += qtyMode === "bags" ? Math.round(takenQty / getItemWeight(item)) : takenQty;
+            }
+            if (!hiddenOutwardColumns.includes("PENDING TAKEN")) {
+                sum += qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
             }
             return sum;
         } else {
@@ -1528,7 +1756,7 @@ const InStockReport: React.FC = () => {
             if (visibleCount === allOutwardOptions.length) return rawStockOut;
             return (rawStockOut * visibleCount) / allOutwardOptions.length;
         }
-    }, [getProductDetails, outwardTripHeaders, hiddenOutwardColumns, getQtyForTrip, visibleOutwardColumns, allOutwardOptions, getStockOutTotal]);
+    }, [getProductDetails, outwardTakenHeaders, hiddenOutwardColumns, qtyMode, visibleOutwardColumns, allOutwardOptions, getStockOutTotal]);
 
     // Recalculated row-level Process Quantity summing only visible columns
     const getRecalculatedProcessQty = React.useCallback((item: stockWiseReport) => {
@@ -1624,26 +1852,26 @@ const InStockReport: React.FC = () => {
                         excelData.push(row);
                     });
                 } else if (outwardMode) {
-                    const visibleTrips = outwardTripHeaders.filter(t => !hiddenOutwardColumns.includes(t));
-                    const isPendingVisible = !hiddenOutwardColumns.includes("PENDING DELIVERY");
+                    const visibleTrips = outwardTakenHeaders.filter(t => !hiddenOutwardColumns.includes(t));
+                    const isPendingVisible = !hiddenOutwardColumns.includes("PENDING TAKEN");
 
                     const outwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
-                    if (isPendingVisible) outwardHeaderRow.push("Pending Delivery");
+                    if (isPendingVisible) outwardHeaderRow.push("Pending Taken");
                     outwardHeaderRow.push("Total Outward");
                     excelData.push(outwardHeaderRow);
-
                     filteredData.forEach((item, idx) => {
-                        const { outTrips, deliveryQty } = getProductDetails(item);
+                        const { pendingTakenQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
 
                         visibleTrips.forEach(tripLabel => {
-                            const qty = getQtyForTrip(outTrips, tripLabel);
-                            row.push(qty === 0 ? "-" : fmt(qty));
+                            const data = getQtyForTaken(item, tripLabel);
+                            row.push(data.qty === 0 ? "-" : (data.persons > 0 ? `${fmt(data.qty)} (${data.persons})` : fmt(data.qty)));
                         });
 
                         if (isPendingVisible) {
-                            row.push(fmt(deliveryQty));
+                            const pQty = qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
+                            row.push(pQty === 0 ? "-" : fmt(pQty));
                         }
                         row.push(fmt(getRecalculatedStockOutQty(item)));
                         excelData.push(row);
@@ -1784,26 +2012,27 @@ const InStockReport: React.FC = () => {
                         body.push(row);
                     });
                 } else if (outwardMode) {
-                    const visibleTrips = outwardTripHeaders.filter(t => !hiddenOutwardColumns.includes(t));
-                    const isPendingVisible = !hiddenOutwardColumns.includes("PENDING DELIVERY");
+                    const visibleTrips = outwardTakenHeaders.filter(t => !hiddenOutwardColumns.includes(t));
+                    const isPendingVisible = !hiddenOutwardColumns.includes("PENDING TAKEN");
 
                     const outwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
-                    if (isPendingVisible) outwardHeaderRow.push("Pending Delivery");
+                    if (isPendingVisible) outwardHeaderRow.push("Pending Taken");
                     outwardHeaderRow.push("Total Outward");
                     headers = [outwardHeaderRow];
 
                     filteredData.forEach((item, idx) => {
-                        const { outTrips, deliveryQty } = getProductDetails(item);
+                        const { pendingTakenQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
 
                         visibleTrips.forEach(tripLabel => {
-                            const qty = getQtyForTrip(outTrips, tripLabel);
-                            row.push(fmtStr(qty));
+                            const data = getQtyForTaken(item, tripLabel);
+                            row.push(data.qty === 0 ? "-" : (data.persons > 0 ? `${fmtStr(data.qty)} (${data.persons})` : fmtStr(data.qty)));
                         });
 
                         if (isPendingVisible) {
-                            row.push(fmtStr(deliveryQty));
+                            const pQty = qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
+                            row.push(pQty === 0 ? "-" : fmtStr(pQty));
                         }
                         row.push(fmtStr(getRecalculatedStockOutQty(item)));
                         body.push(row);
@@ -1906,12 +2135,12 @@ const InStockReport: React.FC = () => {
         if (inwardMode) {
             const visibleTripsCount = inwardTripHeaders.filter(t => !hiddenInwardColumns.includes(t)).length;
             const isReturnVisible = !hiddenInwardColumns.includes("RETURN") ? 1 : 0;
-            return L + visibleTripsCount + isReturnVisible + 2; // S.No + Config + Trips + Return + Total Stock In
+            return L + visibleTripsCount + isReturnVisible + 2; // S.No + Config + Trip + Return + Total Stock In
         }
         if (outwardMode) {
-            const visibleTripsCount = outwardTripHeaders.filter(t => !hiddenOutwardColumns.includes(t)).length;
-            const isPendingVisible = !hiddenOutwardColumns.includes("PENDING DELIVERY") ? 1 : 0;
-            return L + visibleTripsCount + isPendingVisible + 2; // S.No + Config + Trips + Pending Delivery + Total Outward
+            const visibleTripsCount = outwardTakenHeaders.filter(t => !hiddenOutwardColumns.includes(t)).length;
+            const isPendingVisible = !hiddenOutwardColumns.includes("PENDING TAKEN") ? 1 : 0;
+            return L + visibleTripsCount + isPendingVisible + 2; // S.No + Config + Taken + Pending Taken + Total Outward
         }
         if (processMode) {
             const visibleIn = !hiddenProcessColumns.includes("PROCESS IN") ? 1 : 0;
@@ -1923,12 +2152,12 @@ const InStockReport: React.FC = () => {
 
     const showRetailerColumn = useMemo(() => {
         return !(
-            popupFilterType === 'IN' || 
-            popupFilterType === 'RETURN' || 
-            inwardTripHeaders.includes(popupFilterType) || 
-            popupFilterType === 'PROCESS' || 
-            popupFilterType === 'PROCESS_IN' || 
-            popupFilterType === 'PROCESS_OUT' || 
+            popupFilterType === 'IN' ||
+            popupFilterType === 'RETURN' ||
+            inwardTripHeaders.includes(popupFilterType) ||
+            popupFilterType === 'PROCESS' ||
+            popupFilterType === 'PROCESS_IN' ||
+            popupFilterType === 'PROCESS_OUT' ||
             (inwardMode && popupFilterType.startsWith('Trip'))
         );
     }, [popupFilterType, inwardMode, inwardTripHeaders]);
@@ -1946,20 +2175,39 @@ const InStockReport: React.FC = () => {
                 showPages={true}
                 settingsSlot={
                     selectedGodown && (
-                        <Tooltip title="Table Settings">
-                            <IconButton
-                                size="small"
-                                onClick={(e) => setSettingsAnchor(e.currentTarget)}
-                                sx={{
-                                    height: 24,
-                                    width: 24,
-                                    backgroundColor: "#fff",
-                                    borderRadius: 0.5,
-                                }}
-                            >
-                                <SettingsIcon fontSize="small" />
-                            </IconButton>
-                        </Tooltip>
+                        <Box display="flex" alignItems="center" gap={1}>
+                            {/* Group By Selector Icon */}
+                            <Tooltip title="Group By">
+                                <IconButton
+                                    size="small"
+                                    onClick={(e) => setGroupByAnchor(e.currentTarget)}
+                                    sx={{
+                                        height: 24,
+                                        width: 24,
+                                        backgroundColor: "#fff",
+                                        borderRadius: 0.5,
+                                    }}
+                                >
+                                    <GroupWorkIcon fontSize="small" />
+                                </IconButton>
+                            </Tooltip>
+
+                            {/* Column settings icon */}
+                            <Tooltip title="Table Settings">
+                                <IconButton
+                                    size="small"
+                                    onClick={(e) => setSettingsAnchor(e.currentTarget)}
+                                    sx={{
+                                        height: 24,
+                                        width: 24,
+                                        backgroundColor: "#fff",
+                                        borderRadius: 0.5,
+                                    }}
+                                >
+                                    <SettingsIcon fontSize="small" />
+                                </IconButton>
+                            </Tooltip>
+                        </Box>
                     )
                 }
             />
@@ -2008,16 +2256,35 @@ const InStockReport: React.FC = () => {
                                     whiteSpace: "normal",
                                     wordBreak: "break-word",
                                     lineHeight: 1.2,
-                                    fontSize: "0.8rem",
-                                    px: 1.5,
-                                    py: 1.5
+                                    fontSize: "0.72rem",
+                                    px: 1,
+                                    py: 1
                                 }
                             }}
                         >
                             <TableHead>
-                                <TableRow>
+                                <TableRow ref={headerRowRef}>
                                     <TableCell align="center" sx={{ width: "8%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>S.NO</TableCell>
-                                    <TableCell sx={{ width: "27%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>GODOWN NAME</TableCell>
+                                    <TableCell
+                                        sx={{
+                                            width: "27%",
+                                            backgroundColor: "#1E3A8A",
+                                            color: "#fff",
+                                            fontWeight: 600,
+                                            py: 1.5,
+                                            borderRight: "1px solid #cbd5e1",
+                                            cursor: "pointer",
+                                            userSelect: "none"
+                                        }}
+                                        onClick={(e) => {
+                                            setGodownFilterAnchor(e.currentTarget);
+                                            setGodownFilterSearch("");
+                                        }}
+                                    >
+                                        <Box display="flex" alignItems="center" justifyContent="space-between">
+                                            <span>GODOWN NAME</span>
+                                        </Box>
+                                    </TableCell>
                                     <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>OB</TableCell>
                                     <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>STOCK IN</TableCell>
                                     <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5, borderRight: "1px solid #cbd5e1" }}>PROCESS</TableCell>
@@ -2025,22 +2292,22 @@ const InStockReport: React.FC = () => {
                                     <TableCell align="right" sx={{ width: "13%", backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, py: 1.5 }}>CLOSING</TableCell>
                                 </TableRow>
                                 <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
-                                    <TableCell colSpan={2} align="center" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
+                                    <TableCell colSpan={2} align="center" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800 }}>
                                         GRAND TOTAL
                                     </TableCell>
-                                    <TableCell align="right" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                    <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
                                         {grandTotals.opening.toLocaleString()}
                                     </TableCell>
-                                    <TableCell align="right" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                    <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
                                         {grandTotals.stockIn.toLocaleString()}
                                     </TableCell>
-                                    <TableCell align="right" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                    <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
                                         {grandTotals.process.toLocaleString()}
                                     </TableCell>
-                                    <TableCell align="right" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
+                                    <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2 }}>
                                         {grandTotals.stockOut.toLocaleString()}
                                     </TableCell>
-                                    <TableCell align="right" sx={{ position: "sticky", top: "43px", zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#15803d" }}>
+                                    <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#15803d" }}>
                                         {grandTotals.closing.toLocaleString()}
                                     </TableCell>
                                 </TableRow>
@@ -2242,6 +2509,25 @@ const InStockReport: React.FC = () => {
                             </FormControl>
                         )}
 
+                        {(inwardMode || outwardMode) && (
+                            <FormControl size="small" sx={{ minWidth: 130 }}>
+                                <InputLabel id="view-mode-dropdown-label" sx={{ fontSize: "0.82rem", fontWeight: 600, color: "#1E3A8A" }}>
+                                    View Mode
+                                </InputLabel>
+                                <Select
+                                    labelId="view-mode-dropdown-label"
+                                    id="view-mode-dropdown-select"
+                                    value={viewMode}
+                                    onChange={(e) => setViewMode(e.target.value as "cumulative" | "trip")}
+                                    input={<OutlinedInput label="View Mode" />}
+                                    sx={{ bgcolor: "#fff", borderRadius: 1, fontSize: "0.8rem", height: 36 }}
+                                >
+                                    <MenuItem value="cumulative" sx={{ fontSize: "0.8rem", fontWeight: 600 }}>Cumulative</MenuItem>
+                                    <MenuItem value="trip" sx={{ fontSize: "0.8rem", fontWeight: 600 }}>Trip Wise</MenuItem>
+                                </Select>
+                            </FormControl>
+                        )}
+
                         <TextField
                             size="small"
                             placeholder="Search product..."
@@ -2260,16 +2546,19 @@ const InStockReport: React.FC = () => {
 
                     {/* Filters and Brand Chips */}
                     <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", mb: 2 }}>
-                        {brands.map((b) => (
+                        {groupChips.map((b) => (
                             <Chip
                                 key={b}
                                 label={b}
                                 clickable
+                                size="small"
                                 color={selectedBrand === b ? "primary" : "default"}
                                 onClick={() => setSelectedBrand(b)}
                                 sx={{
                                     fontWeight: 600,
-                                    px: 1,
+                                    px: 0.8,
+                                    fontSize: "0.72rem",
+                                    height: 26,
                                     bgcolor: selectedBrand === b ? "#1E3A8A" : "#fff",
                                     border: "1px solid #e2e8f0",
                                     "&:hover": { bgcolor: selectedBrand === b ? "#1e40af" : "#f1f5f9" }
@@ -2292,7 +2581,7 @@ const InStockReport: React.FC = () => {
                                     onClick={() => handleShowInwardColumn(col)}
                                     color="primary"
                                     icon={<AddIcon fontSize="small" />}
-                                    sx={{ fontWeight: 600, bgcolor: "#1e40af", color: "#fff", "& .MuiChip-icon": { color: "#fff" } }}
+                                    sx={{ fontWeight: 600, fontSize: "0.7rem", height: 22, bgcolor: "#1e40af", color: "#fff", "& .MuiChip-icon": { color: "#fff" } }}
                                 />
                             ))}
                         </Box>
@@ -2311,7 +2600,7 @@ const InStockReport: React.FC = () => {
                                     onClick={() => handleShowOutwardColumn(col)}
                                     color="error"
                                     icon={<AddIcon fontSize="small" />}
-                                    sx={{ fontWeight: 600, bgcolor: "#b91c1c", color: "#fff", "& .MuiChip-icon": { color: "#fff" } }}
+                                    sx={{ fontWeight: 600, fontSize: "0.7rem", height: 22, bgcolor: "#b91c1c", color: "#fff", "& .MuiChip-icon": { color: "#fff" } }}
                                 />
                             ))}
                         </Box>
@@ -2330,7 +2619,7 @@ const InStockReport: React.FC = () => {
                                     onClick={() => handleShowProcessColumn(col)}
                                     color="success"
                                     icon={<AddIcon fontSize="small" />}
-                                    sx={{ fontWeight: 600, bgcolor: "#15803d", color: "#fff", "& .MuiChip-icon": { color: "#fff" } }}
+                                    sx={{ fontWeight: 600, fontSize: "0.7rem", height: 22, bgcolor: "#15803d", color: "#fff", "& .MuiChip-icon": { color: "#fff" } }}
                                 />
                             ))}
                         </Box>
@@ -2358,8 +2647,9 @@ const InStockReport: React.FC = () => {
                                     whiteSpace: "normal",
                                     wordBreak: "break-word",
                                     lineHeight: 1.2,
-                                    fontSize: "0.8rem",
-                                    px: 1
+                                    fontSize: "0.72rem",
+                                    px: 0.8,
+                                    py: 0.8
                                 }
                             }}
                         >
@@ -2432,8 +2722,8 @@ const InStockReport: React.FC = () => {
                                                         key={tripLabel}
                                                         align="right"
                                                         sx={{
-                                                            width: 200,
-                                                            minWidth: 200,
+                                                            width: viewMode === "cumulative" ? 120 : 200,
+                                                            minWidth: viewMode === "cumulative" ? 120 : 200,
                                                             backgroundColor: "#1E3A8A",
                                                             color: "#fff",
                                                             fontWeight: 600,
@@ -2643,15 +2933,15 @@ const InStockReport: React.FC = () => {
                                     {/* Show splits for Stock Outwards when outwardMode is active */}
                                     {outwardMode && (
                                         <>
-                                            {outwardTripHeaders.map((tripLabel) => {
+                                            {outwardTakenHeaders.map((tripLabel) => {
                                                 if (hiddenOutwardColumns.includes(tripLabel)) return null;
                                                 return (
                                                     <TableCell
                                                         key={tripLabel}
                                                         align="right"
                                                         sx={{
-                                                            width: 200,
-                                                            minWidth: 200,
+                                                            width: viewMode === "cumulative" ? 120 : 200,
+                                                            minWidth: viewMode === "cumulative" ? 120 : 200,
                                                             backgroundColor: "#1E3A8A",
                                                             color: "#fff",
                                                             fontWeight: 600,
@@ -2672,7 +2962,7 @@ const InStockReport: React.FC = () => {
                                                     </TableCell>
                                                 );
                                             })}
-                                            {!hiddenOutwardColumns.includes("PENDING DELIVERY") && (
+                                            {!hiddenOutwardColumns.includes("PENDING TAKEN") && (
                                                 <TableCell
                                                     align="right"
                                                     sx={{
@@ -2686,10 +2976,10 @@ const InStockReport: React.FC = () => {
                                                     }}
                                                 >
                                                     <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
-                                                        PENDING DELIVERY
+                                                        PENDING TAKEN
                                                         <IconButton
                                                             size="small"
-                                                            onClick={() => handleHideOutwardColumn("PENDING DELIVERY")}
+                                                            onClick={() => handleHideOutwardColumn("PENDING TAKEN")}
                                                             sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
                                                         >
                                                             <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
@@ -2753,7 +3043,7 @@ const InStockReport: React.FC = () => {
                                                 {inwardTripHeaders.map((tripLabel) => {
                                                     if (hiddenInwardColumns.includes(tripLabel)) return null;
                                                     return (
-                                                        <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 200, minWidth: 200 }}>
+                                                                                         <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: viewMode === "cumulative" ? 120 : 200, minWidth: viewMode === "cumulative" ? 120 : 200 }}>
                                                             {formatQtyVal(inwardTripTotals[tripLabel])}
                                                         </TableCell>
                                                     );
@@ -2805,15 +3095,22 @@ const InStockReport: React.FC = () => {
                                         {/* Outward Mode: Out Details & Delivery & Total Outward */}
                                         {outwardMode && (
                                             <>
-                                                {outwardTripHeaders.map((tripLabel) => {
+                                                {outwardTakenHeaders.map((tripLabel) => {
                                                     if (hiddenOutwardColumns.includes(tripLabel)) return null;
                                                     return (
-                                                        <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 200, minWidth: 200 }}>
-                                                            {formatQtyVal(outwardTripTotals[tripLabel])}
+                                                        <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: viewMode === "cumulative" ? 120 : 200, minWidth: viewMode === "cumulative" ? 120 : 200 }}>
+                                                            {(() => {
+                                                                const data = outwardTakenTotals[tripLabel];
+                                                                if (!data) return "-";
+                                                                if (data.qty === 0) return "-";
+                                                                return data.persons > 0
+                                                                    ? `${formatQtyVal(data.qty)} (${data.persons})`
+                                                                    : formatQtyVal(data.qty);
+                                                            })()}
                                                         </TableCell>
                                                     );
                                                 })}
-                                                {!hiddenOutwardColumns.includes("PENDING DELIVERY") && (
+                                                {!hiddenOutwardColumns.includes("PENDING TAKEN") && (
                                                     <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 130, minWidth: 130 }}>
                                                         {formatQtyVal(detailedTotals.deliveryQtyTotal)}
                                                     </TableCell>
@@ -2842,19 +3139,18 @@ const InStockReport: React.FC = () => {
                                     </TableRow>
                                 ) : (
                                     paginatedData.map((item, idx) => {
-                                        const currentBrand = item.Brand || item.Group_Name || "Others";
-                                        const prevBrand = idx > 0 ? (paginatedData[idx - 1].Brand || paginatedData[idx - 1].Group_Name || "Others") : null;
-                                        const showBrandHeader = idx === 0 || currentBrand !== prevBrand;
+                                        const currentGroupVal = String(item[groupByColumn] || "Others");
+                                        const prevGroupVal = idx > 0 ? String(paginatedData[idx - 1][groupByColumn] || "Others") : null;
+                                        const showGroupHeader = idx === 0 || currentGroupVal !== prevGroupVal;
 
                                         const sNo = (page - 1) * rowsPerPage + idx + 1;
                                         const openingStock = getOpeningStock(item);
-
-                                        const { trips, returnQty, procInQty, procOutQty, outTrips, deliveryQty } = getProductDetails(item);
+                                        const { trips, returnQty, procInQty, procOutQty } = getProductDetails(item);
 
                                         return (
                                             <React.Fragment key={idx}>
-                                                {/* Brand Group Separator */}
-                                                {showBrandHeader && (
+                                                {/* Group Separator */}
+                                                {showGroupHeader && (
                                                     <TableRow sx={{ backgroundColor: "#f1f5f9" }}>
                                                         <TableCell
                                                             colSpan={getTotalColumns()}
@@ -2863,12 +3159,12 @@ const InStockReport: React.FC = () => {
                                                                 fontWeight: 800,
                                                                 py: 1,
                                                                 px: 2,
-                                                                fontSize: "0.85rem",
+                                                                fontSize: "0.76rem",
                                                                 letterSpacing: 0.5,
                                                                 textAlign: "left"
                                                             }}
                                                         >
-                                                            {currentBrand.toUpperCase()}
+                                                            {currentGroupVal.toUpperCase()}
                                                         </TableCell>
                                                     </TableRow>
                                                 )}
@@ -2973,8 +3269,8 @@ const InStockReport: React.FC = () => {
                                                                             color: qty > 0 ? "#2563eb" : "#94a3b8",
                                                                             cursor: qty !== 0 ? "pointer" : "default",
                                                                             textDecoration: qty !== 0 ? "underline" : "none",
-                                                                            width: 200,
-                                                                            minWidth: 200,
+                                                                            width: viewMode === "cumulative" ? 120 : 200,
+                                                                            minWidth: viewMode === "cumulative" ? 120 : 200,
                                                                             "&:hover": qty !== 0 ? { color: "#1d4ed8" } : {}
                                                                         }}
                                                                     >
@@ -3155,63 +3451,69 @@ const InStockReport: React.FC = () => {
                                                             {formatQtyVal(getRecalculatedStockOutQty(item))}
                                                         </TableCell>
                                                     )}
-
-                                                    {/* Outward Mode: Render dynamic TRIP columns, PENDING DELIVERY, and TOTAL OUTWARD */}
+                                                    {/* Outward Mode: Render dynamic TAKEN columns, PENDING TAKEN, and TOTAL OUTWARD */}
                                                     {outwardMode && (
                                                         <>
-                                                            {outwardTripHeaders.map((tripLabel) => {
-                                                                if (hiddenOutwardColumns.includes(tripLabel)) return null;
-                                                                const qty = getQtyForTrip(outTrips, tripLabel, getItemWeight(item));
+                                                            {(() => {
+                                                                const { pendingTakenQty } = getProductDetails(item);
                                                                 return (
-                                                                    <TableCell
-                                                                        key={tripLabel}
-                                                                        align="right"
-                                                                        onClick={() => {
-                                                                            if (qty !== 0) {
-                                                                                const matchingTripRecord = outTrips.find(t => getTripLabel(t) === tripLabel);
-                                                                                const tripNo = matchingTripRecord?.Trip_No || matchingTripRecord?.trip_no || matchingTripRecord?.Trip_Voucher_Number;
-                                                                                handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, tripLabel, tripNo);
-                                                                            }
-                                                                        }}
-                                                                        sx={{
-                                                                            borderRight: "1px solid #e2e8f0",
-                                                                            fontWeight: 600,
-                                                                            pr: 2,
-                                                                            color: qty > 0 ? "#2563eb" : "#94a3b8",
-                                                                            cursor: qty !== 0 ? "pointer" : "default",
-                                                                            textDecoration: qty !== 0 ? "underline" : "none",
-                                                                            width: 200,
-                                                                            minWidth: 200,
-                                                                            "&:hover": qty !== 0 ? { color: "#1d4ed8" } : {}
-                                                                        }}
-                                                                    >
-                                                                        {formatQtyVal(qty)}
-                                                                    </TableCell>
+                                                                    <>
+                                                                        {outwardTakenHeaders.map((tripLabel) => {
+                                                                            if (hiddenOutwardColumns.includes(tripLabel)) return null;
+                                                                            const data = getQtyForTaken(item, tripLabel);
+                                                                            const qty = data.qty;
+                                                                            return (
+                                                                                <TableCell
+                                                                                    key={tripLabel}
+                                                                                    align="right"
+                                                                                    onClick={() => {
+                                                                                        if (qty !== 0) {
+                                                                                            handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, tripLabel);
+                                                                                        }
+                                                                                    }}
+                                                                                    sx={{
+                                                                                        borderRight: "1px solid #e2e8f0",
+                                                                                        fontWeight: 600,
+                                                                                        pr: 2,
+                                                                                        color: qty > 0 ? "#2563eb" : "#94a3b8",
+                                                                                        cursor: qty !== 0 ? "pointer" : "default",
+                                                                                        textDecoration: qty !== 0 ? "underline" : "none",
+                                                                                        width: viewMode === "cumulative" ? 120 : 200,
+                                                                                        minWidth: viewMode === "cumulative" ? 120 : 200,
+                                                                                        "&:hover": qty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                                    }}
+                                                                                >
+                                                                                    {qty === 0 ? "-" : (data.persons > 0 ? `${formatQtyVal(qty)} (${data.persons})` : formatQtyVal(qty))}
+                                                                                </TableCell>
+                                                                            );
+                                                                        })}
+                                                                        {!hiddenOutwardColumns.includes("PENDING TAKEN") && (
+                                                                            <TableCell
+                                                                                align="right"
+                                                                                onClick={() => {
+                                                                                    const pQty = qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
+                                                                                    if (pQty !== 0) {
+                                                                                        handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'PENDING TAKEN');
+                                                                                    }
+                                                                                }}
+                                                                                sx={{
+                                                                                    borderRight: "1px solid #e2e8f0",
+                                                                                    fontWeight: 600,
+                                                                                    pr: 2,
+                                                                                    color: pendingTakenQty > 0 ? "#2563eb" : "#475569",
+                                                                                    cursor: pendingTakenQty !== 0 ? "pointer" : "default",
+                                                                                    textDecoration: pendingTakenQty !== 0 ? "underline" : "none",
+                                                                                    width: 130,
+                                                                                    minWidth: 130,
+                                                                                    "&:hover": pendingTakenQty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                                }}
+                                                                            >
+                                                                                {formatQtyVal(qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty)}
+                                                                            </TableCell>
+                                                                        )}
+                                                                    </>
                                                                 );
-                                                            })}
-                                                            {!hiddenOutwardColumns.includes("PENDING DELIVERY") && (
-                                                                <TableCell
-                                                                    align="right"
-                                                                    onClick={() => {
-                                                                        if (deliveryQty !== 0) {
-                                                                            handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'PENDING DELIVERY');
-                                                                        }
-                                                                    }}
-                                                                    sx={{
-                                                                        borderRight: "1px solid #e2e8f0",
-                                                                        fontWeight: 600,
-                                                                        pr: 2,
-                                                                        color: deliveryQty > 0 ? "#2563eb" : "#475569",
-                                                                        cursor: deliveryQty !== 0 ? "pointer" : "default",
-                                                                        textDecoration: deliveryQty !== 0 ? "underline" : "none",
-                                                                        width: 130,
-                                                                        minWidth: 130,
-                                                                        "&:hover": deliveryQty !== 0 ? { color: "#1d4ed8" } : {}
-                                                                    }}
-                                                                >
-                                                                    {formatQtyVal(deliveryQty)}
-                                                                </TableCell>
-                                                            )}
+                                                            })()}
                                                             <TableCell
                                                                 align="right"
                                                                 onClick={() => {
@@ -3302,6 +3604,28 @@ const InStockReport: React.FC = () => {
                     }
                 }}
             />
+
+            {/* ===== GROUP BY POPUP MENU ===== */}
+            <Menu
+                anchorEl={groupByAnchor}
+                open={Boolean(groupByAnchor)}
+                onClose={() => setGroupByAnchor(null)}
+            >
+                {GROUPBY_OPTIONS.map((opt) => (
+                    <MenuItem
+                        key={opt.key}
+                        selected={groupByColumn === opt.key}
+                        onClick={() => {
+                            setGroupByColumn(opt.key);
+                            setSelectedBrand("All"); // Reset chip filter
+                            setGroupByAnchor(null);
+                        }}
+                        sx={{ fontSize: "0.85rem", py: 1 }}
+                    >
+                        {opt.label}
+                    </MenuItem>
+                ))}
+            </Menu>
 
             {/* ===== COLUMN SETTINGS POPUP MENU ===== */}
             <Menu
@@ -3452,7 +3776,7 @@ const InStockReport: React.FC = () => {
                         </Box>
                     ) : (
                         <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid #cbd5e1", borderRadius: 2, maxHeight: 350 }}>
-                            <Table size="small" stickyHeader sx={{ "& .MuiTableCell-root": { py: 0.8, fontSize: "0.775rem" } }}>
+                            <Table size="small" stickyHeader sx={{ "& .MuiTableCell-root": { py: 0.6, fontSize: "0.72rem" } }}>
                                 <TableHead>
                                     <TableRow>
                                         <TableCell align="center" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>S.NO</TableCell>
@@ -3528,7 +3852,7 @@ const InStockReport: React.FC = () => {
                                                     const staffMap = parseStaffInvolved(r.Staff_Involved || "");
                                                     const { inQty, processQty, outQty, pendingQty } = getRowQuantities(r);
                                                     const filteredQty = getRowQtyForFilter(r, popupFilterType);
-                                                    
+
                                                     const formatVal = (val: number) => {
                                                         if (val === 0) return "-";
                                                         return val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -3538,8 +3862,8 @@ const InStockReport: React.FC = () => {
                                                         <React.Fragment key={i}>
                                                             {showDateHeader && (
                                                                 <TableRow sx={{ backgroundColor: "#e2e8f0" }}>
-                                                                    <TableCell 
-                                                                        colSpan={totalColSpan} 
+                                                                    <TableCell
+                                                                        colSpan={totalColSpan}
                                                                         sx={{ fontWeight: 800, color: "#1e293b", py: 0.8 }}
                                                                     >
                                                                         DATE: {currentDateStr}
@@ -3548,7 +3872,7 @@ const InStockReport: React.FC = () => {
                                                             )}
                                                             <TableRow hover sx={{ "&:hover": { bgcolor: "#f1f5f9" } }}>
                                                                 <TableCell align="center" sx={{ fontWeight: 600, color: "#64748b" }}>{sno++}</TableCell>
-                                                                <TableCell>{r.module || r.Module || r.Voucher_Type || r.voucher_name || r.Stock_Voucher_Name || "-"}</TableCell>
+                                                                <TableCell>{r.Voucher_Type || r.voucher_name || r.Stock_Voucher_Name || r.module || r.Module || "-"}</TableCell>
                                                                 <TableCell>{getRowInvNoDisplay(r)}</TableCell>
                                                                 {showRetailerColumn && <TableCell>{r.Retailer_Name || "-"}</TableCell>}
                                                                 {popupFilterType === "ALL" ? (
@@ -3587,6 +3911,75 @@ const InStockReport: React.FC = () => {
                     )}
                 </DialogContent>
             </Dialog>
+
+            {/* ===== GODOWN NAME COLUMN HEADER FILTER MENU ===== */}
+            <Menu
+                anchorEl={godownFilterAnchor}
+                open={Boolean(godownFilterAnchor)}
+                onClose={() => setGodownFilterAnchor(null)}
+                sx={{
+                    "& .MuiButton-root": {
+                        color: "#000 !important",
+                        justifyContent: "flex-start",
+                        textTransform: "none",
+                        fontWeight: 500,
+                    },
+                    "& .MuiTypography-root": {
+                        color: "#000 !important",
+                    },
+                    "& .MuiInputBase-input": {
+                        color: "#000",
+                    },
+                }}
+            >
+                <Box p={2} sx={{ minWidth: 220, maxWidth: 300 }}>
+                    <TextField
+                        size="small"
+                        fullWidth
+                        placeholder="Search Godown..."
+                        value={godownFilterSearch}
+                        onChange={e => setGodownFilterSearch(e.target.value)}
+                        sx={{ mb: 1 }}
+                    />
+
+                    <MenuItem
+                        dense
+                        onClick={() => {
+                            setSelectedGodowns([]);
+                            setGodownFilterAnchor(null);
+                        }}
+                    >
+                        <Checkbox checked={selectedGodowns.length === 0} size="small" />
+                        <ListItemText primary="All" primaryTypographyProps={{ fontSize: "0.85rem", fontWeight: 600 }} />
+                    </MenuItem>
+
+                    <Box sx={{ maxHeight: 200, overflowY: "auto" }}>
+                        {uniqueGodownNames
+                            .filter(name =>
+                                name.toLowerCase().includes(godownFilterSearch.toLowerCase())
+                            )
+                            .map(name => {
+                                const isChecked = selectedGodowns.includes(name);
+                                return (
+                                    <MenuItem
+                                        key={name}
+                                        dense
+                                        onClick={() => {
+                                            if (isChecked) {
+                                                setSelectedGodowns(prev => prev.filter(x => x !== name));
+                                            } else {
+                                                setSelectedGodowns(prev => [...prev, name]);
+                                            }
+                                        }}
+                                    >
+                                        <Checkbox checked={isChecked} size="small" />
+                                        <ListItemText primary={name} primaryTypographyProps={{ fontSize: "0.85rem", fontWeight: 600 }} />
+                                    </MenuItem>
+                                );
+                            })}
+                    </Box>
+                </Box>
+            </Menu>
 
             {loading && (
                 <Box sx={{

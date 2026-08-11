@@ -515,7 +515,7 @@ const InStockReport: React.FC = () => {
                     });
                 }
             }
-            const invoiceNo = r.Do_Inv_No || r.invoice_no;
+            const invoiceNo = r.Do_Inv_No || r.Do_inv_no || r.invoice_no;
             const matchingRawRecord = recs.find(x => x.module_voucher_number === invoiceNo);
             if (matchingRawRecord) {
                 const hasTripField = (
@@ -536,7 +536,7 @@ const InStockReport: React.FC = () => {
     };
 
     const getRowQuantities = (r: any) => {
-        const isOB = (r.Do_Inv_No || r.invoice_no) === "OB" || String(r.Particulars || r.Narration || "").toLowerCase().includes("opening balance");
+        const isOB = (r.Do_Inv_No || r.Do_inv_no || r.invoice_no) === "OB" || String(r.Particulars || r.Narration || "").toLowerCase().includes("opening balance");
         const isSJ = String(r.Narration || r.Particulars || "").toLowerCase().includes("stock journal") ||
             String(r.Voucher_Type || r.voucher_name || "").toLowerCase().includes("stock journal") ||
             String(r.module || r.Module || "").toLowerCase().includes("stock journal") ||
@@ -656,18 +656,50 @@ const InStockReport: React.FC = () => {
     };
 
     const getRowInvNoDisplay = (r: any) => {
-        const isOut = String(r.stock_direction || r.Direction || "").toUpperCase() === "OUT";
-        const invNo = r.Do_Inv_No || r.invoice_no || r.Invoice_No || r.Invoice_no || r.Bill_Nos || r.bill_nos;
+        const isOut = outwardMode || String(r.stock_direction || r.Direction || "").toUpperCase() === "OUT";
+        const isIn = inwardMode || (!outwardMode && String(r.stock_direction || r.Direction || "").toUpperCase() === "IN");
+        
+        const invNo = r.Do_Inv_No || r.Do_inv_no || r.invoice_no || r.Invoice_No || r.Invoice_no || r.Bill_Nos || r.bill_nos;
+        const tripNo = r.Trip_No || r.trip_no;
         const tripVoucherNo = r.Trip_Voucher_Number || r.trip_voucher_number;
 
-        const isStockInPopup = inwardMode || !isOut;
+        const tripStr = tripNo ? (
+            isOut ? (
+                String(tripNo).trim().toLowerCase().startsWith("trip")
+                    ? String(tripNo).trim().replace(/trip/i, "Taken")
+                    : String(tripNo).trim().toLowerCase().startsWith("taken")
+                        ? String(tripNo).trim()
+                        : `Taken - ${tripNo}`
+            ) : (
+                String(tripNo).trim().toLowerCase().startsWith("trip")
+                    ? String(tripNo).trim()
+                    : `Trip - ${tripNo}`
+            )
+        ) : "";
 
-        if (isStockInPopup) {
-            return tripVoucherNo || invNo || "-";
+        if (isIn) {
+            // For Stock In popup, show Trip_Voucher_No (or fallback invNo) along with Trip No
+            const baseInv = tripVoucherNo || invNo;
+            if (baseInv && tripStr) {
+                return `${baseInv} (${tripStr})`;
+            }
+            if (baseInv) return baseInv;
+            if (tripStr) return tripStr;
+            return "-";
         } else {
-            return invNo || "-";
+            // For Process and Outwards, show Do_Inv_No (invNo) along with Trip No
+            if (invNo && tripStr) {
+                return `${invNo} (${tripStr})`;
+            }
+            if (invNo) return invNo;
+            if (tripStr) return tripStr;
+            return "-";
         }
     };
+
+
+
+
 
 
 
@@ -1429,7 +1461,7 @@ const InStockReport: React.FC = () => {
 
     const filteredPopupRows = useMemo(() => {
         return ledgerRows.filter((r) => {
-            const isOB = (r.Do_Inv_No || r.invoice_no || r.Invoice_No) === "OB" || String(r.Particulars || r.Narration || "").toLowerCase().includes("opening balance");
+            const isOB = (r.Do_Inv_No || r.Do_inv_no || r.invoice_no || r.Invoice_No) === "OB" || String(r.Particulars || r.Narration || "").toLowerCase().includes("opening balance");
             const isSJ = String(r.Narration || r.Particulars || "").toLowerCase().includes("stock journal") ||
                 String(r.Voucher_Type || r.voucher_name || "").toLowerCase().includes("stock journal") ||
                 String(r.module || r.Module || "").toLowerCase().includes("stock journal") ||
@@ -1472,7 +1504,7 @@ const InStockReport: React.FC = () => {
                         });
                     }
                 }
-                const invoiceNo = r.Do_Inv_No || r.invoice_no;
+                const invoiceNo = r.Do_Inv_No || r.Do_inv_no || r.invoice_no;
                 const matchingRawRecord = recs.find(x => x.module_voucher_number === invoiceNo);
 
                 const isTrip = (pr: any) => {

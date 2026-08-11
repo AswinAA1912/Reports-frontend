@@ -205,7 +205,12 @@ const InStockReport: React.FC = () => {
     const [tempFromDate, setTempFromDate] = useState(today);
     const [tempToDate, setTempToDate] = useState(today);
     const [drawerOpen, setDrawerOpen] = useState(false);
-    const [loading, setLoading] = useState(false);
+    const [loadingGodowns, setLoadingGodowns] = useState(false);
+    const [loadingDetails, setLoadingDetails] = useState(false);
+    const loading = loadingGodowns || loadingDetails;
+    const latestGodownsReq = React.useRef(0);
+    const latestDetailsReq = React.useRef(0);
+
     const [qtyMode, setQtyMode] = useState<"qty" | "actQty" | "bags">(() => {
         const saved = sessionStorage.getItem("inStockQtyMode");
         return (saved as "qty" | "actQty" | "bags") || "qty";
@@ -652,43 +657,23 @@ const InStockReport: React.FC = () => {
 
     const getRowInvNoDisplay = (r: any) => {
         const isOut = String(r.stock_direction || r.Direction || "").toUpperCase() === "OUT";
-        const invNo = r.Do_Inv_No || r.invoice_no || r.Invoice_No;
-        const tripNo = r.Trip_No || r.trip_no;
+        const invNo = r.Do_Inv_No || r.invoice_no || r.Invoice_No || r.Invoice_no || r.Bill_Nos || r.bill_nos;
         const tripVoucherNo = r.Trip_Voucher_Number || r.trip_voucher_number;
 
-        if (isOut) {
-            const tNo = tripNo || tripVoucherNo;
-            if (invNo && tNo) {
-                const tripStr = String(tNo).trim().toLowerCase().startsWith("trip")
-                    ? String(tNo).trim().replace(/trip/i, "Taken")
-                    : String(tNo).trim().toLowerCase().startsWith("taken")
-                        ? String(tNo).trim()
-                        : `Taken - ${tNo}`;
-                return `${invNo} (${tripStr})`;
-            }
-            if (invNo) return invNo;
-            if (tNo) {
-                return String(tNo).trim().toLowerCase().startsWith("trip")
-                    ? String(tNo).trim().replace(/trip/i, "Taken")
-                    : String(tNo).trim().toLowerCase().startsWith("taken")
-                        ? String(tNo).trim()
-                        : `Taken - ${tNo}`;
-            }
-            return "-";
+        const isStockInPopup = inwardMode || !isOut;
+
+        if (isStockInPopup) {
+            return tripVoucherNo || invNo || "-";
         } else {
-            const tripStr = tripNo ? (String(tripNo).trim().toLowerCase().startsWith("trip")
-                ? String(tripNo).trim()
-                : `Trip - ${tripNo}`) : "";
-            
-            if (tripStr && tripVoucherNo) {
-                return `${tripStr} (${tripVoucherNo})`;
-            }
-            if (tripStr) return tripStr;
-            if (tripVoucherNo) return tripVoucherNo;
-            if (invNo) return invNo;
-            return "-";
+            return invNo || "-";
         }
     };
+
+
+
+
+
+
 
     const ledgerRows = useMemo(() => {
         let running = 0;
@@ -747,26 +732,34 @@ const InStockReport: React.FC = () => {
 
     // Fetch overall godowns list
     const loadGodownList = async () => {
+        const reqId = ++latestGodownsReq.current;
         try {
-            setLoading(true);
+            setLoadingGodowns(true);
             const res = await StockAbstractReportService.getGodownSummaryInstock({
                 Predate: dayjs(fromDate).subtract(1, "day").format("YYYY-MM-DD"),
                 Fromdate: dayjs(fromDate).format("YYYY-MM-DD"),
                 Todate: dayjs(toDate).format("YYYY-MM-DD"),
             });
-            setGodownListData(res || []);
+            if (reqId === latestGodownsReq.current) {
+                setGodownListData(res || []);
+            }
         } catch (err) {
             console.error("Failed to load godown list:", err);
-            toast.error("Failed to load godown list");
+            if (reqId === latestGodownsReq.current) {
+                toast.error("Failed to load godown list");
+            }
         } finally {
-            setLoading(false);
+            if (reqId === latestGodownsReq.current) {
+                setLoadingGodowns(false);
+            }
         }
     };
 
     // Fetch detailed stock items for the selected godown
     const loadDetailedStock = async (godownId: string | number) => {
+        const reqId = ++latestDetailsReq.current;
         try {
-            setLoading(true);
+            setLoadingDetails(true);
             const [res, processRes] = await Promise.all([
                 godownwisestockreportservice.getGodownwiseReports({
                     Godown_Id: godownId,
@@ -781,6 +774,8 @@ const InStockReport: React.FC = () => {
                     return { data: { data: [] } };
                 })
             ]);
+
+            if (reqId !== latestDetailsReq.current) return;
 
             const apiRows = res.data?.data || [];
             const processData = processRes.data?.data || [];
@@ -877,17 +872,20 @@ const InStockReport: React.FC = () => {
             }
         } catch (err) {
             console.error("Failed to load godown stock data:", err);
-            toast.error("Failed to load godown stock data");
-            setDetailedStockData([]);
+            if (reqId === latestDetailsReq.current) {
+                toast.error("Failed to load godown stock data");
+                setDetailedStockData([]);
+            }
         } finally {
-            setLoading(false);
+            if (reqId === latestDetailsReq.current) {
+                setLoadingDetails(false);
+            }
         }
     };
 
     useEffect(() => {
         loadGodownList();
     }, [fromDate, toDate]);
-
     useEffect(() => {
         if (selectedGodown) {
             loadDetailedStock(selectedGodown.godown_id);
@@ -896,6 +894,15 @@ const InStockReport: React.FC = () => {
             setProcessApiData([]);
         }
     }, [selectedGodown, fromDate, toDate]);
+
+    useEffect(() => {
+        if (drawerOpen) {
+            setTempFromDate(fromDate);
+            setTempToDate(toDate);
+        }
+    }, [drawerOpen, fromDate, toDate]);
+
+
 
     // Group godown list by parent_godown_name (only including godowns with data)
     const groupedGodowns = useMemo(() => {
@@ -909,7 +916,6 @@ const InStockReport: React.FC = () => {
         });
         return groups;
     }, [filteredGodowns]);
-
     // Calculate aggregated overall summary of godowns totals
     const grandTotals = useMemo(() => {
         let opening = 0;
@@ -919,24 +925,29 @@ const InStockReport: React.FC = () => {
         let closing = 0;
 
         filteredGodowns.forEach(g => {
-            if (qtyMode === "actQty") {
-                opening += Number(g.ACt_OB_Qty || 0);
-                stockIn += Number(g.ACt_In_Qty || 0);
-                process += Number(g.Process_Act_IN_OUT_Qty || 0);
-                stockOut += Number(g.ACt_Out_Qty || 0);
-                closing += Number(g.CL_ACt_QTY || 0);
+            const ob = Number((qtyMode === "actQty" ? g.ACt_OB_Qty : g.OB_Qty) || 0);
+            const sin = Number((qtyMode === "actQty" ? g.ACt_In_Qty : g.IN_Qty) || 0);
+            const proc = Number((qtyMode === "actQty" ? g.Process_Act_IN_OUT_Qty : g.Process_IN_OUT_Qty) || 0);
+            const sout = Number((qtyMode === "actQty" ? g.ACt_Out_Qty : g.Out_Qty) || 0);
+            const cl = Number((qtyMode === "actQty" ? g.CL_ACt_QTY : g.CL_QTY) || 0);
+
+            if (qtyMode === "bags") {
+                opening += Math.round(ob / 50);
+                stockIn += Math.round(sin / 50);
+                process += Math.round(proc / 50);
+                stockOut += Math.round(sout / 50);
+                closing += Math.round(cl / 50);
             } else {
-                opening += Number(g.OB_Qty || 0);
-                stockIn += Number(g.IN_Qty || 0);
-                process += Number(g.Process_IN_OUT_Qty || 0);
-                stockOut += Number(g.Out_Qty || 0);
-                closing += Number(g.CL_QTY || 0);
+                opening += ob;
+                stockIn += sin;
+                process += proc;
+                stockOut += sout;
+                closing += cl;
             }
         });
 
         return { opening, stockIn, process, stockOut, closing };
     }, [filteredGodowns, qtyMode]);
-
     // Helper to get mapped details for a product
     const getProductDetails = useMemo(() => {
         return (item: stockWiseReport) => {
@@ -1596,6 +1607,30 @@ const InStockReport: React.FC = () => {
         };
     }, [filteredData, inwardMode, outwardMode, processMode, columnsConfig, searchText, page, rowsPerPage, selectedGodown]);
 
+    const formatISTTimeOnly = (dateString: any): string => {
+        if (!dateString) return "-";
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return "-";
+
+        const formatter = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Asia/Kolkata",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true
+        });
+
+        const parts = formatter.formatToParts(date);
+        const getPart = (type: string) => parts.find(p => p.type === type)?.value || "";
+
+        const hour = getPart("hour");
+        const minute = getPart("minute");
+        const dayPeriod = getPart("dayPeriod").toLowerCase();
+
+        const ampm = dayPeriod.includes("pm") || dayPeriod.includes("p.m") ? "p.m." : "a.m.";
+
+        return `${hour}.${minute} ${ampm}`;
+    };
+
     // Slice data for pagination
     const paginatedData = useMemo(() => {
         return numFilteredAndSortedRows.slice((page - 1) * rowsPerPage, page * rowsPerPage);
@@ -1656,14 +1691,14 @@ const InStockReport: React.FC = () => {
                 const itemTakenQtyBase = trips.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
                 const itemTakenQty = qtyMode === "bags" ? Math.round(itemTakenQtyBase / weight) : itemTakenQtyBase;
 
-                const itemReturnQty = returnQty;
-                const itemStockIn = stockInQty;
-                const itemProcIn = procInQty;
-                const itemProcOut = procOutQty;
+                const itemReturnQty = qtyMode === "bags" ? Math.round(returnQty / weight) : returnQty;
+                const itemStockIn = qtyMode === "bags" ? Math.round(stockInQty / weight) : stockInQty;
+                const itemProcIn = qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty;
+                const itemProcOut = qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty;
 
                 const itemOutTakenQty = qtyMode === "bags" ? Math.round(takenQty / weight) : takenQty;
                 const itemDeliveryQty = qtyMode === "bags" ? Math.round(pendingTakenQty / weight) : pendingTakenQty;
-                const itemStockOut = outwardQty;
+                const itemStockOut = qtyMode === "bags" ? Math.round(outwardQty / weight) : outwardQty;
 
                 takenQtyTotal += itemTakenQty;
                 returnQtyTotal += itemReturnQty;
@@ -1723,7 +1758,7 @@ const InStockReport: React.FC = () => {
                 }
             });
             if (!hiddenInwardColumns.includes("RETURN")) {
-                sum += returnQty;
+                sum += qtyMode === "bags" ? Math.round(returnQty / getItemWeight(item)) : returnQty;
             }
             return sum;
         } else {
@@ -1734,7 +1769,7 @@ const InStockReport: React.FC = () => {
             if (visibleCount === allInwardOptions.length) return rawStockIn;
             return (rawStockIn * visibleCount) / allInwardOptions.length;
         }
-    }, [getProductDetails, inwardTripHeaders, hiddenInwardColumns, getQtyForTrip, visibleInwardColumns, allInwardOptions, getStockInTotal]);
+    }, [getProductDetails, inwardTripHeaders, hiddenInwardColumns, getQtyForTrip, visibleInwardColumns, allInwardOptions, getStockInTotal, qtyMode]);
 
     // Recalculated row-level Stock Out Quantity summing only visible columns
     const getRecalculatedStockOutQty = React.useCallback((item: stockWiseReport) => {
@@ -1761,8 +1796,13 @@ const InStockReport: React.FC = () => {
     // Recalculated row-level Process Quantity summing only visible columns
     const getRecalculatedProcessQty = React.useCallback((item: stockWiseReport) => {
         const { procInQty, procOutQty } = getProductDetails(item);
-        let pIn = procInQty > 0 ? procInQty : getProcIn(item);
-        let pOut = procOutQty > 0 ? procOutQty : getProcOut(item);
+        const weight = getItemWeight(item);
+        let pIn = procInQty > 0
+            ? (qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty)
+            : getProcIn(item);
+        let pOut = procOutQty > 0
+            ? (qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty)
+            : getProcOut(item);
 
         let sum = 0;
         if (!hiddenProcessColumns.includes("PROCESS IN")) {
@@ -1772,7 +1812,7 @@ const InStockReport: React.FC = () => {
             sum -= pOut;
         }
         return sum;
-    }, [getProductDetails, hiddenProcessColumns, getProcIn, getProcOut]);
+    }, [getProductDetails, hiddenProcessColumns, getProcIn, getProcOut, qtyMode]);
 
     // Recalculated row-level Closing Stock Quantity
     const getRecalculatedClosingStock = React.useCallback((item: stockWiseReport) => {
@@ -1885,18 +1925,19 @@ const InStockReport: React.FC = () => {
                     if (isProcessOutVisible) processHeaderRow.push("Process Out");
                     processHeaderRow.push("Total Process");
                     excelData.push(processHeaderRow);
-
                     filteredData.forEach((item, idx) => {
                         const { procInQty, procOutQty } = getProductDetails(item);
+                        const weight = getItemWeight(item);
+                        const displayProcIn = qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty;
+                        const displayProcOut = qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty;
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
 
-                        if (isProcessInVisible) row.push(fmt(procInQty));
-                        if (isProcessOutVisible) row.push(fmt(procOutQty));
+                        if (isProcessInVisible) row.push(fmt(displayProcIn));
+                        if (isProcessOutVisible) row.push(fmt(displayProcOut));
                         row.push(fmt(getRecalculatedProcessQty(item)));
                         excelData.push(row);
-                    });
-                } else {
+                    });                } else {
                     excelData.push(["S.No", ...configLabels, "Opening Stock", "Stock In", "Process", "Stock Outwards", "Closing Stock"]);
                     filteredData.forEach((item, idx) => {
                         const row: any[] = [idx + 1];
@@ -2046,18 +2087,19 @@ const InStockReport: React.FC = () => {
                     if (isProcessOutVisible) processHeaderRow.push("Process Out");
                     processHeaderRow.push("Total Process");
                     headers = [processHeaderRow];
-
                     filteredData.forEach((item, idx) => {
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
                         const { procInQty, procOutQty } = getProductDetails(item);
+                        const weight = getItemWeight(item);
+                        const displayProcIn = qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty;
+                        const displayProcOut = qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty;
 
-                        if (isProcessInVisible) row.push(fmtStr(procInQty));
-                        if (isProcessOutVisible) row.push(fmtStr(procOutQty));
+                        if (isProcessInVisible) row.push(fmtStr(displayProcIn));
+                        if (isProcessOutVisible) row.push(fmtStr(displayProcOut));
                         row.push(fmtStr(getRecalculatedProcessQty(item)));
                         body.push(row);
-                    });
-                } else {
+                    });                } else {
                     headers = [["S.No", ...configLabels, "Opening", "Stock In", "Process", "Stock Out", "Closing"]];
                     filteredData.forEach((item, idx) => {
                         const row: any[] = [idx + 1];
@@ -2164,8 +2206,11 @@ const InStockReport: React.FC = () => {
 
     const totalColSpan = useMemo(() => {
         const baseColSpan = popupFilterType === "ALL" ? 7 : 4;
-        return baseColSpan + (showRetailerColumn ? 1 : 0) + uniqueRoles.length;
-    }, [popupFilterType, showRetailerColumn, uniqueRoles]);
+        const createdOnCol = (processMode || outwardMode || popupFilterType === "Trip In" || String(popupFilterType).startsWith("Trip")) ? 1 : 0;
+        return baseColSpan + (showRetailerColumn ? 1 : 0) + createdOnCol + uniqueRoles.length;
+    }, [popupFilterType, showRetailerColumn, uniqueRoles, processMode, outwardMode]);
+
+    const showCreatedOn = processMode || outwardMode || popupFilterType === "Trip In" || String(popupFilterType).startsWith("Trip");
 
     return (
         <Box sx={{ width: "100%", minHeight: "100vh", bgcolor: "#f8fafc", p: 2, boxSizing: "border-box" }}>
@@ -2316,11 +2361,18 @@ const InStockReport: React.FC = () => {
                                 {(() => {
                                     let sno = 1;
                                     return Object.entries(groupedGodowns).map(([parentName, items]) => {
-                                        const groupOB = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.ACt_OB_Qty : r.OB_Qty) || 0), 0);
-                                        const groupIn = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.ACt_In_Qty : r.IN_Qty) || 0), 0);
-                                        const groupProcess = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.Process_Act_IN_OUT_Qty : r.Process_IN_OUT_Qty) || 0), 0);
-                                        const groupOut = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.ACt_Out_Qty : r.Out_Qty) || 0), 0);
-                                        const groupCL = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.CL_ACt_QTY : r.CL_QTY) || 0), 0);
+
+                                                                       const groupOBRaw = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.ACt_OB_Qty : r.OB_Qty) || 0), 0);
+                                        const groupInRaw = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.ACt_In_Qty : r.IN_Qty) || 0), 0);
+                                        const groupProcessRaw = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.Process_Act_IN_OUT_Qty : r.Process_IN_OUT_Qty) || 0), 0);
+                                        const groupOutRaw = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.ACt_Out_Qty : r.Out_Qty) || 0), 0);
+                                        const groupCLRaw = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.CL_ACt_QTY : r.CL_QTY) || 0), 0);
+
+                                        const groupOB = qtyMode === "bags" ? Math.round(groupOBRaw / 50) : groupOBRaw;
+                                        const groupIn = qtyMode === "bags" ? Math.round(groupInRaw / 50) : groupInRaw;
+                                        const groupProcess = qtyMode === "bags" ? Math.round(groupProcessRaw / 50) : groupProcessRaw;
+                                        const groupOut = qtyMode === "bags" ? Math.round(groupOutRaw / 50) : groupOutRaw;
+                                        const groupCL = qtyMode === "bags" ? Math.round(groupCLRaw / 50) : groupCLRaw;
 
                                         return (
                                             <React.Fragment key={parentName}>
@@ -2331,19 +2383,19 @@ const InStockReport: React.FC = () => {
                                                         {parentName}
                                                     </TableCell>
                                                     <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A", borderRight: "1px solid #cbd5e1", pr: 2 }}>
-                                                        {groupOB.toLocaleString()}
+                                                        {formatQtyVal(groupOB)}
                                                     </TableCell>
                                                     <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A", borderRight: "1px solid #cbd5e1", pr: 2 }}>
-                                                        {groupIn.toLocaleString()}
+                                                        {formatQtyVal(groupIn)}
                                                     </TableCell>
                                                     <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A", borderRight: "1px solid #cbd5e1", pr: 2 }}>
-                                                        {groupProcess.toLocaleString()}
+                                                        {formatQtyVal(groupProcess)}
                                                     </TableCell>
                                                     <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A", borderRight: "1px solid #cbd5e1", pr: 2 }}>
-                                                        {groupOut.toLocaleString()}
+                                                        {formatQtyVal(groupOut)}
                                                     </TableCell>
                                                     <TableCell align="right" sx={{ fontWeight: 700, color: "#1E3A8A", pr: 2 }}>
-                                                        {groupCL.toLocaleString()}
+                                                        {formatQtyVal(groupCL)}
                                                     </TableCell>
                                                 </TableRow>
                                                 {/* Godown rows under this parent */}
@@ -2366,19 +2418,19 @@ const InStockReport: React.FC = () => {
                                                             {item.godown_name}
                                                         </TableCell>
                                                         <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                            {Number((qtyMode === "actQty" ? item.ACt_OB_Qty : item.OB_Qty) || 0).toLocaleString()}
+                                                            {formatQtyVal(qtyMode === "bags" ? Math.round(Number(item.OB_Qty || 0) / 50) : (qtyMode === "actQty" ? item.ACt_OB_Qty : item.OB_Qty))}
                                                         </TableCell>
                                                         <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#2563eb" }}>
-                                                            {Number((qtyMode === "actQty" ? item.ACt_In_Qty : item.IN_Qty) || 0).toLocaleString()}
+                                                            {formatQtyVal(qtyMode === "bags" ? Math.round(Number(item.IN_Qty || 0) / 50) : (qtyMode === "actQty" ? item.ACt_In_Qty : item.IN_Qty))}
                                                         </TableCell>
                                                         <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#475569" }}>
-                                                            {Number((qtyMode === "actQty" ? item.Process_Act_IN_OUT_Qty : item.Process_IN_OUT_Qty) || 0).toLocaleString()}
+                                                            {formatQtyVal(qtyMode === "bags" ? Math.round(Number(item.Process_IN_OUT_Qty || 0) / 50) : (qtyMode === "actQty" ? item.Process_Act_IN_OUT_Qty : item.Process_IN_OUT_Qty))}
                                                         </TableCell>
                                                         <TableCell align="right" sx={{ borderRight: "1px solid #e2e8f0", fontWeight: 600, pr: 2, color: "#ef4444" }}>
-                                                            {Number((qtyMode === "actQty" ? item.ACt_Out_Qty : item.Out_Qty) || 0).toLocaleString()}
+                                                            {formatQtyVal(qtyMode === "bags" ? Math.round(Number(item.Out_Qty || 0) / 50) : (qtyMode === "actQty" ? item.ACt_Out_Qty : item.Out_Qty))}
                                                         </TableCell>
                                                         <TableCell align="right" sx={{ fontWeight: 700, pr: 2, backgroundColor: "#dcfce7", color: "#15803d" }}>
-                                                            {Number((qtyMode === "actQty" ? item.CL_ACt_QTY : item.CL_QTY) || 0).toLocaleString()}
+                                                            {formatQtyVal(qtyMode === "bags" ? Math.round(Number(item.CL_QTY || 0) / 50) : (qtyMode === "actQty" ? item.CL_ACt_QTY : item.CL_QTY))}
                                                         </TableCell>
                                                     </TableRow>
                                                 ))}
@@ -3375,7 +3427,7 @@ const InStockReport: React.FC = () => {
                                                                         "&:hover": procInQty !== 0 ? { color: "#1d4ed8" } : {}
                                                                     }}
                                                                 >
-                                                                    {formatQtyVal(procInQty)}
+                                                                    {formatQtyVal(qtyMode === "bags" ? Math.round(procInQty / getItemWeight(item)) : procInQty)}
                                                                 </TableCell>
                                                             )}
                                                             {!hiddenProcessColumns.includes("PROCESS OUT") && (
@@ -3398,10 +3450,9 @@ const InStockReport: React.FC = () => {
                                                                         "&:hover": procOutQty !== 0 ? { color: "#1d4ed8" } : {}
                                                                     }}
                                                                 >
-                                                                    {formatQtyVal(procOutQty)}
+                                                                    {formatQtyVal(qtyMode === "bags" ? Math.round(procOutQty / getItemWeight(item)) : procOutQty)}
                                                                 </TableCell>
-                                                            )}
-                                                            <TableCell
+                                                            )}                                                            <TableCell
                                                                 align="right"
                                                                 onClick={() => {
                                                                     const qtyVal = getRecalculatedProcessQty(item);
@@ -3596,8 +3647,12 @@ const InStockReport: React.FC = () => {
                 qtyModeValue={qtyMode}
                 onQtyModeChange={setQtyMode}
                 onApply={() => {
+                    setDrawerOpen(false);
                     if (tempFromDate === fromDate && tempToDate === toDate) {
                         loadGodownList();
+                        if (selectedGodown) {
+                            loadDetailedStock(selectedGodown.godown_id);
+                        }
                     } else {
                         setFromDate(tempFromDate);
                         setToDate(tempToDate);
@@ -3782,10 +3837,13 @@ const InStockReport: React.FC = () => {
                                         <TableCell align="center" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>S.NO</TableCell>
                                         <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>VOUCHER TYPE</TableCell>
                                         <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>INV NO</TableCell>
+
+                                        {showCreatedOn && (
+                                            <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>CREATED ON</TableCell>
+                                        )}
                                         {showRetailerColumn && (
                                             <TableCell sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>RETAILER NAME</TableCell>
-                                        )}
-                                        {popupFilterType === "ALL" ? (
+                                        )}                                        {popupFilterType === "ALL" ? (
                                             <>
                                                 <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>IN QTY</TableCell>
                                                 <TableCell align="right" sx={{ backgroundColor: "#1e293b", color: "#fff", fontWeight: 600 }}>PROCES QTY</TableCell>
@@ -3816,6 +3874,7 @@ const InStockReport: React.FC = () => {
                                                 <TableCell align="center">-</TableCell>
                                                 <TableCell>TOTAL</TableCell>
                                                 <TableCell></TableCell>
+                                                {showCreatedOn && <TableCell></TableCell>}
                                                 {showRetailerColumn && <TableCell></TableCell>}
                                                 {popupFilterType === "ALL" ? (
                                                     <>
@@ -3874,6 +3933,9 @@ const InStockReport: React.FC = () => {
                                                                 <TableCell align="center" sx={{ fontWeight: 600, color: "#64748b" }}>{sno++}</TableCell>
                                                                 <TableCell>{r.Voucher_Type || r.voucher_name || r.Stock_Voucher_Name || r.module || r.Module || "-"}</TableCell>
                                                                 <TableCell>{getRowInvNoDisplay(r)}</TableCell>
+                                                                {showCreatedOn && (
+                                                                    <TableCell>{formatISTTimeOnly(r.Created_At || r.Created_on)}</TableCell>
+                                                                )}
                                                                 {showRetailerColumn && <TableCell>{r.Retailer_Name || "-"}</TableCell>}
                                                                 {popupFilterType === "ALL" ? (
                                                                     <>

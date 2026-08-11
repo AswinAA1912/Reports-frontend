@@ -19,14 +19,10 @@ import {
     DialogActions,
     Checkbox,
     FormControlLabel,
-    FormGroup,
     FormControl,
     InputLabel,
     Select,
     MenuItem,
-    RadioGroup,
-    Radio,
-    FormLabel,
     ListItemText,
 } from "@mui/material";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -40,6 +36,10 @@ import AppLayout from "../../Layout/appLayout";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import { toast } from "react-toastify";
 import { SettingsService } from "../../services/reportSettings.services";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 
 // Column config type matching other reports
 export interface ColumnConfig {
@@ -47,22 +47,99 @@ export interface ColumnConfig {
     label: string;
     enabled: boolean;
     order: number;
+    metric?: "qty" | "count";
 }
 
 // Initial configurable role columns (all hidden by default as requested)
 const DEFAULT_ROLE_COLUMNS: ColumnConfig[] = [
-    { key: "ATTEN BY", label: "Atten By", enabled: false, order: 0 },
-    { key: "CREATED", label: "Created", enabled: false, order: 1 },
-    { key: "PRINT", label: "Print", enabled: false, order: 2 },
-    { key: "TAKEN", label: "Taken", enabled: false, order: 3 },
-    { key: "CHECK", label: "Check", enabled: false, order: 4 },
-    { key: "DELIVERY", label: "Delivery", enabled: false, order: 5 },
-    { key: "DRIVER", label: "Driver / Hindi", enabled: false, order: 6 },
-    { key: "SUPERVISOR", label: "Supervisor", enabled: false, order: 7 },
-    { key: "LADIES", label: "Ladies", enabled: false, order: 8 },
-    { key: "Total Tonnage", label: "Total Tonnage", enabled: false, order: 9 },
-    { key: "Count", label: "Count", enabled: false, order: 10 },
+    { key: "ATTEN BY", label: "Atten By", enabled: false, order: 0, metric: "qty" },
+    { key: "CREATED", label: "Created", enabled: false, order: 1, metric: "qty" },
+    { key: "PRINT", label: "Print", enabled: false, order: 2, metric: "qty" },
+    { key: "TAKEN", label: "Taken", enabled: false, order: 3, metric: "qty" },
+    { key: "CHECK", label: "Check", enabled: false, order: 4, metric: "qty" },
+    { key: "DELIVERY", label: "Delivery", enabled: false, order: 5, metric: "qty" },
+    { key: "DRIVER", label: "Driver / Hindi", enabled: false, order: 6, metric: "qty" },
+    { key: "SUPERVISOR", label: "Supervisor", enabled: false, order: 7, metric: "qty" },
+    { key: "LADIES", label: "Ladies", enabled: false, order: 8, metric: "qty" },
+    { key: "Total Tonnage", label: "Total Tonnage", enabled: false, order: 9, metric: "qty" },
+    { key: "Count", label: "Count", enabled: false, order: 10, metric: "count" },
 ];
+
+const getColumnLabel = (col: ColumnConfig) => {
+    if (col.key === "Total Tonnage" || col.key === "Count") {
+        return col.label;
+    }
+    const metricLabel = col.metric === "count" ? "Count" : "Qty";
+    return `${col.label} (${metricLabel})`;
+};
+
+interface SortableColumnRowProps {
+    column: ColumnConfig;
+    onToggle: (key: string) => void;
+    onChangeMetric: (key: string, metric: "qty" | "count") => void;
+}
+
+const SortableColumnRow: React.FC<SortableColumnRowProps> = ({ column, onToggle, onChangeMetric }) => {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging
+    } = useSortable({ id: column.key });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        backgroundColor: isDragging ? "#f1f5f9" : "transparent",
+        borderRadius: "4px",
+    };
+
+    return (
+        <Box
+            ref={setNodeRef}
+            style={style}
+            display="flex"
+            alignItems="center"
+            gap={1}
+            py={0.5}
+            px={1}
+        >
+            <IconButton
+                size="small"
+                {...listeners}
+                {...attributes}
+                sx={{ cursor: "grab" }}
+            >
+                <DragIndicatorIcon fontSize="small" />
+            </IconButton>
+            <FormControlLabel
+                control={
+                    <Checkbox
+                        checked={column.enabled}
+                        onChange={() => onToggle(column.key)}
+                        size="small"
+                    />
+                }
+                label={column.label}
+                sx={{ flexGrow: 1, margin: 0 }}
+            />
+            {column.key !== "Total Tonnage" && column.key !== "Count" && (
+                <Select
+                    value={column.metric || "qty"}
+                    onChange={(e) => onChangeMetric(column.key, e.target.value as "qty" | "count")}
+                    size="small"
+                    sx={{ minWidth: 80, height: 28, fontSize: "0.75rem" }}
+                >
+                    <MenuItem value="qty" sx={{ fontSize: "0.75rem" }}>Qty</MenuItem>
+                    <MenuItem value="count" sx={{ fontSize: "0.75rem" }}>Count</MenuItem>
+                </Select>
+            )}
+        </Box>
+    );
+};
 
 interface InvoiceDetail {
     invoiceNo: string;
@@ -96,23 +173,27 @@ const INITIAL_VOUCHERS_DATA: VoucherTypeData[] = [
             {
                 name: "BALAMURUGAN.K",
                 roleValues: {
-                    CREATED: { qty: 930, count: 1 },
-                    "Total Tonnage": { qty: 930, count: 1 },
-                    Count: { qty: 0, count: 1 },
+                    CREATED: { qty: 930, count: 3 },
+                    "Total Tonnage": { qty: 930, count: 3 },
+                    Count: { qty: 0, count: 3 },
                 },
                 invoices: [
-                    { invoiceNo: "INW-ADJ-001", date: "2026-08-08", customer: "Supplier A", qty: 930, count: 1 }
+                    { invoiceNo: "GIA/000223/26-27", date: "2026-08-08", customer: "Supplier A", qty: 700, count: 1 },
+                    { invoiceNo: "GIA/000222/26-27", date: "2026-08-08", customer: "Supplier A", qty: 200, count: 1 },
+                    { invoiceNo: "GIA/000224/26-27", date: "2026-08-08", customer: "Supplier A", qty: 30, count: 1 }
                 ]
             },
             {
                 name: "VELMURUGAN",
                 roleValues: {
-                    CHECK: { qty: 930, count: 1 },
-                    "Total Tonnage": { qty: 930, count: 1 },
-                    Count: { qty: 0, count: 1 },
+                    CHECK: { qty: 930, count: 3 },
+                    "Total Tonnage": { qty: 930, count: 3 },
+                    Count: { qty: 0, count: 3 },
                 },
                 invoices: [
-                    { invoiceNo: "INW-ADJ-002", date: "2026-08-08", customer: "Supplier A", qty: 930, count: 1 }
+                    { invoiceNo: "GIA/000223/26-27", date: "2026-08-08", customer: "Supplier A", qty: 700, count: 1 },
+                    { invoiceNo: "GIA/000222/26-27", date: "2026-08-08", customer: "Supplier A", qty: 200, count: 1 },
+                    { invoiceNo: "GIA/000224/26-27", date: "2026-08-08", customer: "Supplier A", qty: 30, count: 1 }
                 ]
             }
         ]
@@ -808,18 +889,53 @@ const OverallStaffReport: React.FC = () => {
     const [toDate, setToDate] = useState(today);
     const [drawerOpen, setDrawerOpen] = useState(false);
 
-    // Filter states
-    const [displayMode, setDisplayMode] = useState<"qty" | "count">("qty"); // qty vs inv count
-
     // Column Config State
     const [roleColumns, setRoleColumns] = useState<ColumnConfig[]>(() => {
         const saved = sessionStorage.getItem("overallStaffColumns");
-        return saved ? JSON.parse(saved) : DEFAULT_ROLE_COLUMNS;
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                // Check if the saved columns have the correct format (original keys and a metric field present)
+                const isCorrectFormat = parsed.every((c: any) => !c.key.endsWith("_qty") && !c.key.endsWith("_cnt") && ("metric" in c));
+                if (isCorrectFormat) {
+                    return parsed;
+                }
+            } catch (e) {
+                console.error("Error parsing saved columns", e);
+            }
+        }
+        return DEFAULT_ROLE_COLUMNS;
     });
+
+    const handleChangeMetric = (key: string, metric: "qty" | "count") => {
+        setRoleColumns(p => p.map(col => col.key === key ? { ...col, metric } : col));
+    };
 
     useEffect(() => {
         sessionStorage.setItem("overallStaffColumns", JSON.stringify(roleColumns));
     }, [roleColumns]);
+
+    // Drag-and-drop sensors
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: {
+                distance: 5,
+            },
+        })
+    );
+
+    const handleDragEnd = (event: any) => {
+        const { active, over } = event;
+        if (!over) return;
+        if (active.id !== over.id) {
+            setRoleColumns((items) => {
+                const oldIndex = items.findIndex((item) => item.key === active.id);
+                const newIndex = items.findIndex((item) => item.key === over.id);
+                const updated = arrayMove(items, oldIndex, newIndex);
+                return updated.map((item, idx) => ({ ...item, order: idx }));
+            });
+        }
+    };
 
     // Grouping Config State
     const [groups, setGroups] = useState<GroupConfig[]>(() => {
@@ -834,16 +950,8 @@ const OverallStaffReport: React.FC = () => {
     // Selected Expanded Voucher Types
     const [expandedVouchers, setExpandedVouchers] = useState<string[]>([]);
 
-    // Drill down invoice popup state
-    const [invoicePopup, setInvoicePopup] = useState<{
-        open: boolean;
-        staffName: string;
-        invoices: InvoiceDetail[];
-    }>({
-        open: false,
-        staffName: "",
-        invoices: []
-    });
+    // Selected Expanded Staff Invoices inline
+    const [expandedStaff, setExpandedStaff] = useState<string[]>([]);
 
     // Group Creation Modal Dialog
     const [groupCreateOpen, setGroupCreateOpen] = useState(false);
@@ -898,7 +1006,7 @@ const OverallStaffReport: React.FC = () => {
                     expandedSP: "sp_OverallStaffReport",
                     abstractColumns: payloadColumns,
                     expandedColumns: payloadColumns,
-                    createdBy 
+                    createdBy
                 });
                 toast.success("Template Saved Successfully ✅");
             }
@@ -916,7 +1024,7 @@ const OverallStaffReport: React.FC = () => {
             setIsEditTemplate(true);
             const res = await SettingsService.getReportEditData({ reportId: templateId, typeId: 1 });
             const templateCols = res.data.data.columns || [];
-            
+
             // Map settings
             const updatedCols = roleColumns.map(col => {
                 const matched = templateCols.find((t: any) => t.key === col.key);
@@ -1018,17 +1126,18 @@ const OverallStaffReport: React.FC = () => {
                 voucherTypes: matchedVouchers.map(v => {
                     // Compute columns sum for this voucher type
                     const totalTonnageSum = v.staffContributions.reduce((sum: number, sc: StaffContribution) => {
-                        return sum + (sc.roleValues["Total Tonnage"]?.[displayMode] || sc.roleValues["Total Tonnage"]?.qty || 0);
+                        return sum + (sc.roleValues["Total Tonnage"]?.qty || 0);
                     }, 0);
                     const totalCountSum = v.staffContributions.reduce((sum: number, sc: StaffContribution) => {
-                        return sum + (sc.roleValues["Count"]?.[displayMode] || sc.roleValues["Count"]?.count || 0);
+                        return sum + (sc.roleValues["Count"]?.count || 0);
                     }, 0);
 
                     // Compute specific role column sums for header row
                     const roleSums: Record<string, number> = {};
                     roleColumns.forEach(roleCol => {
+                        const metric: "qty" | "count" = roleCol.metric || "qty";
                         roleSums[roleCol.key] = v.staffContributions.reduce((sum: number, sc: StaffContribution) => {
-                            const scVal = sc.roleValues[roleCol.key]?.[displayMode] || 0;
+                            const scVal = sc.roleValues[roleCol.key]?.[metric] || 0;
                             return sum + scVal;
                         }, 0);
                     });
@@ -1055,7 +1164,7 @@ const OverallStaffReport: React.FC = () => {
         // Block 1 (PUR/RET + INT TRF), Block 2 (ADJ + ATTY + CLEANING + WT.CHECK)
         const inBlock1 = inwardsGroups.filter(g => ["PUR / RET", "INT TRF"].includes(g.groupName));
         const inBlock2 = inwardsGroups.filter(g => ["ADJ", "ATTY", "CLEANING", "WT.CHECK"].includes(g.groupName));
-        
+
         const categories = [
             {
                 name: "INWARDS",
@@ -1075,7 +1184,7 @@ const OverallStaffReport: React.FC = () => {
         ].filter(cat => cat.groups.length > 0);
 
         return categories;
-    }, [groups, displayMode, roleColumns]);
+    }, [groups, roleColumns]);
 
     // Toggles expanded voucher state
     const handleToggleExpandVoucher = (voucherName: string) => {
@@ -1107,13 +1216,12 @@ const OverallStaffReport: React.FC = () => {
         };
     }, [tableCategories, roleColumns]);
 
-    // Handle Open Invoice list Dialog popup
-    const handleStaffClick = (staff: StaffContribution) => {
-        setInvoicePopup({
-            open: true,
-            staffName: staff.name,
-            invoices: staff.invoices || []
-        });
+    // Toggle expand staff invoices inline
+    const handleToggleExpandStaff = (voucherName: string, staffName: string) => {
+        const key = `${voucherName}_${staffName}`;
+        setExpandedStaff(prev =>
+            prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+        );
     };
 
     return (
@@ -1145,7 +1253,7 @@ const OverallStaffReport: React.FC = () => {
                                     borderRadius: 0.5,
                                 }}
                             >
-                                <GroupAddIcon fontSize="small" sx={{ color: "#1e3a8a" }} />
+                                <GroupAddIcon fontSize="small" />
                             </IconButton>
                         </Tooltip>
 
@@ -1160,7 +1268,7 @@ const OverallStaffReport: React.FC = () => {
                                     borderRadius: 0.5,
                                 }}
                             >
-                                <SettingsIcon fontSize="small" sx={{ color: "#1e3a8a" }} />
+                                <SettingsIcon fontSize="small" />
                             </IconButton>
                         </Tooltip>
                     </Box>
@@ -1203,19 +1311,18 @@ const OverallStaffReport: React.FC = () => {
                                     <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.85rem", bgcolor: "#1E3A8A" }} align="center">
                                         Kgs
                                     </TableCell>
-                                    
+
                                     {/* STAFF NAME Header only shown when rows are expanded */}
                                     <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.85rem", bgcolor: "#1E3A8A" }}>
                                         STAFF NAME
                                     </TableCell>
 
                                     {/* Dynamically enabled role columns */}
-                                    {roleColumns.filter(c => c.enabled).map(col => (
+                                    {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => (
                                         <TableCell key={col.key} sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.85rem", bgcolor: "#1E3A8A" }} align="center">
-                                            {col.label}
+                                            {getColumnLabel(col)}
                                         </TableCell>
-                                    ))}
-                                </TableRow>
+                                    ))}                                </TableRow>
                             </TableHead>
                             <TableBody>
                                 {/* Grand Total Row at the top of the body, styled as sticky */}
@@ -1230,7 +1337,7 @@ const OverallStaffReport: React.FC = () => {
                                         {grandTotals.totalKgs.toLocaleString()}
                                     </TableCell>
                                     <TableCell sx={{ borderRight: "1px solid #93c5fd", position: "sticky", top: 48, zIndex: 100, bgcolor: "#bfdbfe" }} />
-                                    {roleColumns.filter(c => c.enabled).map(col => (
+                                    {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => (
                                         <TableCell key={col.key} sx={{ color: "#1e3a8a", fontWeight: 900, fontSize: "0.85rem", position: "sticky", top: 48, zIndex: 100, bgcolor: "#bfdbfe", borderRight: "1px solid #e2e8f0" }} align="center">
                                             {grandTotals.roleTotals[col.key].toLocaleString()}
                                         </TableCell>
@@ -1246,6 +1353,12 @@ const OverallStaffReport: React.FC = () => {
                                                 categorySpan += 1;
                                                 if (expandedVouchers.includes(vt.name)) {
                                                     categorySpan += vt.staff.length;
+                                                    vt.staff.forEach((sc: StaffContribution) => {
+                                                        const staffKey = `${vt.name}_${sc.name}`;
+                                                        if (expandedStaff.includes(staffKey) && sc.invoices) {
+                                                            categorySpan += sc.invoices.length;
+                                                        }
+                                                    });
                                                 }
                                             });
                                         });
@@ -1259,6 +1372,12 @@ const OverallStaffReport: React.FC = () => {
                                                 groupSpan += 1;
                                                 if (expandedVouchers.includes(vt.name)) {
                                                     groupSpan += vt.staff.length;
+                                                    vt.staff.forEach((sc: StaffContribution) => {
+                                                        const staffKey = `${vt.name}_${sc.name}`;
+                                                        if (expandedStaff.includes(staffKey) && sc.invoices) {
+                                                            groupSpan += sc.invoices.length;
+                                                        }
+                                                    });
                                                 }
                                             });
 
@@ -1354,25 +1473,21 @@ const OverallStaffReport: React.FC = () => {
                                                             {vt.baseKgs.toLocaleString()}
                                                         </TableCell>
 
-                                                        {/* Staff Name placeholder for Header Row */}
-                                                        <TableCell sx={{ fontStyle: "italic", color: "text.secondary", borderRight: "1px solid #cbd5e1", py: 1 }}>
+                                                        {/* Staff Name placeholder for Voucher Type Row */}
+                                                        <TableCell sx={{ fontStyle: "italic", color: "text.secondary", borderRight: "1px solid #cbd5e1", py: 1 }} align="center">
                                                             -
                                                         </TableCell>
 
                                                         {/* Role wise sums for Voucher Type headers */}
-                                                        {roleColumns.filter(c => c.enabled).map(col => {
-                                                            let value = 0;
-                                                            if (col.key === "Total Tonnage") value = vt.totalTonnage;
-                                                            else if (col.key === "Count") value = vt.totalCount;
-                                                            else value = vt.roleSums[col.key] || 0;
+                                                        {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => {
+                                                            const value = vt.roleSums[col.key] || 0;
 
                                                             return (
                                                                 <TableCell key={col.key} sx={{ fontWeight: 800, borderRight: "1px solid #cbd5e1", py: 1, bgcolor: "#f1f5f9" }} align="center">
                                                                     {value > 0 ? value.toLocaleString() : "0"}
                                                                 </TableCell>
                                                             );
-                                                        })}
-                                                    </TableRow>
+                                                        })}                                                    </TableRow>
                                                 );
 
                                                 isFirstCategoryRow = false;
@@ -1380,43 +1495,114 @@ const OverallStaffReport: React.FC = () => {
 
                                                 // Render Staff nested rows if expanded
                                                 const staffRows = isExpanded && hasStaff ? (
-                                                    vt.staff.map((sc: StaffContribution) => (
-                                                        <TableRow key={sc.name} sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
-                                                            {/* Empty placeholders for columns spanned by Group & Voucher Type */}
-                                                            <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} />
-                                                            <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} align="center" />
-                                                            <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} align="center" />
-                                                            <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} align="center" />
-                                                            <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} align="center" />
+                                                    vt.staff.map((sc: StaffContribution) => {
+                                                        const isStaffExpanded = expandedStaff.includes(`${vt.name}_${sc.name}`);
+                                                        const hasInvoices = sc.invoices && sc.invoices.length > 0;
 
-                                                            {/* Clickable Staff Name to Drill down Invoice Details */}
-                                                            <TableCell
-                                                                sx={{
-                                                                    fontWeight: 650,
-                                                                    color: "#1e3a8a",
-                                                                    textDecoration: "underline",
-                                                                    cursor: "pointer",
-                                                                    borderRight: "1px solid #e2e8f0",
-                                                                    py: 0.8,
-                                                                    fontSize: "0.8rem",
-                                                                    pl: 4
-                                                                }}
-                                                                onClick={() => handleStaffClick(sc)}
-                                                            >
-                                                                {sc.name}
-                                                            </TableCell>
+                                                        const staffRow = (
+                                                            <TableRow key={sc.name} sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
+                                                                {/* Empty placeholders for columns spanned by Group & Voucher Type */}
+                                                                <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} />
+                                                                <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} align="center" />
 
-                                                            {/* Staff role values */}
-                                                            {roleColumns.filter(c => c.enabled).map(col => {
-                                                                const roleVal = sc.roleValues[col.key]?.[displayMode] || 0;
-                                                                return (
-                                                                    <TableCell key={col.key} sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
-                                                                        {roleVal > 0 ? roleVal.toLocaleString() : "0"}
+                                                                {/* Clickable Staff Name to Drill down Invoice Details */}
+                                                                <TableCell
+                                                                    sx={{
+                                                                        fontWeight: 650,
+                                                                        color: "#1e3a8a",
+                                                                        cursor: "pointer",
+                                                                        borderRight: "1px solid #e2e8f0",
+                                                                        py: 0.8,
+                                                                        fontSize: "0.8rem",
+                                                                        pl: 4,
+                                                                        "&:hover": { textDecoration: "underline" }
+                                                                    }}
+                                                                    onClick={() => handleToggleExpandStaff(vt.name, sc.name)}
+                                                                >
+                                                                    <Box display="flex" alignItems="center" gap={0.5}>
+                                                                        {isStaffExpanded ? (
+                                                                            <KeyboardArrowUpIcon sx={{ fontSize: "0.9rem" }} />
+                                                                        ) : (
+                                                                            <KeyboardArrowDownIcon sx={{ fontSize: "0.9rem" }} />
+                                                                        )}
+                                                                        {sc.name}
+                                                                    </Box>
+                                                                </TableCell>
+
+                                                                {/* Staff role values */}
+                                                                {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => {
+                                                                    const metric: "qty" | "count" = col.metric || "qty";
+                                                                    const roleVal = sc.roleValues[col.key]?.[metric] || 0;
+                                                                    return (
+                                                                        <TableCell key={col.key} sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
+                                                                            {roleVal > 0 ? roleVal.toLocaleString() : "0"}
+                                                                        </TableCell>
+                                                                    );
+                                                                })}                                                            </TableRow>
+                                                        );
+
+                                                        const invoiceRows = isStaffExpanded && hasInvoices ? (
+                                                            sc.invoices.map((inv, idx) => (
+                                                                <TableRow key={`${sc.name}_${inv.invoiceNo}_${idx}`} sx={{ bgcolor: "#ffffff", "&:hover": { bgcolor: "#f8fafc" } }}>
+                                                                    {/* Empty placeholders for category, group, voucher type columns */}
+                                                                    <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} />
+                                                                    <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} align="center" />
+
+                                                                    {/* Invoice number in STAFF NAME column */}
+                                                                    <TableCell
+                                                                        sx={{
+                                                                            color: "#334155",
+                                                                            borderRight: "1px solid #cbd5e1",
+                                                                            py: 0.6,
+                                                                            fontSize: "0.8rem",
+                                                                            pl: 6
+                                                                        }}
+                                                                    >
+                                                                        {inv.invoiceNo}
                                                                     </TableCell>
-                                                                );
-                                                            })}
-                                                        </TableRow>
-                                                    ))
+
+                                                                    {/* Invoice values corresponding to active role columns */}
+                                                                    {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => {
+                                                                        const metric: "qty" | "count" = col.metric || "qty";
+                                                                        let val = 0;
+                                                                        if (col.key === "Total Tonnage") {
+                                                                            val = metric === "qty" ? inv.qty : inv.count;
+                                                                        } else if (col.key === "Count") {
+                                                                            val = metric === "qty" ? 0 : inv.count;
+                                                                        } else {
+                                                                            const staffHasRole = sc.roleValues[col.key] && (
+                                                                                sc.roleValues[col.key][metric] > 0
+                                                                            );
+                                                                            if (staffHasRole) {
+                                                                                val = metric === "qty" ? inv.qty : inv.count;
+                                                                            }
+                                                                        }
+
+                                                                        return (
+                                                                            <TableCell
+                                                                                key={col.key}
+                                                                                sx={{
+                                                                                    color: "#475569",
+                                                                                    borderRight: "1px solid #cbd5e1",
+                                                                                    py: 0.6,
+                                                                                    fontSize: "0.8rem"
+                                                                                }}
+                                                                                align="center"
+                                                                            >
+                                                                                {val.toLocaleString()}
+                                                                            </TableCell>
+                                                                        );
+                                                                    })}                                                                </TableRow>
+                                                            ))
+                                                        ) : null;
+
+                                                        return (
+                                                            <React.Fragment key={sc.name}>
+                                                                {staffRow}
+                                                                {invoiceRows}
+                                                            </React.Fragment>
+                                                        );
+                                                    })
                                                 ) : null;
 
                                                 return (
@@ -1443,6 +1629,7 @@ const OverallStaffReport: React.FC = () => {
                 </Box>
             </AppLayout>
 
+
             {/* Column Config Settings Dialog popover */}
             <Dialog
                 open={Boolean(settingsAnchor)}
@@ -1456,49 +1643,40 @@ const OverallStaffReport: React.FC = () => {
                         <CloseIcon />
                     </IconButton>
                 </DialogTitle>
-                <DialogContent dividers>
-                    {/* Switch layout display mode (Quantity vs Count) */}
-                    <FormControl sx={{ mb: 3, display: "block" }}>
-                        <FormLabel sx={{ fontWeight: 700, color: "#1E3A8A", fontSize: "0.9rem", mb: 1, display: "block" }}>
-                            Value Mode (Staff contribution display value)
-                        </FormLabel>
-                        <RadioGroup
-                            row
-                            value={displayMode}
-                            onChange={(e) => setDisplayMode(e.target.value as "qty" | "count")}
-                        >
-                            <FormControlLabel value="qty" control={<Radio size="small" />} label="Qty (Kgs / Tonnage)" />
-                            <FormControlLabel value="count" control={<Radio size="small" />} label="Invoice Count (Count)" />
-                        </RadioGroup>
-                    </FormControl>
-
+                <DialogContent dividers sx={{ maxHeight: "60vh", overflowY: "auto" }}>
                     <Typography variant="subtitle2" fontWeight={700} color="#1E3A8A" mb={1.5}>
-                        Toggle Visible Columns
+                        Drag columns to reorder / Toggle visibility
                     </Typography>
-                    <FormGroup>
-                        {roleColumns.map((col) => (
-                            <FormControlLabel
-                                key={col.key}
-                                control={
-                                    <Checkbox
-                                        checked={col.enabled}
-                                        onChange={() => handleToggleColumn(col.key)}
-                                        size="small"
-                                    />
-                                }
-                                label={col.label}
-                            />
-                        ))}
-                    </FormGroup>
+
+                    <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={handleDragEnd}
+                    >
+                        <SortableContext
+                            items={roleColumns.map(c => c.key)}
+                            strategy={verticalListSortingStrategy}
+                        >
+                            <Box display="flex" flexDirection="column" gap={0.5}>
+                                {[...roleColumns]
+                                    .sort((a, b) => a.order - b.order)
+                                    .map((col) => (
+                                        <SortableColumnRow
+                                            key={col.key}
+                                            column={col}
+                                            onToggle={handleToggleColumn}
+                                            onChangeMetric={handleChangeMetric}
+                                        />
+                                    ))}                            </Box>
+                        </SortableContext>
+                    </DndContext>
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setSettingsAnchor(null)} color="primary" variant="contained">
                         Close
                     </Button>
                 </DialogActions>
-            </Dialog>
-
-            {/* Group Creation Dialog */}
+            </Dialog>            {/* Group Creation Dialog */}
             <Dialog
                 open={groupCreateOpen}
                 onClose={handleCloseGroupDialog}
@@ -1559,6 +1737,7 @@ const OverallStaffReport: React.FC = () => {
                             onChange={(e) => setNewGroupCategory(e.target.value as any)}
                         >
                             <MenuItem value="INWARDS">INWARDS</MenuItem>
+                            <MenuItem value="ADJUSTMENTS">ADJUSTMENTS</MenuItem>
                             <MenuItem value="OUTWARDS">OUTWARDS</MenuItem>
                         </Select>
                     </FormControl>
@@ -1589,59 +1768,7 @@ const OverallStaffReport: React.FC = () => {
                 </DialogActions>
             </Dialog>
 
-            {/* Drill Down Invoice details dialog */}
-            <Dialog
-                open={invoicePopup.open}
-                onClose={() => setInvoicePopup(p => ({ ...p, open: false }))}
-                maxWidth="md"
-                fullWidth
-            >
-                <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    Invoice Details - {invoicePopup.staffName}
-                    <IconButton size="small" onClick={() => setInvoicePopup(p => ({ ...p, open: false }))}>
-                        <CloseIcon />
-                    </IconButton>
-                </DialogTitle>
-                <DialogContent dividers>
-                    <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid #e2e8f0" }}>
-                        <Table size="small">
-                            <TableHead>
-                                <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                                    <TableCell sx={{ fontWeight: 700 }}>Invoice No</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Customer / Details</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }} align="center">Qty</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }} align="center">Count</TableCell>
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {invoicePopup.invoices.length > 0 ? (
-                                    invoicePopup.invoices.map((inv, idx) => (
-                                        <TableRow key={idx}>
-                                            <TableCell>{inv.invoiceNo}</TableCell>
-                                            <TableCell>{dayjs(inv.date).format("DD-MM-YYYY")}</TableCell>
-                                            <TableCell>{inv.customer}</TableCell>
-                                            <TableCell align="center">{inv.qty.toLocaleString()}</TableCell>
-                                            <TableCell align="center">{inv.count}</TableCell>
-                                        </TableRow>
-                                    ))
-                                ) : (
-                                    <TableRow>
-                                        <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
-                                            No invoice details found.
-                                        </TableCell>
-                                    </TableRow>
-                                )}
-                            </TableBody>
-                        </Table>
-                    </TableContainer>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setInvoicePopup(p => ({ ...p, open: false }))} variant="contained">
-                        Close
-                    </Button>
-                </DialogActions>
-            </Dialog>
+            {/* Inline Drill Down replacement - no dialog popup needed */}
 
             {/* Template Save Dialog */}
             <Dialog

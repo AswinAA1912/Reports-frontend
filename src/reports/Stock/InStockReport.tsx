@@ -124,6 +124,35 @@ const parseStaffInvolved = (staffStr: string): Record<string, string> => {
     return parsed;
 };
 
+const getTakenByNameFromStaffInvolved = (staffInvolved: string | null | undefined): string => {
+    if (!staffInvolved) return "";
+    const parts = staffInvolved.split(",");
+    const takenNames: string[] = [];
+    parts.forEach(part => {
+        const trimmed = part.trim();
+        const match = trimmed.match(/^(.*?)\s*\(Taken\)$/i);
+        if (match) {
+            takenNames.push(match[1].trim());
+        }
+    });
+    return takenNames.join(",");
+};
+
+const getTakenName = (r: any): string => {
+    if (!r) return "";
+    return String(r.Taken ?? r.Taken_By_Name ?? getTakenByNameFromStaffInvolved(r.Staff_Involved) ?? "").trim();
+};
+
+const isTrip = (pr: any): boolean => {
+    if (!pr) return false;
+    return (
+        pr.trip_voucher_number !== null && pr.trip_voucher_number !== undefined ||
+        pr.trip_id !== null && pr.trip_id !== undefined ||
+        (pr.Trip_No !== null && pr.Trip_No !== undefined && String(pr.Trip_No).trim() !== "") ||
+        (pr.trip_no !== null && pr.trip_no !== undefined && String(pr.trip_no).trim() !== "")
+    );
+};
+
 const InStockReport: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
     const [columnsConfig, setColumnsConfig] = useState<ColumnConfig[]>(() => {
@@ -231,20 +260,20 @@ const InStockReport: React.FC = () => {
         if (qtyMode === "qty") {
             return {
                 opening: "OB_Bal_Qty" as keyof stockWiseReport,
-                in: "Pur_Qty" as keyof stockWiseReport,
+                in: "IN_Qty" as keyof stockWiseReport,
                 procIn: "Proc_IN_Qty" as keyof stockWiseReport,
                 procOut: "Proc_OUT_Qty" as keyof stockWiseReport,
-                out: "Sal_Qty" as keyof stockWiseReport,
+                out: "OUT_Qty" as keyof stockWiseReport,
                 closing: "Bal_Qty" as keyof stockWiseReport
             };
         } else {
             return {
                 opening: "OB_Act_Qty" as keyof stockWiseReport,
-                in: "Pur_Act_Qty" as keyof stockWiseReport,
+                in: "IN_Act_Qty" as keyof stockWiseReport,
                 procIn: "Proc_IN_Act_Qty" as keyof stockWiseReport,
                 procOut: "Proc_OUT_Act_Qty" as keyof stockWiseReport,
-                out: "Sal_Act_Qty" as keyof stockWiseReport,
-                closing: "Bal_Act_Qty" as keyof stockWiseReport
+                out: "OUT_Act_Qty" as keyof stockWiseReport,
+                closing: "Act_Bal_Qty" as keyof stockWiseReport
             };
         }
     }, [qtyMode]);
@@ -463,11 +492,11 @@ const InStockReport: React.FC = () => {
         }
     };
 
-    const getTripOrTakenLabel = React.useCallback((t: any, isOutward: boolean): string => {
+    const getTripOrTakenLabel = React.useCallback((t: any, _isOutward: boolean): string => {
         const rawVal = t.Trip_No || t.trip_no || t.trip_voucher_number || t.trip_id;
         if (!rawVal) return "N/A";
         const str = String(rawVal).trim();
-        const prefix = isOutward ? "Taken" : "Trip";
+        const prefix = "Trip";
 
         let label = "";
         if (str.toLowerCase().startsWith("trip") || str.toLowerCase().startsWith("taken")) {
@@ -543,7 +572,7 @@ const InStockReport: React.FC = () => {
             r.Direction !== undefined;
 
         // Check if pending taken
-        const isPending = String(r.Record_Type || "").toUpperCase() === "PENDING_DELIVERY" || String(r.Record_Type || "").toUpperCase() === "PENDING" || popupFilterType === "PENDING TAKEN";
+        const isPending = String(r.Record_Type || "").toUpperCase() === "PENDING_DELIVERY" || String(r.Record_Type || "").toUpperCase() === "PENDING" || popupFilterType === "Pending Taken" || popupFilterType === "Pending Delivery" || popupFilterType === "PENDING TAKEN";
 
         let stockIn = Number(r.Stock_In_Qty ?? r.In_Qty ?? r.Bill_Qty ?? 0);
         let stockOut = Number(r.Stock_Out_Qty ?? r.Out_Qty ?? r.Bill_Qty ?? 0);
@@ -634,7 +663,7 @@ const InStockReport: React.FC = () => {
         if (filterType === "RETURN") {
             return inQty;
         }
-        if (filterType === "PENDING TAKEN") {
+        if (filterType === "PENDING TAKEN" || filterType === "Pending Taken" || filterType === "Pending Delivery") {
             return pendingQty;
         }
         if (filterType.startsWith("Taken")) {
@@ -648,7 +677,7 @@ const InStockReport: React.FC = () => {
         if (popupFilterType === "OB") return "OPENING QTY";
         if (popupFilterType === "IN" || popupFilterType === "RETURN" || inwardTripHeaders.includes(popupFilterType)) return "IN QTY";
         if (popupFilterType === "OUT" || outwardTakenHeaders.includes(popupFilterType)) return "OUT QTY";
-        if (popupFilterType === "PENDING TAKEN") return "PENDING QTY";
+        if (popupFilterType === "PENDING TAKEN" || popupFilterType === "Pending Taken" || popupFilterType === "Pending Delivery") return "PENDING QTY";
         if (popupFilterType === "PROCESS") return "PROCESS QTY";
         if (popupFilterType === "PROCESS_IN") return "PROCESS IN QTY";
         if (popupFilterType === "PROCESS_OUT") return "PROCESS OUT QTY";
@@ -658,7 +687,7 @@ const InStockReport: React.FC = () => {
     const getRowInvNoDisplay = (r: any) => {
         const isOut = outwardMode || String(r.stock_direction || r.Direction || "").toUpperCase() === "OUT";
         const isIn = inwardMode || (!outwardMode && String(r.stock_direction || r.Direction || "").toUpperCase() === "IN");
-        
+
         const invNo = r.Do_Inv_No || r.Do_inv_no || r.invoice_no || r.Invoice_No || r.Invoice_no || r.Bill_Nos || r.bill_nos;
         const tripNo = r.Trip_No || r.trip_no;
         const tripVoucherNo = r.Trip_Voucher_Number || r.trip_voucher_number;
@@ -1071,16 +1100,26 @@ const InStockReport: React.FC = () => {
             let takenQty = 0;
             let takenPersonCount = 0;
             let pendingTakenQty = 0;
+            let pendingDeliveryQty = 0;
 
             outRecords.forEach((r) => {
                 const qty = Number(r.quantity || 0);
-                const hasTakenByName = r.Taken_By_Name !== null && r.Taken_By_Name !== undefined && String(r.Taken_By_Name).trim() !== "";
-                if (hasTakenByName) {
+                
+                const status = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
+                if (status === "TAKEN") {
                     takenQty += qty;
-                    const persons = String(r.Taken_By_Name).split(",").map(p => p.trim()).filter(Boolean);
-                    takenPersonCount += persons.length;
                 } else {
                     pendingTakenQty += qty;
+                }
+
+                if (!isTrip(r)) {
+                    pendingDeliveryQty += qty;
+                }
+
+                const rawTaken = getTakenName(r);
+                if (rawTaken) {
+                    const persons = rawTaken.split(",").map(p => p.trim()).filter(Boolean);
+                    takenPersonCount += persons.length;
                 }
             });
 
@@ -1094,7 +1133,9 @@ const InStockReport: React.FC = () => {
                 takenQty,
                 takenPersonCount,
                 pendingTakenQty,
-                hasModuleTransactions
+                pendingDeliveryQty,
+                hasModuleTransactions,
+                outRecords
             };
         };
     }, [mappedProcessData, selectedGodown, moduleFilter]);
@@ -1230,7 +1271,7 @@ const InStockReport: React.FC = () => {
             });
         });
 
-            return Object.values(groups);
+        return Object.values(groups);
     }, [filteredDetailedData, enabledConfigColumns, isPivotMode, groupByColumn]);
 
     const numFilteredAndSortedRows = filteredData;
@@ -1266,65 +1307,51 @@ const InStockReport: React.FC = () => {
     }, [filteredData, getProductDetails, getTripLabel, viewMode]);
 
     const getQtyForTaken = React.useCallback((item: stockWiseReport, label: string): { qty: number; persons: number } => {
-        const godownName = String(item.Godown_Name || selectedGodown?.godown_name || "").toLowerCase().trim();
-        const productIds = (item as any).Product_Ids;
-        const pIdsToSearch = Array.isArray(productIds) && productIds.length > 0 ? productIds : [item.Product_Id];
-        let records: any[] = [];
-        pIdsToSearch.forEach((pId) => {
-            if (!pId && pId !== 0) return;
-            const strId = String(pId).trim();
-            const key1 = `${strId}_${godownName}`;
-            let recs = mappedProcessData.mapByProductAndGodown[key1];
-            if (!recs || recs.length === 0) {
-                const rawRecs = mappedProcessData.mapByProductIdOnly[strId];
-                if (rawRecs) {
-                    recs = rawRecs.filter((r: any) => {
-                        const rGodown = String(r.godown_name || "").toLowerCase().trim();
-                        return !rGodown || rGodown === godownName;
-                    });
-                }
-            }
-            if (recs && recs.length > 0) {
-                records = [...records, ...recs];
-            }
-        });
-
-        const outRecords = records.filter(r => r.stock_direction?.toUpperCase() === "OUT");
+        const { outRecords } = getProductDetails(item);
 
         if (label === "Taken") {
             let qty = 0;
             let personsCount = 0;
             outRecords.forEach(r => {
-                if (r.Taken_By_Name) {
+                const status = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
+                if (status === "TAKEN") {
                     qty += Number(r.quantity || 0);
-                    const names = String(r.Taken_By_Name).split(",").map(n => n.trim()).filter(Boolean);
-                    personsCount += names.length;
-                }
-            });
-            const finalQty = qtyMode === "bags" ? Math.round(qty / getItemWeight(item)) : qty;
-            return { qty: finalQty, persons: personsCount };
-        } else {
-            const nameToMatch = label.replace(/^Taken\s*-\s*/i, "").trim().toLowerCase();
-            let qty = 0;
-            let personsCount = 0;
-            outRecords.forEach(r => {
-                if (r.Taken_By_Name) {
-                    const names = String(r.Taken_By_Name).split(",").map(n => n.trim()).filter(Boolean);
-                    if (names.some(n => n.toLowerCase() === nameToMatch)) {
-                        qty += Number(r.quantity || 0);
-                        personsCount += 1;
+                    const rawTaken = getTakenName(r);
+                    if (rawTaken) {
+                        const names = rawTaken.split(",").map(n => n.trim()).filter(Boolean);
+                        personsCount += names.length;
                     }
                 }
             });
             const finalQty = qtyMode === "bags" ? Math.round(qty / getItemWeight(item)) : qty;
             return { qty: finalQty, persons: personsCount };
+        } else if (label === "Pending Taken") {
+            let qty = 0;
+            outRecords.forEach(r => {
+                const status = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
+                if (status !== "TAKEN") {
+                    qty += Number(r.quantity || 0);
+                }
+            });
+            const finalQty = qtyMode === "bags" ? Math.round(qty / getItemWeight(item)) : qty;
+            return { qty: finalQty, persons: 0 };
+        } else {
+            const tripLabelToMatch = label.toLowerCase().trim();
+            let qty = 0;
+            outRecords.forEach(r => {
+                if (isTrip(r) && getTripLabel(r).toLowerCase().trim() === tripLabelToMatch) {
+                    qty += Number(r.quantity || 0);
+                }
+            });
+            const finalQty = qtyMode === "bags" ? Math.round(qty / getItemWeight(item)) : qty;
+            return { qty: finalQty, persons: 0 };
         }
-    }, [selectedGodown, mappedProcessData, qtyMode]);
+    }, [getProductDetails, qtyMode, getTripLabel]);
 
     // Unique outward taken headers in filteredData
     const outwardTakenHeaders = useMemo(() => {
         if (viewMode === "cumulative") {
-            return ["Taken"];
+            return ["Taken", "Pending Taken"];
         }
         const set = new Set<string>();
         filteredData.forEach((item) => {
@@ -1350,19 +1377,17 @@ const InStockReport: React.FC = () => {
                     records = [...records, ...recs];
                 }
             });
-            
+
             const outRecords = records.filter(r => r.stock_direction?.toUpperCase() === "OUT");
             outRecords.forEach(r => {
-                if (r.Taken_By_Name) {
-                    const names = String(r.Taken_By_Name).split(",").map(n => n.trim()).filter(Boolean);
-                    names.forEach(name => {
-                        set.add(`Taken - ${name}`);
-                    });
+                if (isTrip(r)) {
+                    set.add(getTripLabel(r));
                 }
             });
         });
-        return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    }, [filteredData, selectedGodown, mappedProcessData, viewMode]);
+        const sortedTrips = Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        return sortedTrips;
+    }, [filteredData, selectedGodown, mappedProcessData, viewMode, getTripLabel]);
 
 
     // Available split-up options for dropdowns
@@ -1375,8 +1400,11 @@ const InStockReport: React.FC = () => {
     }, []);
 
     const allOutwardOptions = useMemo(() => {
-        return [...outwardTakenHeaders, "PENDING TAKEN"];
-    }, [outwardTakenHeaders]);
+        if (viewMode === "cumulative") {
+            return ["Taken", "Pending Taken"];
+        }
+        return [...outwardTakenHeaders, "Pending Delivery"];
+    }, [outwardTakenHeaders, viewMode]);
 
     // Currently visible columns derived for dropdown display
     const visibleInwardColumns = useMemo(() => {
@@ -1436,28 +1464,16 @@ const InStockReport: React.FC = () => {
             let sumQty = 0;
             let sumPersons = 0;
             filteredData.forEach(item => {
-                const { takenQty, takenPersonCount } = getProductDetails(item);
-                sumQty += qtyMode === "bags" ? Math.round(takenQty / getItemWeight(item)) : takenQty;
-                sumPersons += takenPersonCount;
+                const data = getQtyForTaken(item, label);
+                sumQty += data.qty;
+                sumPersons += data.persons;
             });
             totals[label] = { qty: sumQty, persons: sumPersons };
         });
         return totals;
-    }, [filteredData, outwardTakenHeaders, getProductDetails, qtyMode]);
+    }, [filteredData, outwardTakenHeaders, getQtyForTaken]);
 
-    const getTakenByNameFromStaffInvolved = (staffInvolved: string | null | undefined): string => {
-        if (!staffInvolved) return "";
-        const parts = staffInvolved.split(",");
-        const takenNames: string[] = [];
-        parts.forEach(part => {
-            const trimmed = part.trim();
-            const match = trimmed.match(/^(.*?)\s*\(Taken\)$/i);
-            if (match) {
-                takenNames.push(match[1].trim());
-            }
-        });
-        return takenNames.join(",");
-    };
+    // Removed duplicate getTakenByNameFromStaffInvolved helper (moved to top of file)
 
     const filteredPopupRows = useMemo(() => {
         return ledgerRows.filter((r) => {
@@ -1466,18 +1482,17 @@ const InStockReport: React.FC = () => {
                 String(r.Voucher_Type || r.voucher_name || "").toLowerCase().includes("stock journal") ||
                 String(r.module || r.Module || "").toLowerCase().includes("stock journal") ||
                 r.Direction !== undefined;
-            const isPending = String(r.Record_Type || "").toUpperCase() === "PENDING_DELIVERY" || String(r.Record_Type || "").toUpperCase() === "PENDING" || popupFilterType === "PENDING TAKEN";
+            const isPending = String(r.Record_Type || "").toUpperCase() === "PENDING_DELIVERY" || String(r.Record_Type || "").toUpperCase() === "PENDING" || popupFilterType === "Pending Taken" || popupFilterType === "Pending Delivery";
 
             const { inQty, outQty } = getRowQuantities(r);
 
             if (popupFilterType === "OB") {
                 return isOB;
-            }
-            if (popupFilterType === "IN") {
-                return !isOB && !isSJ && !isPending && inQty > 0;
+            } if (popupFilterType === "IN") {
+                return !isOB && !isPending && inQty > 0;
             }
             if (popupFilterType === "OUT") {
-                return !isSJ && !isPending && outQty > 0;
+                return !isPending && outQty > 0;
             }
             if (popupFilterType === "PROCESS") {
                 return isSJ;
@@ -1489,7 +1504,7 @@ const InStockReport: React.FC = () => {
                 return isSJ && outQty > 0;
             }
 
-            // Lookup corresponding raw record from processApiData for trip / return / delivery filtering
+            // Lookup corresponding raw record from processApi data for trip / return / delivery filtering
             if (popupProductInfo) {
                 const godownName = String(popupProductInfo.godownName || "").toLowerCase().trim();
                 const productIdStr = String(popupProductInfo.productId).trim();
@@ -1507,18 +1522,10 @@ const InStockReport: React.FC = () => {
                 const invoiceNo = r.Do_Inv_No || r.Do_inv_no || r.invoice_no;
                 const matchingRawRecord = recs.find(x => x.module_voucher_number === invoiceNo);
 
-                const isTrip = (pr: any) => {
-                    return (
-                        pr.trip_voucher_number !== null ||
-                        pr.trip_id !== null ||
-                        (pr.Trip_No !== null && pr.Trip_No !== undefined && String(pr.Trip_No).trim() !== "") ||
-                        (pr.trip_no !== null && pr.trip_no !== undefined && String(pr.trip_no).trim() !== "")
-                    );
-                };
-
                 const isOutwardRecord = outwardMode ||
                     popupFilterType === "OUT" ||
-                    popupFilterType === "PENDING TAKEN" ||
+                    popupFilterType === "Pending Taken" ||
+                    popupFilterType === "Pending Delivery" ||
                     popupFilterType === "Taken" ||
                     outwardTakenHeaders.includes(popupFilterType) ||
                     (popupFilterType === "ALL" && String(r.Direction || r.stock_direction || "").toUpperCase() === "OUT");
@@ -1536,27 +1543,49 @@ const InStockReport: React.FC = () => {
                     }
                     return !isOB && !isSJ && !isPending && !directTripInfo.isTrip && Number(r.Stock_In_Qty ?? r.In_Qty ?? r.Bill_Qty ?? 0) > 0;
                 }
-                if (popupFilterType === "PENDING TAKEN") {
-                    if (matchingRawRecord) {
-                        const rawTakenName = matchingRawRecord.Taken_By_Name || getTakenByNameFromStaffInvolved(matchingRawRecord.Staff_Involved);
-                        const hasTakenName = rawTakenName !== null && rawTakenName !== undefined && String(rawTakenName).trim() !== "";
-                        return matchingRawRecord.stock_direction?.toUpperCase() === "OUT" && !hasTakenName;
+                if (popupFilterType === "Pending Taken") {
+                    const rawTakenStatus = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
+                    const tripTakenStatus = matchingRawRecord ? String(matchingRawRecord.Taken_Status || matchingRawRecord.taken_status || "").toUpperCase().trim() : "";
+                    const isTaken = matchingRawRecord ? (tripTakenStatus === "TAKEN") : (rawTakenStatus === "TAKEN");
+                    const { pendingQty } = getRowQuantities(r);
+                    return !isOB && !isSJ && !isTaken && pendingQty > 0;
+                }
+                if (popupFilterType === "Pending Delivery") {
+                    const { pendingQty } = getRowQuantities(r);
+                    if (processApiData.length > 0) {
+                        if (matchingRawRecord) {
+                            return !isOB && !isSJ && !isTrip(matchingRawRecord) && pendingQty > 0;
+                        }
+                        return false;
                     }
-                    const rTakenName = r.Taken_By_Name || getTakenByNameFromStaffInvolved(r.Staff_Involved);
-                    const rHasTakenName = rTakenName !== null && rTakenName !== undefined && String(rTakenName).trim() !== "";
-                    return String(r.Direction || r.stock_direction || "").toUpperCase() === "OUT" && !rHasTakenName;
+                    return !isOB && !isSJ && !isTrip(r) && pendingQty > 0;
                 }
                 if (popupFilterType === "Taken") {
-                    if (matchingRawRecord) {
-                        const rawTakenName = matchingRawRecord.Taken_By_Name || getTakenByNameFromStaffInvolved(matchingRawRecord.Staff_Involved);
-                        const hasTakenName = rawTakenName !== null && rawTakenName !== undefined && String(rawTakenName).trim() !== "";
-                        return matchingRawRecord.stock_direction?.toUpperCase() === "OUT" && hasTakenName;
-                    }
-                    const rTakenName = r.Taken_By_Name || getTakenByNameFromStaffInvolved(r.Staff_Involved);
-                    const rHasTakenName = rTakenName !== null && rTakenName !== undefined && String(rTakenName).trim() !== "";
-                    return String(r.Direction || r.stock_direction || "").toUpperCase() === "OUT" && rHasTakenName;
+                    const rawTakenStatus = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
+                    const tripTakenStatus = matchingRawRecord ? String(matchingRawRecord.Taken_Status || matchingRawRecord.taken_status || "").toUpperCase().trim() : "";
+                    const isTaken = matchingRawRecord ? (tripTakenStatus === "TAKEN") : (rawTakenStatus === "TAKEN");
+                    return isTaken;
                 }
-                if (popupFilterType.startsWith("Trip") || (popupFilterType.startsWith("Taken") && popupFilterType !== "Taken")) {
+                if (popupFilterType.startsWith("Taken") && popupFilterType !== "Taken") {
+                    const nameToMatch = popupFilterType.replace(/^Taken\s*-\s*/i, "").trim().toLowerCase();
+                    if (processApiData.length > 0) {
+                        if (matchingRawRecord) {
+                            const rawTakenName = getTakenName(matchingRawRecord);
+                            if (rawTakenName) {
+                                const names = rawTakenName.split(",").map(n => n.trim().toLowerCase()).filter(Boolean);
+                                return names.includes(nameToMatch);
+                            }
+                        }
+                        return false;
+                    }
+                    const rawTakenName = getTakenName(r);
+                    if (rawTakenName) {
+                        const names = rawTakenName.split(",").map(n => n.trim().toLowerCase()).filter(Boolean);
+                        return names.includes(nameToMatch);
+                    }
+                    return false;
+                }
+                if (popupFilterType.startsWith("Trip")) {
                     const cleanLabel = (lbl: string) => {
                         const parts = lbl.split(" - ");
                         return parts.slice(0, 2).join(" - ").trim().toLowerCase();
@@ -1681,10 +1710,7 @@ const InStockReport: React.FC = () => {
         const base = Number(item[qtyKeys.out] || 0);
         return qtyMode === "bags" ? Math.round(base / getItemWeight(item)) : base;
     };
-    const getClosingStock = (item: stockWiseReport) => {
-        const base = Number(item[qtyKeys.closing] || 0);
-        return qtyMode === "bags" ? Math.round(base / getItemWeight(item)) : base;
-    };
+
     const getProcIn = (item: stockWiseReport) => {
         const base = Number(item[qtyKeys.procIn] || 0);
         return qtyMode === "bags" ? Math.round(base / getItemWeight(item)) : base;
@@ -1693,6 +1719,104 @@ const InStockReport: React.FC = () => {
         const base = Number(item[qtyKeys.procOut] || 0);
         return qtyMode === "bags" ? Math.round(base / getItemWeight(item)) : base;
     };
+
+    const getRecalculatedStockInQty = React.useCallback((item: stockWiseReport) => {
+        const { trips, returnQty } = getProductDetails(item);
+        if (inwardMode) {
+            if (trips.length > 0 || returnQty > 0) {
+                let sum = 0;
+                inwardTripHeaders.forEach((tripLabel) => {
+                    if (!hiddenInwardColumns.includes(tripLabel)) {
+                        sum += getQtyForTrip(trips, tripLabel, getItemWeight(item));
+                    }
+                });
+                if (!hiddenInwardColumns.includes("RETURN")) {
+                    sum += qtyMode === "bags" ? Math.round(returnQty / getItemWeight(item)) : returnQty;
+                }
+                return sum;
+            } else {
+                const rawStockIn = getStockInTotal(item);
+                if (allInwardOptions.length === 0) return rawStockIn;
+                const visibleCount = visibleInwardColumns.length;
+                if (visibleCount === 0) return 0;
+                if (visibleCount === allInwardOptions.length) return rawStockIn;
+                return (rawStockIn * visibleCount) / allInwardOptions.length;
+            }
+        } else {
+            return getStockInTotal(item);
+        }
+    }, [inwardMode, getProductDetails, inwardTripHeaders, hiddenInwardColumns, getQtyForTrip, visibleInwardColumns, allInwardOptions, getStockInTotal, qtyMode]);
+
+    // Recalculated row-level Stock Out Quantity summing only visible columns
+    const getRecalculatedStockOutQty = React.useCallback((item: stockWiseReport) => {
+        const { pendingTakenQty, pendingDeliveryQty } = getProductDetails(item);
+        if (outwardMode) {
+            const rawStockOut = getStockOutTotal(item);
+            if (rawStockOut > 0) {
+                let sum = 0;
+                if (viewMode === "cumulative") {
+                    if (!hiddenOutwardColumns.includes("Taken")) {
+                        sum += getQtyForTaken(item, "Taken").qty;
+                    }
+                    if (!hiddenOutwardColumns.includes("Pending Taken")) {
+                        sum += qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
+                    }
+                } else {
+                    if (!hiddenOutwardColumns.includes("Taken")) {
+                        sum += getQtyForTaken(item, "Taken").qty;
+                    }
+                    if (!hiddenOutwardColumns.includes("Pending Delivery")) {
+                        sum += qtyMode === "bags" ? Math.round(pendingDeliveryQty / getItemWeight(item)) : pendingDeliveryQty;
+                    }
+                    sum = Math.min(sum, rawStockOut);
+                }
+                return sum;
+            } else {
+                if (allOutwardOptions.length === 0) return rawStockOut;
+                const visibleCount = visibleOutwardColumns.length;
+                if (visibleCount === 0) return 0;
+                if (visibleCount === allOutwardOptions.length) return rawStockOut;
+                return (rawStockOut * visibleCount) / allOutwardOptions.length;
+            }
+        } else {
+            return getStockOutTotal(item);
+        }
+    }, [outwardMode, getProductDetails, hiddenOutwardColumns, qtyMode, visibleOutwardColumns, allOutwardOptions, getStockOutTotal, getQtyForTaken, viewMode]);
+
+    // Recalculated row-level Process Quantity summing only visible columns
+    const getRecalculatedProcessQty = React.useCallback((item: stockWiseReport) => {
+        const { procInQty, procOutQty } = getProductDetails(item);
+        const weight = getItemWeight(item);
+        if (processMode) {
+            let pIn = procInQty > 0
+                ? (qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty)
+                : getProcIn(item);
+            let pOut = procOutQty > 0
+                ? (qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty)
+                : getProcOut(item);
+
+            let sum = 0;
+            if (!hiddenProcessColumns.includes("PROCESS IN")) {
+                sum += pIn;
+            }
+            if (!hiddenProcessColumns.includes("PROCESS OUT")) {
+                sum -= pOut;
+            }
+            return sum;
+        } else {
+            return getProcIn(item) - getProcOut(item);
+        }
+    }, [processMode, getProductDetails, hiddenProcessColumns, getProcIn, getProcOut, qtyMode]);
+
+    // Recalculated row-level Closing Stock Quantity
+    const getRecalculatedClosingStock = React.useCallback((item: stockWiseReport) => {
+        const opening = getOpeningStock(item);
+        const inQty = getRecalculatedStockInQty(item);
+        const procQty = getRecalculatedProcessQty(item);
+        const outQty = getRecalculatedStockOutQty(item);
+
+        return opening + inQty + procQty - outQty;
+    }, [getOpeningStock, getRecalculatedStockInQty, getRecalculatedProcessQty, getRecalculatedStockOutQty]);
 
     // Calculate totals for the selected godown's filtered data
     const detailedTotals = useMemo(() => {
@@ -1709,14 +1833,14 @@ const InStockReport: React.FC = () => {
 
         filteredData.forEach(item => {
             const op = getOpeningStock(item);
-            const inQty = getStockInTotal(item);
-            const outQty = getStockOutTotal(item);
-            const clQty = getClosingStock(item);
+            const inQty = getRecalculatedStockInQty(item);
+            const outQty = getRecalculatedStockOutQty(item);
+            const clQty = getRecalculatedClosingStock(item);
 
             opening += op;
             closing += clQty;
 
-            const { trips, returnQty, stockInQty, procInQty, procOutQty, outwardQty, takenQty, pendingTakenQty } = getProductDetails(item);
+            const { trips, returnQty, procInQty, procOutQty, takenQty, pendingTakenQty, pendingDeliveryQty } = getProductDetails(item);
 
             if (processApiData.length > 0) {
                 const weight = getItemWeight(item);
@@ -1724,22 +1848,22 @@ const InStockReport: React.FC = () => {
                 const itemTakenQty = qtyMode === "bags" ? Math.round(itemTakenQtyBase / weight) : itemTakenQtyBase;
 
                 const itemReturnQty = qtyMode === "bags" ? Math.round(returnQty / weight) : returnQty;
-                const itemStockIn = qtyMode === "bags" ? Math.round(stockInQty / weight) : stockInQty;
                 const itemProcIn = qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty;
                 const itemProcOut = qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty;
 
                 const itemOutTakenQty = qtyMode === "bags" ? Math.round(takenQty / weight) : takenQty;
-                const itemDeliveryQty = qtyMode === "bags" ? Math.round(pendingTakenQty / weight) : pendingTakenQty;
-                const itemStockOut = qtyMode === "bags" ? Math.round(outwardQty / weight) : outwardQty;
+                const itemDeliveryQty = qtyMode === "bags" 
+                    ? Math.round((viewMode === "cumulative" ? pendingTakenQty : pendingDeliveryQty) / weight) 
+                    : (viewMode === "cumulative" ? pendingTakenQty : pendingDeliveryQty);
 
                 takenQtyTotal += itemTakenQty;
                 returnQtyTotal += itemReturnQty;
                 outTakenQtyTotal += itemOutTakenQty;
                 deliveryQtyTotal += itemDeliveryQty;
-                procIn += itemProcIn;
-                procOut += itemProcOut;
-                stockIn += itemStockIn;
-                stockOutTotal += itemStockOut;
+                procIn += itemProcIn > 0 ? itemProcIn : getProcIn(item);
+                procOut += itemProcOut > 0 ? itemProcOut : getProcOut(item);
+                stockIn += inQty;
+                stockOutTotal += outQty;
             } else {
                 const pIn = getProcIn(item);
                 const pOut = getProcOut(item);
@@ -1778,83 +1902,6 @@ const InStockReport: React.FC = () => {
             totalProcess: procIn - procOut
         };
     }, [filteredData, qtyKeys, getProductDetails, processApiData]);
-
-    // Recalculated row-level Stock In Quantity summing only visible columns
-    const getRecalculatedStockInQty = React.useCallback((item: stockWiseReport) => {
-        const { trips, returnQty } = getProductDetails(item);
-        if (trips.length > 0 || returnQty > 0) {
-            let sum = 0;
-            inwardTripHeaders.forEach((tripLabel) => {
-                if (!hiddenInwardColumns.includes(tripLabel)) {
-                    sum += getQtyForTrip(trips, tripLabel, getItemWeight(item));
-                }
-            });
-            if (!hiddenInwardColumns.includes("RETURN")) {
-                sum += qtyMode === "bags" ? Math.round(returnQty / getItemWeight(item)) : returnQty;
-            }
-            return sum;
-        } else {
-            const rawStockIn = getStockInTotal(item);
-            if (allInwardOptions.length === 0) return rawStockIn;
-            const visibleCount = visibleInwardColumns.length;
-            if (visibleCount === 0) return 0;
-            if (visibleCount === allInwardOptions.length) return rawStockIn;
-            return (rawStockIn * visibleCount) / allInwardOptions.length;
-        }
-    }, [getProductDetails, inwardTripHeaders, hiddenInwardColumns, getQtyForTrip, visibleInwardColumns, allInwardOptions, getStockInTotal, qtyMode]);
-
-    // Recalculated row-level Stock Out Quantity summing only visible columns
-    const getRecalculatedStockOutQty = React.useCallback((item: stockWiseReport) => {
-        const { takenQty, pendingTakenQty, outwardQty } = getProductDetails(item);
-        if (outwardQty > 0) {
-            let sum = 0;
-            if (!hiddenOutwardColumns.includes("Taken")) {
-                sum += qtyMode === "bags" ? Math.round(takenQty / getItemWeight(item)) : takenQty;
-            }
-            if (!hiddenOutwardColumns.includes("PENDING TAKEN")) {
-                sum += qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
-            }
-            return sum;
-        } else {
-            const rawStockOut = getStockOutTotal(item);
-            if (allOutwardOptions.length === 0) return rawStockOut;
-            const visibleCount = visibleOutwardColumns.length;
-            if (visibleCount === 0) return 0;
-            if (visibleCount === allOutwardOptions.length) return rawStockOut;
-            return (rawStockOut * visibleCount) / allOutwardOptions.length;
-        }
-    }, [getProductDetails, outwardTakenHeaders, hiddenOutwardColumns, qtyMode, visibleOutwardColumns, allOutwardOptions, getStockOutTotal]);
-
-    // Recalculated row-level Process Quantity summing only visible columns
-    const getRecalculatedProcessQty = React.useCallback((item: stockWiseReport) => {
-        const { procInQty, procOutQty } = getProductDetails(item);
-        const weight = getItemWeight(item);
-        let pIn = procInQty > 0
-            ? (qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty)
-            : getProcIn(item);
-        let pOut = procOutQty > 0
-            ? (qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty)
-            : getProcOut(item);
-
-        let sum = 0;
-        if (!hiddenProcessColumns.includes("PROCESS IN")) {
-            sum += pIn;
-        }
-        if (!hiddenProcessColumns.includes("PROCESS OUT")) {
-            sum -= pOut;
-        }
-        return sum;
-    }, [getProductDetails, hiddenProcessColumns, getProcIn, getProcOut, qtyMode]);
-
-    // Recalculated row-level Closing Stock Quantity
-    const getRecalculatedClosingStock = React.useCallback((item: stockWiseReport) => {
-        const opening = getOpeningStock(item);
-        const inQty = getRecalculatedStockInQty(item);
-        const procQty = getRecalculatedProcessQty(item);
-        const outQty = getRecalculatedStockOutQty(item);
-
-        return opening + inQty + procQty - outQty;
-    }, [getOpeningStock, getRecalculatedStockInQty, getRecalculatedProcessQty, getRecalculatedStockOutQty]);
 
     // Memoized recalculated grand totals
     const recalculatedTotals = useMemo(() => {
@@ -1925,7 +1972,7 @@ const InStockReport: React.FC = () => {
                     });
                 } else if (outwardMode) {
                     const visibleTrips = outwardTakenHeaders.filter(t => !hiddenOutwardColumns.includes(t));
-                    const isPendingVisible = !hiddenOutwardColumns.includes("PENDING TAKEN");
+                    const isPendingVisible = !hiddenOutwardColumns.includes("Pending Taken");
 
                     const outwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
                     if (isPendingVisible) outwardHeaderRow.push("Pending Taken");
@@ -1938,7 +1985,7 @@ const InStockReport: React.FC = () => {
 
                         visibleTrips.forEach(tripLabel => {
                             const data = getQtyForTaken(item, tripLabel);
-                            row.push(data.qty === 0 ? "-" : (data.persons > 0 ? `${fmt(data.qty)} (${data.persons})` : fmt(data.qty)));
+                            row.push(data.qty === 0 ? "-" : fmt(data.qty));
                         });
 
                         if (isPendingVisible) {
@@ -1969,7 +2016,8 @@ const InStockReport: React.FC = () => {
                         if (isProcessOutVisible) row.push(fmt(displayProcOut));
                         row.push(fmt(getRecalculatedProcessQty(item)));
                         excelData.push(row);
-                    });                } else {
+                    });
+                } else {
                     excelData.push(["S.No", ...configLabels, "Opening Stock", "Stock In", "Process", "Stock Outwards", "Closing Stock"]);
                     filteredData.forEach((item, idx) => {
                         const row: any[] = [idx + 1];
@@ -2086,7 +2134,7 @@ const InStockReport: React.FC = () => {
                     });
                 } else if (outwardMode) {
                     const visibleTrips = outwardTakenHeaders.filter(t => !hiddenOutwardColumns.includes(t));
-                    const isPendingVisible = !hiddenOutwardColumns.includes("PENDING TAKEN");
+                    const isPendingVisible = !hiddenOutwardColumns.includes("Pending Taken");
 
                     const outwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
                     if (isPendingVisible) outwardHeaderRow.push("Pending Taken");
@@ -2100,7 +2148,7 @@ const InStockReport: React.FC = () => {
 
                         visibleTrips.forEach(tripLabel => {
                             const data = getQtyForTaken(item, tripLabel);
-                            row.push(data.qty === 0 ? "-" : (data.persons > 0 ? `${fmtStr(data.qty)} (${data.persons})` : fmtStr(data.qty)));
+                            row.push(data.qty === 0 ? "-" : fmtStr(data.qty));
                         });
 
                         if (isPendingVisible) {
@@ -2131,7 +2179,8 @@ const InStockReport: React.FC = () => {
                         if (isProcessOutVisible) row.push(fmtStr(displayProcOut));
                         row.push(fmtStr(getRecalculatedProcessQty(item)));
                         body.push(row);
-                    });                } else {
+                    });
+                } else {
                     headers = [["S.No", ...configLabels, "Opening", "Stock In", "Process", "Stock Out", "Closing"]];
                     filteredData.forEach((item, idx) => {
                         const row: any[] = [idx + 1];
@@ -2213,7 +2262,7 @@ const InStockReport: React.FC = () => {
         }
         if (outwardMode) {
             const visibleTripsCount = outwardTakenHeaders.filter(t => !hiddenOutwardColumns.includes(t)).length;
-            const isPendingVisible = !hiddenOutwardColumns.includes("PENDING TAKEN") ? 1 : 0;
+            const isPendingVisible = !hiddenOutwardColumns.includes("Pending Taken") ? 1 : 0;
             return L + visibleTripsCount + isPendingVisible + 2; // S.No + Config + Taken + Pending Taken + Total Outward
         }
         if (processMode) {
@@ -2394,7 +2443,7 @@ const InStockReport: React.FC = () => {
                                     let sno = 1;
                                     return Object.entries(groupedGodowns).map(([parentName, items]) => {
 
-                                                                       const groupOBRaw = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.ACt_OB_Qty : r.OB_Qty) || 0), 0);
+                                        const groupOBRaw = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.ACt_OB_Qty : r.OB_Qty) || 0), 0);
                                         const groupInRaw = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.ACt_In_Qty : r.IN_Qty) || 0), 0);
                                         const groupProcessRaw = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.Process_Act_IN_OUT_Qty : r.Process_IN_OUT_Qty) || 0), 0);
                                         const groupOutRaw = items.reduce((sum, r) => sum + Number((qtyMode === "actQty" ? r.ACt_Out_Qty : r.Out_Qty) || 0), 0);
@@ -2602,12 +2651,16 @@ const InStockReport: React.FC = () => {
                                     labelId="view-mode-dropdown-label"
                                     id="view-mode-dropdown-select"
                                     value={viewMode}
-                                    onChange={(e) => setViewMode(e.target.value as "cumulative" | "trip")}
+                                    onChange={(e) => {
+                                        setViewMode(e.target.value as "cumulative" | "trip");
+                                        setHiddenInwardColumns([]);
+                                        setHiddenOutwardColumns([]);
+                                    }}
                                     input={<OutlinedInput label="View Mode" />}
                                     sx={{ bgcolor: "#fff", borderRadius: 1, fontSize: "0.8rem", height: 36 }}
                                 >
-                                    <MenuItem value="cumulative" sx={{ fontSize: "0.8rem", fontWeight: 600 }}>Cumulative</MenuItem>
-                                    <MenuItem value="trip" sx={{ fontSize: "0.8rem", fontWeight: 600 }}>Trip Wise</MenuItem>
+                                    <MenuItem value="cumulative" sx={{ fontSize: "0.8rem", fontWeight: 600 }}>{outwardMode ? "Taken" : "Cumulative"}</MenuItem>
+                                    <MenuItem value="trip" sx={{ fontSize: "0.8rem", fontWeight: 600 }}>{outwardMode ? "Tripwise" : "Trip Wise"}</MenuItem>
                                 </Select>
                             </FormControl>
                         )}
@@ -3046,31 +3099,31 @@ const InStockReport: React.FC = () => {
                                                     </TableCell>
                                                 );
                                             })}
-                                            {!hiddenOutwardColumns.includes("PENDING TAKEN") && (
-                                                <TableCell
-                                                    align="right"
-                                                    sx={{
-                                                        width: 130,
-                                                        minWidth: 130,
-                                                        backgroundColor: "#1E3A8A",
-                                                        color: "#fff",
-                                                        fontWeight: 600,
-                                                        py: 0.5,
-                                                        borderRight: "1px solid #cbd5e1"
-                                                    }}
-                                                >
-                                                    <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
-                                                        PENDING TAKEN
-                                                        <IconButton
-                                                            size="small"
-                                                            onClick={() => handleHideOutwardColumn("PENDING TAKEN")}
-                                                            sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
-                                                        >
-                                                            <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
-                                                        </IconButton>
-                                                    </Box>
-                                                </TableCell>
-                                            )}
+                                             {viewMode === "trip" && !hiddenOutwardColumns.includes("Pending Delivery") && (
+                                                 <TableCell
+                                                     align="right"
+                                                     sx={{
+                                                         width: 130,
+                                                         minWidth: 130,
+                                                         backgroundColor: "#1E3A8A",
+                                                         color: "#fff",
+                                                         fontWeight: 600,
+                                                         py: 0.5,
+                                                         borderRight: "1px solid #cbd5e1"
+                                                     }}
+                                                 >
+                                                     <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                                                         PENDING DELIVERY
+                                                         <IconButton
+                                                             size="small"
+                                                             onClick={() => handleHideOutwardColumn("Pending Delivery")}
+                                                             sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
+                                                         >
+                                                             <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
+                                                         </IconButton>
+                                                     </Box>
+                                                 </TableCell>
+                                             )}
                                             <TableCell
                                                 align="right"
                                                 onClick={() => handleSetOutwardMode(false)}
@@ -3127,7 +3180,7 @@ const InStockReport: React.FC = () => {
                                                 {inwardTripHeaders.map((tripLabel) => {
                                                     if (hiddenInwardColumns.includes(tripLabel)) return null;
                                                     return (
-                                                                                         <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: viewMode === "cumulative" ? 120 : 200, minWidth: viewMode === "cumulative" ? 120 : 200 }}>
+                                                        <TableCell key={tripLabel} align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: viewMode === "cumulative" ? 120 : 200, minWidth: viewMode === "cumulative" ? 120 : 200 }}>
                                                             {formatQtyVal(inwardTripTotals[tripLabel])}
                                                         </TableCell>
                                                     );
@@ -3187,14 +3240,12 @@ const InStockReport: React.FC = () => {
                                                                 const data = outwardTakenTotals[tripLabel];
                                                                 if (!data) return "-";
                                                                 if (data.qty === 0) return "-";
-                                                                return data.persons > 0
-                                                                    ? `${formatQtyVal(data.qty)} (${data.persons})`
-                                                                    : formatQtyVal(data.qty);
+                                                                return formatQtyVal(data.qty);
                                                             })()}
                                                         </TableCell>
                                                     );
                                                 })}
-                                                {!hiddenOutwardColumns.includes("PENDING TAKEN") && (
+                                                {viewMode === "trip" && !hiddenOutwardColumns.includes("Pending Delivery") && (
                                                     <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 130, minWidth: 130 }}>
                                                         {formatQtyVal(detailedTotals.deliveryQtyTotal)}
                                                     </TableCell>
@@ -3538,7 +3589,7 @@ const InStockReport: React.FC = () => {
                                                     {outwardMode && (
                                                         <>
                                                             {(() => {
-                                                                const { pendingTakenQty } = getProductDetails(item);
+                                                                const { pendingDeliveryQty } = getProductDetails(item);
                                                                 return (
                                                                     <>
                                                                         {outwardTakenHeaders.map((tripLabel) => {
@@ -3566,32 +3617,32 @@ const InStockReport: React.FC = () => {
                                                                                         "&:hover": qty !== 0 ? { color: "#1d4ed8" } : {}
                                                                                     }}
                                                                                 >
-                                                                                    {qty === 0 ? "-" : (data.persons > 0 ? `${formatQtyVal(qty)} (${data.persons})` : formatQtyVal(qty))}
+                                                                                    {qty === 0 ? "-" : formatQtyVal(qty)}
                                                                                 </TableCell>
                                                                             );
                                                                         })}
-                                                                        {!hiddenOutwardColumns.includes("PENDING TAKEN") && (
+                                                                        {viewMode === "trip" && !hiddenOutwardColumns.includes("Pending Delivery") && (
                                                                             <TableCell
                                                                                 align="right"
                                                                                 onClick={() => {
-                                                                                    const pQty = qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
+                                                                                    const pQty = qtyMode === "bags" ? Math.round(pendingDeliveryQty / getItemWeight(item)) : pendingDeliveryQty;
                                                                                     if (pQty !== 0) {
-                                                                                        handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'PENDING TAKEN');
+                                                                                        handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'Pending Delivery');
                                                                                     }
                                                                                 }}
                                                                                 sx={{
                                                                                     borderRight: "1px solid #e2e8f0",
                                                                                     fontWeight: 600,
                                                                                     pr: 2,
-                                                                                    color: pendingTakenQty > 0 ? "#2563eb" : "#475569",
-                                                                                    cursor: pendingTakenQty !== 0 ? "pointer" : "default",
-                                                                                    textDecoration: pendingTakenQty !== 0 ? "underline" : "none",
+                                                                                    color: pendingDeliveryQty > 0 ? "#2563eb" : "#475569",
+                                                                                    cursor: pendingDeliveryQty !== 0 ? "pointer" : "default",
+                                                                                    textDecoration: pendingDeliveryQty !== 0 ? "underline" : "none",
                                                                                     width: 130,
                                                                                     minWidth: 130,
-                                                                                    "&:hover": pendingTakenQty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                                    "&:hover": pendingDeliveryQty !== 0 ? { color: "#1d4ed8" } : {}
                                                                                 }}
                                                                             >
-                                                                                {formatQtyVal(qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty)}
+                                                                                {pendingDeliveryQty === 0 ? "-" : formatQtyVal(qtyMode === "bags" ? Math.round(pendingDeliveryQty / getItemWeight(item)) : pendingDeliveryQty)}
                                                                             </TableCell>
                                                                         )}
                                                                     </>

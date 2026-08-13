@@ -1731,95 +1731,99 @@ const InStockReport: React.FC = () => {
     };
 
     const getRecalculatedStockInQty = React.useCallback((item: stockWiseReport) => {
+        const rawStockIn = getStockInTotal(item);
+        const visibleCount = visibleInwardColumns.length;
+        if (visibleCount === allInwardOptions.length) {
+            return rawStockIn;
+        }
+        if (visibleCount === 0) {
+            return 0;
+        }
+
         const { trips, returnQty } = getProductDetails(item);
-        if (inwardMode) {
-            if (trips.length > 0 || returnQty > 0) {
-                let sum = 0;
-                inwardTripHeaders.forEach((tripLabel) => {
-                    if (!hiddenInwardColumns.includes(tripLabel)) {
-                        sum += getQtyForTrip(trips, tripLabel, getItemWeight(item));
-                    }
-                });
-                if (!hiddenInwardColumns.includes("RETURN")) {
-                    sum += qtyMode === "bags" ? Math.round(returnQty / getItemWeight(item)) : returnQty;
-                }
-                return sum;
-            } else {
-                const rawStockIn = getStockInTotal(item);
-                if (allInwardOptions.length === 0) return rawStockIn;
-                const visibleCount = visibleInwardColumns.length;
-                if (visibleCount === 0) return 0;
-                if (visibleCount === allInwardOptions.length) return rawStockIn;
-                return (rawStockIn * visibleCount) / allInwardOptions.length;
-            }
-        } else {
-            return getStockInTotal(item);
-        }
-    }, [inwardMode, getProductDetails, inwardTripHeaders, hiddenInwardColumns, getQtyForTrip, visibleInwardColumns, allInwardOptions, getStockInTotal, qtyMode]);
-
-    // Recalculated row-level Stock Out Quantity summing only visible columns
-    const getRecalculatedStockOutQty = React.useCallback((item: stockWiseReport) => {
-        const { pendingTakenQty, pendingDeliveryQty } = getProductDetails(item);
-        if (outwardMode) {
-            const rawStockOut = getStockOutTotal(item);
-            if (rawStockOut > 0) {
-                let sum = 0;
-                if (viewMode === "cumulative") {
-                    if (!hiddenOutwardColumns.includes("Taken")) {
-                        sum += getQtyForTaken(item, "Taken").qty;
-                    }
-                    if (!hiddenOutwardColumns.includes("Pending Taken")) {
-                        sum += qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
-                    }
-                    if (!hiddenOutwardColumns.includes("Inplace")) {
-                        sum += getQtyForTaken(item, "Inplace").qty;
-                    }
-                } else {
-                    if (!hiddenOutwardColumns.includes("Taken")) {
-                        sum += getQtyForTaken(item, "Taken").qty;
-                    }
-                    if (!hiddenOutwardColumns.includes("Pending Delivery")) {
-                        sum += qtyMode === "bags" ? Math.round(pendingDeliveryQty / getItemWeight(item)) : pendingDeliveryQty;
-                    }
-                    sum = Math.min(sum, rawStockOut);
-                }
-                return sum;
-            } else {
-                if (allOutwardOptions.length === 0) return rawStockOut;
-                const visibleCount = visibleOutwardColumns.length;
-                if (visibleCount === 0) return 0;
-                if (visibleCount === allOutwardOptions.length) return rawStockOut;
-                return (rawStockOut * visibleCount) / allOutwardOptions.length;
-            }
-        } else {
-            return getStockOutTotal(item);
-        }
-    }, [outwardMode, getProductDetails, hiddenOutwardColumns, qtyMode, visibleOutwardColumns, allOutwardOptions, getStockOutTotal, getQtyForTaken, viewMode]);
-
-    // Recalculated row-level Process Quantity summing only visible columns
-    const getRecalculatedProcessQty = React.useCallback((item: stockWiseReport) => {
-        const { procInQty, procOutQty } = getProductDetails(item);
-        const weight = getItemWeight(item);
-        if (processMode) {
-            let pIn = procInQty > 0
-                ? (qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty)
-                : getProcIn(item);
-            let pOut = procOutQty > 0
-                ? (qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty)
-                : getProcOut(item);
-
+        if (trips.length > 0 || returnQty > 0) {
             let sum = 0;
-            if (!hiddenProcessColumns.includes("PROCESS IN")) {
-                sum += pIn;
-            }
-            if (!hiddenProcessColumns.includes("PROCESS OUT")) {
-                sum -= pOut;
+            inwardTripHeaders.forEach((tripLabel) => {
+                if (!hiddenInwardColumns.includes(tripLabel)) {
+                    sum += getQtyForTrip(trips, tripLabel, getItemWeight(item));
+                }
+            });
+            if (!hiddenInwardColumns.includes("RETURN")) {
+                sum += qtyMode === "bags" ? Math.round(returnQty / getItemWeight(item)) : returnQty;
             }
             return sum;
         } else {
+            return (rawStockIn * visibleCount) / allInwardOptions.length;
+        }
+    }, [getProductDetails, inwardTripHeaders, hiddenInwardColumns, getQtyForTrip, visibleInwardColumns, allInwardOptions, getStockInTotal, qtyMode]);
+
+    // Recalculated row-level Stock Out Quantity summing only visible columns
+    const getRecalculatedStockOutQty = React.useCallback((item: stockWiseReport) => {
+        const rawStockOut = getStockOutTotal(item);
+        const visibleCount = visibleOutwardColumns.length;
+        if (visibleCount === allOutwardOptions.length) {
+            return rawStockOut;
+        }
+        if (visibleCount === 0) {
+            return 0;
+        }
+
+        const { pendingTakenQty, pendingDeliveryQty } = getProductDetails(item);
+        if (rawStockOut > 0) {
+            let sum = 0;
+            if (viewMode === "cumulative") {
+                if (!hiddenOutwardColumns.includes("Taken")) {
+                    sum += getQtyForTaken(item, "Taken").qty;
+                }
+                if (!hiddenOutwardColumns.includes("Pending Taken")) {
+                    sum += qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
+                }
+                if (!hiddenOutwardColumns.includes("Inplace")) {
+                    sum += getQtyForTaken(item, "Inplace").qty;
+                }
+            } else {
+                if (!hiddenOutwardColumns.includes("Taken")) {
+                    sum += getQtyForTaken(item, "Taken").qty;
+                }
+                if (!hiddenOutwardColumns.includes("Pending Delivery")) {
+                    sum += qtyMode === "bags" ? Math.round(pendingDeliveryQty / getItemWeight(item)) : pendingDeliveryQty;
+                }
+                sum = Math.min(sum, rawStockOut);
+            }
+            return sum;
+        } else {
+            return (rawStockOut * visibleCount) / allOutwardOptions.length;
+        }
+    }, [getProductDetails, hiddenOutwardColumns, qtyMode, visibleOutwardColumns, allOutwardOptions, getStockOutTotal, getQtyForTaken, viewMode]);
+
+    // Recalculated row-level Process Quantity summing only visible columns
+    const getRecalculatedProcessQty = React.useCallback((item: stockWiseReport) => {
+        const visibleCount = visibleProcessColumns.length;
+        if (visibleCount === allProcessOptions.length) {
             return getProcIn(item) - getProcOut(item);
         }
-    }, [processMode, getProductDetails, hiddenProcessColumns, getProcIn, getProcOut, qtyMode]);
+        if (visibleCount === 0) {
+            return 0;
+        }
+
+        const { procInQty, procOutQty } = getProductDetails(item);
+        const weight = getItemWeight(item);
+        let pIn = procInQty > 0
+            ? (qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty)
+            : getProcIn(item);
+        let pOut = procOutQty > 0
+            ? (qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty)
+            : getProcOut(item);
+
+        let sum = 0;
+        if (!hiddenProcessColumns.includes("PROCESS IN")) {
+            sum += pIn;
+        }
+        if (!hiddenProcessColumns.includes("PROCESS OUT")) {
+            sum -= pOut;
+        }
+        return sum;
+    }, [getProductDetails, hiddenProcessColumns, getProcIn, getProcOut, qtyMode, visibleProcessColumns, allProcessOptions]);
 
     // Recalculated row-level Closing Stock Quantity
     const getRecalculatedClosingStock = React.useCallback((item: stockWiseReport) => {

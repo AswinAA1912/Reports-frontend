@@ -1417,7 +1417,7 @@ const OverallStaffReport: React.FC = () => {
                                                                 rowSpan={groupSpan}
                                                                 sx={{
                                                                     fontWeight: 750,
-                                                                    bgcolor: "#f0f9ff", // Very Light Blue
+                                                                    bgcolor: "#f0f9ff",
                                                                     color: "#0c4a6e",
                                                                     borderRight: "2px solid #bae6fd",
                                                                     borderBottom: "2px solid #bae6fd",
@@ -1676,7 +1676,7 @@ const OverallStaffReport: React.FC = () => {
                         Close
                     </Button>
                 </DialogActions>
-            </Dialog>            {/* Group Creation Dialog */}
+            </Dialog>
             <Dialog
                 open={groupCreateOpen}
                 onClose={handleCloseGroupDialog}

@@ -145,12 +145,8 @@ const getTakenName = (r: any): string => {
 
 const isTrip = (pr: any): boolean => {
     if (!pr) return false;
-    return (
-        pr.trip_voucher_number !== null && pr.trip_voucher_number !== undefined ||
-        pr.trip_id !== null && pr.trip_id !== undefined ||
-        (pr.Trip_No !== null && pr.Trip_No !== undefined && String(pr.Trip_No).trim() !== "") ||
-        (pr.trip_no !== null && pr.trip_no !== undefined && String(pr.trip_no).trim() !== "")
-    );
+    const vNo = pr.trip_voucher_number || pr.Trip_Voucher_Number || pr.trip_id || pr.Trip_Id || pr.Trip_No || pr.trip_no;
+    return vNo !== null && vNo !== undefined && String(vNo).trim() !== "";
 };
 
 const InStockReport: React.FC = () => {
@@ -685,7 +681,6 @@ const InStockReport: React.FC = () => {
     };
 
     const getRowInvNoDisplay = (r: any) => {
-        const isOut = outwardMode || String(r.stock_direction || r.Direction || "").toUpperCase() === "OUT";
         const isIn = inwardMode || (!outwardMode && String(r.stock_direction || r.Direction || "").toUpperCase() === "IN");
 
         const invNo = r.Do_Inv_No || r.Do_inv_no || r.invoice_no || r.Invoice_No || r.Invoice_no || r.Bill_Nos || r.bill_nos;
@@ -693,17 +688,11 @@ const InStockReport: React.FC = () => {
         const tripVoucherNo = r.Trip_Voucher_Number || r.trip_voucher_number;
 
         const tripStr = tripNo ? (
-            isOut ? (
-                String(tripNo).trim().toLowerCase().startsWith("trip")
-                    ? String(tripNo).trim().replace(/trip/i, "Taken")
-                    : String(tripNo).trim().toLowerCase().startsWith("taken")
-                        ? String(tripNo).trim()
-                        : `Taken - ${tripNo}`
-            ) : (
-                String(tripNo).trim().toLowerCase().startsWith("trip")
-                    ? String(tripNo).trim()
+            String(tripNo).trim().toLowerCase().startsWith("trip")
+                ? String(tripNo).trim()
+                : String(tripNo).trim().toLowerCase().startsWith("taken")
+                    ? String(tripNo).trim().replace(/taken/i, "Trip")
                     : `Trip - ${tripNo}`
-            )
         ) : "";
 
         if (isIn) {
@@ -1046,14 +1035,6 @@ const InStockReport: React.FC = () => {
                 }
             }
 
-            const isTrip = (r: any) => {
-                return (
-                    r.trip_voucher_number !== null ||
-                    r.trip_id !== null ||
-                    (r.Trip_No !== null && r.Trip_No !== undefined && String(r.Trip_No).trim() !== "") ||
-                    (r.trip_no !== null && r.trip_no !== undefined && String(r.trip_no).trim() !== "")
-                );
-            };
 
             if (moduleFilter !== 'ALL') {
                 records = records.filter(r => {
@@ -1098,28 +1079,32 @@ const InStockReport: React.FC = () => {
             );
 
             let takenQty = 0;
+            let inplaceQty = 0;
             let takenPersonCount = 0;
             let pendingTakenQty = 0;
             let pendingDeliveryQty = 0;
 
             outRecords.forEach((r) => {
                 const qty = Number(r.quantity || 0);
-                
+
                 const status = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
                 if (status === "TAKEN") {
-                    takenQty += qty;
+                    if (isTrip(r)) {
+                        takenQty += qty;
+                        const rawTaken = getTakenName(r);
+                        if (rawTaken) {
+                            const persons = rawTaken.split(",").map(p => p.trim()).filter(Boolean);
+                            takenPersonCount += persons.length;
+                        }
+                    } else {
+                        inplaceQty += qty;
+                    }
                 } else {
                     pendingTakenQty += qty;
                 }
 
                 if (!isTrip(r)) {
                     pendingDeliveryQty += qty;
-                }
-
-                const rawTaken = getTakenName(r);
-                if (rawTaken) {
-                    const persons = rawTaken.split(",").map(p => p.trim()).filter(Boolean);
-                    takenPersonCount += persons.length;
                 }
             });
 
@@ -1131,6 +1116,7 @@ const InStockReport: React.FC = () => {
                 procOutQty,
                 outwardQty,
                 takenQty,
+                inplaceQty,
                 takenPersonCount,
                 pendingTakenQty,
                 pendingDeliveryQty,
@@ -1314,7 +1300,7 @@ const InStockReport: React.FC = () => {
             let personsCount = 0;
             outRecords.forEach(r => {
                 const status = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
-                if (status === "TAKEN") {
+                if (status === "TAKEN" && isTrip(r)) {
                     qty += Number(r.quantity || 0);
                     const rawTaken = getTakenName(r);
                     if (rawTaken) {
@@ -1325,6 +1311,16 @@ const InStockReport: React.FC = () => {
             });
             const finalQty = qtyMode === "bags" ? Math.round(qty / getItemWeight(item)) : qty;
             return { qty: finalQty, persons: personsCount };
+        } else if (label === "Inplace") {
+            let qty = 0;
+            outRecords.forEach(r => {
+                const status = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
+                if (status === "TAKEN" && !isTrip(r)) {
+                    qty += Number(r.quantity || 0);
+                }
+            });
+            const finalQty = qtyMode === "bags" ? Math.round(qty / getItemWeight(item)) : qty;
+            return { qty: finalQty, persons: 0 };
         } else if (label === "Pending Taken") {
             let qty = 0;
             outRecords.forEach(r => {
@@ -1351,7 +1347,7 @@ const InStockReport: React.FC = () => {
     // Unique outward taken headers in filteredData
     const outwardTakenHeaders = useMemo(() => {
         if (viewMode === "cumulative") {
-            return ["Taken", "Pending Taken"];
+            return ["Taken", "Pending Taken", "Inplace"];
         }
         const set = new Set<string>();
         filteredData.forEach((item) => {
@@ -1401,7 +1397,7 @@ const InStockReport: React.FC = () => {
 
     const allOutwardOptions = useMemo(() => {
         if (viewMode === "cumulative") {
-            return ["Taken", "Pending Taken"];
+            return ["Taken", "Pending Taken", "Inplace"];
         }
         return [...outwardTakenHeaders, "Pending Delivery"];
     }, [outwardTakenHeaders, viewMode]);
@@ -1491,9 +1487,6 @@ const InStockReport: React.FC = () => {
             } if (popupFilterType === "IN") {
                 return !isOB && !isPending && inQty > 0;
             }
-            if (popupFilterType === "OUT") {
-                return !isPending && outQty > 0;
-            }
             if (popupFilterType === "PROCESS") {
                 return isSJ;
             }
@@ -1531,6 +1524,14 @@ const InStockReport: React.FC = () => {
                     (popupFilterType === "ALL" && String(r.Direction || r.stock_direction || "").toUpperCase() === "OUT");
 
                 const directTripInfo = getRowTripOrTakenInfo(r, isOutwardRecord);
+                if (popupFilterType === "OUT") {
+                    const rawTakenStatus = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
+                    const tripTakenStatus = matchingRawRecord ? String(matchingRawRecord.Taken_Status || matchingRawRecord.taken_status || "").toUpperCase().trim() : "";
+                    const isTaken = (rawTakenStatus === "TAKEN") || (tripTakenStatus === "TAKEN");
+                    const hasTrip = isTrip(r) || (matchingRawRecord ? isTrip(matchingRawRecord) : false);
+                    const isInplace = isTaken && !hasTrip;
+                    return !isPending && !isInplace && outQty > 0;
+                }
                 if (popupFilterType === "Trip In") {
                     if (matchingRawRecord) {
                         return matchingRawRecord.stock_direction?.toUpperCase() === "IN" && isTrip(matchingRawRecord);
@@ -1546,9 +1547,17 @@ const InStockReport: React.FC = () => {
                 if (popupFilterType === "Pending Taken") {
                     const rawTakenStatus = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
                     const tripTakenStatus = matchingRawRecord ? String(matchingRawRecord.Taken_Status || matchingRawRecord.taken_status || "").toUpperCase().trim() : "";
-                    const isTaken = matchingRawRecord ? (tripTakenStatus === "TAKEN") : (rawTakenStatus === "TAKEN");
+                    const isTaken = (rawTakenStatus === "TAKEN") || (tripTakenStatus === "TAKEN");
                     const { pendingQty } = getRowQuantities(r);
                     return !isOB && !isSJ && !isTaken && pendingQty > 0;
+                }
+                if (popupFilterType === "Inplace") {
+                    const rawTakenStatus = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
+                    const tripTakenStatus = matchingRawRecord ? String(matchingRawRecord.Taken_Status || matchingRawRecord.taken_status || "").toUpperCase().trim() : "";
+                    const isTaken = (rawTakenStatus === "TAKEN") || (tripTakenStatus === "TAKEN");
+                    const hasTrip = isTrip(r) || (matchingRawRecord ? isTrip(matchingRawRecord) : false);
+                    const { outQty } = getRowQuantities(r);
+                    return !isOB && !isSJ && isTaken && !hasTrip && outQty > 0;
                 }
                 if (popupFilterType === "Pending Delivery") {
                     const { pendingQty } = getRowQuantities(r);
@@ -1563,8 +1572,9 @@ const InStockReport: React.FC = () => {
                 if (popupFilterType === "Taken") {
                     const rawTakenStatus = String(r.Taken_Status || r.taken_status || "").toUpperCase().trim();
                     const tripTakenStatus = matchingRawRecord ? String(matchingRawRecord.Taken_Status || matchingRawRecord.taken_status || "").toUpperCase().trim() : "";
-                    const isTaken = matchingRawRecord ? (tripTakenStatus === "TAKEN") : (rawTakenStatus === "TAKEN");
-                    return isTaken;
+                    const isTaken = (rawTakenStatus === "TAKEN") || (tripTakenStatus === "TAKEN");
+                    const hasTrip = isTrip(r) || (matchingRawRecord ? isTrip(matchingRawRecord) : false);
+                    return !isOB && !isSJ && isTaken && hasTrip;
                 }
                 if (popupFilterType.startsWith("Taken") && popupFilterType !== "Taken") {
                     const nameToMatch = popupFilterType.replace(/^Taken\s*-\s*/i, "").trim().toLowerCase();
@@ -1761,6 +1771,9 @@ const InStockReport: React.FC = () => {
                     if (!hiddenOutwardColumns.includes("Pending Taken")) {
                         sum += qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
                     }
+                    if (!hiddenOutwardColumns.includes("Inplace")) {
+                        sum += getQtyForTaken(item, "Inplace").qty;
+                    }
                 } else {
                     if (!hiddenOutwardColumns.includes("Taken")) {
                         sum += getQtyForTaken(item, "Taken").qty;
@@ -1852,8 +1865,8 @@ const InStockReport: React.FC = () => {
                 const itemProcOut = qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty;
 
                 const itemOutTakenQty = qtyMode === "bags" ? Math.round(takenQty / weight) : takenQty;
-                const itemDeliveryQty = qtyMode === "bags" 
-                    ? Math.round((viewMode === "cumulative" ? pendingTakenQty : pendingDeliveryQty) / weight) 
+                const itemDeliveryQty = qtyMode === "bags"
+                    ? Math.round((viewMode === "cumulative" ? pendingTakenQty : pendingDeliveryQty) / weight)
                     : (viewMode === "cumulative" ? pendingTakenQty : pendingDeliveryQty);
 
                 takenQtyTotal += itemTakenQty;
@@ -1972,14 +1985,14 @@ const InStockReport: React.FC = () => {
                     });
                 } else if (outwardMode) {
                     const visibleTrips = outwardTakenHeaders.filter(t => !hiddenOutwardColumns.includes(t));
-                    const isPendingVisible = !hiddenOutwardColumns.includes("Pending Taken");
+                    const isPendingVisible = viewMode === "trip" && !hiddenOutwardColumns.includes("Pending Delivery");
 
                     const outwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
-                    if (isPendingVisible) outwardHeaderRow.push("Pending Taken");
+                    if (isPendingVisible) outwardHeaderRow.push("Pending Delivery");
                     outwardHeaderRow.push("Total Outward");
                     excelData.push(outwardHeaderRow);
                     filteredData.forEach((item, idx) => {
-                        const { pendingTakenQty } = getProductDetails(item);
+                        const { pendingDeliveryQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
 
@@ -1989,7 +2002,7 @@ const InStockReport: React.FC = () => {
                         });
 
                         if (isPendingVisible) {
-                            const pQty = qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
+                            const pQty = qtyMode === "bags" ? Math.round(pendingDeliveryQty / getItemWeight(item)) : pendingDeliveryQty;
                             row.push(pQty === 0 ? "-" : fmt(pQty));
                         }
                         row.push(fmt(getRecalculatedStockOutQty(item)));
@@ -2134,15 +2147,15 @@ const InStockReport: React.FC = () => {
                     });
                 } else if (outwardMode) {
                     const visibleTrips = outwardTakenHeaders.filter(t => !hiddenOutwardColumns.includes(t));
-                    const isPendingVisible = !hiddenOutwardColumns.includes("Pending Taken");
+                    const isPendingVisible = viewMode === "trip" && !hiddenOutwardColumns.includes("Pending Delivery");
 
                     const outwardHeaderRow = ["S.No", ...configLabels, ...visibleTrips];
-                    if (isPendingVisible) outwardHeaderRow.push("Pending Taken");
+                    if (isPendingVisible) outwardHeaderRow.push("Pending Delivery");
                     outwardHeaderRow.push("Total Outward");
                     headers = [outwardHeaderRow];
 
                     filteredData.forEach((item, idx) => {
-                        const { pendingTakenQty } = getProductDetails(item);
+                        const { pendingDeliveryQty } = getProductDetails(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
 
@@ -2152,7 +2165,7 @@ const InStockReport: React.FC = () => {
                         });
 
                         if (isPendingVisible) {
-                            const pQty = qtyMode === "bags" ? Math.round(pendingTakenQty / getItemWeight(item)) : pendingTakenQty;
+                            const pQty = qtyMode === "bags" ? Math.round(pendingDeliveryQty / getItemWeight(item)) : pendingDeliveryQty;
                             row.push(pQty === 0 ? "-" : fmtStr(pQty));
                         }
                         row.push(fmtStr(getRecalculatedStockOutQty(item)));
@@ -3099,31 +3112,31 @@ const InStockReport: React.FC = () => {
                                                     </TableCell>
                                                 );
                                             })}
-                                             {viewMode === "trip" && !hiddenOutwardColumns.includes("Pending Delivery") && (
-                                                 <TableCell
-                                                     align="right"
-                                                     sx={{
-                                                         width: 130,
-                                                         minWidth: 130,
-                                                         backgroundColor: "#1E3A8A",
-                                                         color: "#fff",
-                                                         fontWeight: 600,
-                                                         py: 0.5,
-                                                         borderRight: "1px solid #cbd5e1"
-                                                     }}
-                                                 >
-                                                     <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
-                                                         PENDING DELIVERY
-                                                         <IconButton
-                                                             size="small"
-                                                             onClick={() => handleHideOutwardColumn("Pending Delivery")}
-                                                             sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
-                                                         >
-                                                             <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
-                                                         </IconButton>
-                                                     </Box>
-                                                 </TableCell>
-                                             )}
+                                            {viewMode === "trip" && !hiddenOutwardColumns.includes("Pending Delivery") && (
+                                                <TableCell
+                                                    align="right"
+                                                    sx={{
+                                                        width: 130,
+                                                        minWidth: 130,
+                                                        backgroundColor: "#1E3A8A",
+                                                        color: "#fff",
+                                                        fontWeight: 600,
+                                                        py: 0.5,
+                                                        borderRight: "1px solid #cbd5e1"
+                                                    }}
+                                                >
+                                                    <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                                                        PENDING DELIVERY
+                                                        <IconButton
+                                                            size="small"
+                                                            onClick={() => handleHideOutwardColumn("Pending Delivery")}
+                                                            sx={{ color: "rgba(255,255,255,0.7)", p: 0.2, "&:hover": { color: "#fff" } }}
+                                                        >
+                                                            <CloseIcon fontSize="inherit" sx={{ fontSize: 14 }} />
+                                                        </IconButton>
+                                                    </Box>
+                                                </TableCell>
+                                            )}
                                             <TableCell
                                                 align="right"
                                                 onClick={() => handleSetOutwardMode(false)}
@@ -3392,8 +3405,12 @@ const InStockReport: React.FC = () => {
                                                                         align="right"
                                                                         onClick={() => {
                                                                             if (qty !== 0) {
-                                                                                const matchingTripRecord = trips.find(t => getTripLabel(t) === tripLabel);
-                                                                                const tripNo = matchingTripRecord?.Trip_No || matchingTripRecord?.trip_no || matchingTripRecord?.Trip_Voucher_Number;
+                                                                                const tripNo = viewMode !== "cumulative"
+                                                                                    ? (() => {
+                                                                                        const matchingTripRecord = trips.find(t => getTripLabel(t) === tripLabel);
+                                                                                        return matchingTripRecord?.Trip_No || matchingTripRecord?.trip_no || matchingTripRecord?.Trip_Voucher_Number;
+                                                                                    })()
+                                                                                    : undefined;
                                                                                 handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, tripLabel, tripNo);
                                                                             }
                                                                         }}

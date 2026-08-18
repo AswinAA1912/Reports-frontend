@@ -26,8 +26,6 @@ import StockValueReport from "../reports/Stock/stockValueReport";
 import StockValueRateMasterReport from "../reports/Stock/StockValueRateMaster";
 import StaffBasedReport from "../reports/StaffBased/staffBasedReport";
 import LOSStaffBasedReport from "../reports/StaffBased/LOSstaffBasedReport";
-import ProductionStaffBasedReport from "../reports/StaffBased/productionStaffBasedReport";
-import ProductionStaffBasedDetails from "../reports/StaffBased/productionStaffBasedDetails";
 import ExpensesReport from "../reports/Expenses/ExpensesReport";
 import CostingReport from "../reports/Expenses/CostingReport";
 import OutstandingReport from "../reports/Expenses/outstandingReport";
@@ -371,32 +369,6 @@ const AppRouting: React.FC<AppRoutingProps> = ({
                 fullWidth
               >
                 <StaffBasedReport />
-              </AppLayout>
-            </RequireAuth>
-          }
-        />
-
-        <Route
-          path="/productionStaffBased"
-          element={
-            <RequireAuth>
-              <AppLayout
-                fullWidth
-              >
-                <ProductionStaffBasedReport />
-              </AppLayout>
-            </RequireAuth>
-          }
-        />
-
-        <Route
-          path="/productionStaffBasedDetails"
-          element={
-            <RequireAuth>
-              <AppLayout
-                fullWidth
-              >
-                <ProductionStaffBasedDetails />
               </AppLayout>
             </RequireAuth>
           }

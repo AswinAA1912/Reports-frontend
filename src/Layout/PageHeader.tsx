@@ -57,6 +57,7 @@ interface PageHeaderProps {
   showPages?: boolean;
   onReportChange?: (report: any) => void;
   onQuickSave?: (parentName: string) => void;
+  parentReportName?: string;
 }
 
 export const PAGE_HEADER_HEIGHT = 40;
@@ -73,7 +74,8 @@ const PageHeader: React.FC<PageHeaderProps> = ({
   infoSlot,
   showPages = true,
   onReportChange,
-  onQuickSave
+  onQuickSave,
+  parentReportName
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -158,6 +160,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
   const selectedPath = routeMap[location.pathname] || location.pathname;
 
   const currentPageLabel =
+    parentReportName ||
     pages.find((p) => p.path === selectedPath)?.label ||
     location.pathname.replace("/", "").replace(/-/g, " ").toUpperCase();
 

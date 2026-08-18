@@ -107,13 +107,77 @@ export const StaffBasedCountReportService = {
     ),
 };
 
+export interface VoucherType {
+  Value: number;
+  label: string;
+}
 
+export interface EmployeeReportGroup {
+  Id: number;
+  Group_Name: string;
+  Overall_GroupId: number;
+  Overall_GroupName: string;
+  VoucherId: number;
+  Voucher_Type_Name: string;
+  Created_By?: any;
+  Created_At?: string;
+  Updated_By?: any;
+  Updated_At?: string;
+}
 
+export interface CreateEmployeeReportGroupPayload {
+  groupName: string;
+  overallGroupId: number;
+  voucherId: number;
+  createdBy?: number;
+}
 
+export interface UpdateEmployeeReportGroupPayload {
+  groupName: string;
+  overallGroupId: number;
+  voucherIds: number[];
+  updatedBy?: number;
+}
 
+export const employeeReportGroupService = {
+  getVoucherTypes: () =>
+    axios.get<{ success: boolean; data: VoucherType[] }>(
+      `${getBaseURL()}api/masters/getVoucherTypes`
+    ),
 
+  getEmployeeReportGroups: (params?: { overallGroupId?: number; groupName?: string }) =>
+    axios.get<{ success: boolean; data: EmployeeReportGroup[] }>(
+      `${getBaseURL()}api/reports/settings/getEmployeeReportGroups`,
+      { params }
+    ),
 
+  createEmployeeReportGroup: (payload: CreateEmployeeReportGroupPayload) =>
+    axios.post<{ success: boolean; message: string; data?: { Id: number } }>(
+      `${getBaseURL()}api/reports/settings/createEmployeeReportGroup`,
+      payload
+    ),
 
+  updateEmployeeReportGroup: (payload: UpdateEmployeeReportGroupPayload) =>
+    axios.put<{ success: boolean; message: string }>(
+      `${getBaseURL()}api/reports/settings/updateEmployeeReportGroup`,
+      payload
+    ),
 
+  getOverallStaffCategorywise: (params?: { Fromdate?: string; Todate?: string }) =>
+    axios.get<{ success: boolean; data: any[] }>(
+      `${getBaseURL()}api/reports/externalAPI/overallStaffCategorywise`,
+      { params }
+    ),
 
+  getGroupEmployees: (params?: { Fromdate?: string; Todate?: string; Overall_GroupName?: string; Group_Name?: string; Voucher_Type?: string }) =>
+    axios.get<{ success: boolean; data: any[] }>(
+      `${getBaseURL()}api/reports/externalAPI/overallStaffCategorywise/employees`,
+      { params }
+    ),
 
+  getEmployeeInvoices: (params?: { Fromdate?: string; Todate?: string; Overall_GroupName?: string; Group_Name?: string; Voucher_Type?: string; Emp_Id?: number; Emp_Id_Is_Unassigned?: number }) =>
+    axios.get<{ success: boolean; data: any[] }>(
+      `${getBaseURL()}api/reports/externalAPI/overallStaffCategorywise/invoices`,
+      { params }
+    ),
+};

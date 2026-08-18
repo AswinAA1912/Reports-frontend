@@ -62,6 +62,7 @@ import {
     onlineSalesReportLOLService,
     onlineSalesReportItemLOLService,
 } from "../../services/OnlineSalesReport.service";
+import { lollosColumnsService, LolLosColumn } from "../../services/lollosColumns.service";
 
 /* ================= TYPES ================= */
 
@@ -212,7 +213,8 @@ const formatCreatedOn = (dateString: any): string => {
 
 const buildColumnsFromApi = (
     rows: any[],
-    mode: "Abstract" | "Expanded"
+    mode: "Abstract" | "Expanded",
+    lolColumns: any[]
 ): ColumnConfig[] => {
     if (!rows.length) return [];
 
@@ -221,13 +223,22 @@ const buildColumnsFromApi = (
             ? ABSTRACT_DEFAULT_KEYS
             : EXPANDED_DEFAULT_KEYS;
 
-    return Object.keys(rows[0]).map((key, index) => ({
-        key,
-        label: key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-        enabled: defaults.includes(key),
-        isNumeric: NUMERIC_KEYS.includes(key),
-        order: index,
-    }));
+    return Object.keys(rows[0]).map((key, index) => {
+        const matched = lolColumns.find(
+            col => col.ColumnName?.toUpperCase() === key.toUpperCase()
+        );
+        const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
+            ? matched.Alias_Name.trim() 
+            : key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+        return {
+            key,
+            label,
+            enabled: defaults.includes(key),
+            isNumeric: NUMERIC_KEYS.includes(key),
+            order: index,
+        };
+    });
 };
 
 const formatINR = (value: number) =>
@@ -247,6 +258,7 @@ const OnlineSalesReportLOL: React.FC = () => {
     const [expandedRows, setExpandedRows] = useState<any[]>([]);
     const rawRows =
         toggleMode === "Expanded" ? expandedRows : abstractRows;
+    const [lolColumns, setLolColumns] = useState<LolLosColumn[]>([]);
     const [abstractColumns, setAbstractColumns] = useState<ColumnConfig[]>([]);
     const [expandedColumns, setExpandedColumns] = useState<ColumnConfig[]>([]);
     const columns =
@@ -390,24 +402,41 @@ const OnlineSalesReportLOL: React.FC = () => {
                 ? onlineSalesReportItemLOLService.getReportsItemLOL
                 : onlineSalesReportLOLService.getReportsLOL;
 
+        let currentLolPromise = Promise.resolve(lolColumns);
+        if (lolColumns.length === 0) {
+            currentLolPromise = lollosColumnsService.getLolColumns()
+                .then(res => {
+                    const data = res.data.data || [];
+                    setLolColumns(data);
+                    return data;
+                })
+                .catch(err => {
+                    console.error("Failed to load LOL columns", err);
+                    return [];
+                });
+        }
+
         setLoading(true);
 
-        service({
-            Fromdate: filters.Date.from,
-            Todate: filters.Date.to,
-        })
-            .then((res: any) => {
+        Promise.all([
+            currentLolPromise,
+            service({
+                Fromdate: filters.Date.from,
+                Todate: filters.Date.to,
+            })
+        ])
+            .then(([currentLol, res]) => {
                 const apiRows = res.data.data || [];
 
-                let cols = buildColumnsFromApi(apiRows, toggleMode);
+                let cols = buildColumnsFromApi(apiRows, toggleMode, currentLol);
 
                 // APPLY TEMPLATE
                 if (toggleMode === "Abstract" && templateConfig?.abstract) {
-                    cols = applyTemplateToColumns(cols, templateConfig.abstract);
+                    cols = applyTemplateToColumns(cols, templateConfig.abstract, currentLol);
                 }
 
                 if (toggleMode === "Expanded" && templateConfig?.expanded) {
-                    cols = applyTemplateToColumns(cols, templateConfig.expanded);
+                    cols = applyTemplateToColumns(cols, templateConfig.expanded, currentLol);
                 }
 
                 if (toggleMode === "Expanded") {
@@ -1045,17 +1074,27 @@ const OnlineSalesReportLOL: React.FC = () => {
 
     const applyTemplateToColumns = (
         baseCols: ColumnConfig[],
-        templateCols: any[]
+        templateCols: any[],
+        lolColumns: any[]
     ): ColumnConfig[] => {
 
-        const templateBased = templateCols.map(t => ({
-            key: t.key,
-            label: t.label || t.key,
-            enabled: t.enabled,
-            order: t.order ?? 0,
-            groupBy: t.groupBy ?? 0,
-            isNumeric: NUMERIC_KEYS.includes(t.key),
-        }));
+        const templateBased = templateCols.map(t => {
+            const matched = lolColumns.find(
+                col => col.ColumnName?.toUpperCase() === t.key.toUpperCase()
+            );
+            const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
+                ? matched.Alias_Name.trim() 
+                : (t.label || t.key);
+
+            return {
+                key: t.key,
+                label,
+                enabled: t.enabled,
+                order: t.order ?? 0,
+                groupBy: t.groupBy ?? 0,
+                isNumeric: NUMERIC_KEYS.includes(t.key),
+            };
+        });
 
         const merged = templateBased.map(col => {
             const base = baseCols.find(b => b.key === col.key);
@@ -1067,11 +1106,20 @@ const OnlineSalesReportLOL: React.FC = () => {
 
         const missing = baseCols
             .filter(b => !templateBased.some(t => t.key === b.key))
-            .map(b => ({
-                ...b,
-                enabled: false,
-                groupBy: 0,
-            }));
+            .map(b => {
+                const matched = lolColumns.find(
+                    col => col.ColumnName?.toUpperCase() === b.key.toUpperCase()
+                );
+                const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
+                    ? matched.Alias_Name.trim() 
+                    : b.label;
+                return {
+                    ...b,
+                    label,
+                    enabled: false,
+                    groupBy: 0,
+                };
+            });
 
         return [...merged, ...missing];
     };

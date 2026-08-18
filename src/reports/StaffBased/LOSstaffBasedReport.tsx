@@ -62,6 +62,7 @@ import { toast } from "react-toastify";
 import {
     staffBasedReportService, costCenterListService
 } from "../../services/staffBasedReport.services";
+import { lollosColumnsService, LolLosColumn } from "../../services/lollosColumns.service";
 
 /* ================= TYPES ================= */
 
@@ -185,24 +186,34 @@ const CURRENCY_KEYS = ["Total_Invoice_value", "Amt", "Rate"];
 /* ================= HELPERS ================= */
 
 const buildColumnsFromApi = (
-    rows: any[]
+    rows: any[],
+    losColumns: any[]
 ): ColumnConfig[] => {
     if (!rows.length) return [];
 
-    return Object.keys(rows[0]).map((key, index) => ({
-        key,
-        label: key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+    return Object.keys(rows[0]).map((key, index) => {
+        const matched = losColumns.find(
+            col => col.ColumnName?.toUpperCase() === key.toUpperCase()
+        );
+        const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
+            ? matched.Alias_Name.trim() 
+            : key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 
-        // ✅ Only DEFAULT_KEYS enabled initially
-        enabled: DEFAULT_KEYS.includes(key),
+        return {
+            key,
+            label,
 
-        isNumeric: NUMERIC_KEYS.includes(key),
+            // ✅ Only DEFAULT_KEYS enabled initially
+            enabled: DEFAULT_KEYS.includes(key),
 
-        // ✅ Enabled first, Disabled later
-        order: DEFAULT_KEYS.includes(key)
-            ? DEFAULT_KEYS.indexOf(key)
-            : DEFAULT_KEYS.length + index,
-    }));
+            isNumeric: NUMERIC_KEYS.includes(key),
+
+            // ✅ Enabled first, Disabled later
+            order: DEFAULT_KEYS.includes(key)
+                ? DEFAULT_KEYS.indexOf(key)
+                : DEFAULT_KEYS.length + index,
+        };
+    });
 };
 
 const formatINR = (value: number) =>
@@ -218,6 +229,7 @@ const LOSStaffBasedReport: React.FC = () => {
 
     const [rows, setRows] = useState<any[]>([]);
     const rawRows = rows;
+    const [losColumns, setLosColumns] = useState<LolLosColumn[]>([]);
 
     const [abstractColumns, setAbstractColumns] = useState<ColumnConfig[]>([]);
     const [expandedColumns, setExpandedColumns] = useState<ColumnConfig[]>([]);
@@ -357,6 +369,19 @@ const LOSStaffBasedReport: React.FC = () => {
             try {
                 setLoading(true);
 
+                let currentLos = losColumns;
+                if (currentLos.length === 0) {
+                    try {
+                        const colsRes = await lollosColumnsService.getLosColumns();
+                        if (colsRes.data.success) {
+                            currentLos = colsRes.data.data || [];
+                            setLosColumns(currentLos);
+                        }
+                    } catch (e) {
+                        console.error("Failed to load LOS columns", e);
+                    }
+                }
+
                 const [reportRes, staffRes] = await Promise.all([
                     staffBasedReportService.getStaffBasedReport({
                         Fromdate: filters.Date.from,
@@ -368,7 +393,7 @@ const LOSStaffBasedReport: React.FC = () => {
                 const apiRows = reportRes.data.data || [];
                 const staffRows = staffRes.data.data || [];
 
-                let cols = buildColumnsFromApi(apiRows);
+                let cols = buildColumnsFromApi(apiRows, currentLos);
 
                 /* =====================================================
                 APPLY TEMPLATE BASED ON MODE
@@ -1371,9 +1396,16 @@ const LOSStaffBasedReport: React.FC = () => {
             );
 
             if (base) {
+                const matched = losColumns.find(
+                    col => col.ColumnName?.toUpperCase() === base.key.toUpperCase()
+                );
+                const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
+                    ? matched.Alias_Name.trim() 
+                    : (temp.label || base.label);
+
                 finalCols.push({
                     ...base,
-                    label: temp.label || base.label,
+                    label,
                     enabled: Boolean(temp.enabled),
                     order:
                         temp.order !== undefined

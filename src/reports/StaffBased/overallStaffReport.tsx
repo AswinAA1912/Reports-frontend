@@ -18,12 +18,15 @@ import {
     DialogContent,
     DialogActions,
     Checkbox,
+    Switch,
     FormControlLabel,
     FormControl,
     InputLabel,
     Select,
     MenuItem,
-    ListItemText,
+    Autocomplete,
+    CircularProgress,
+    Popover
 } from "@mui/material";
 import SettingsIcon from "@mui/icons-material/Settings";
 import GroupAddIcon from "@mui/icons-material/GroupAdd";
@@ -31,11 +34,15 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CloseIcon from "@mui/icons-material/Close";
 import dayjs from "dayjs";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 import PageHeader from "../../Layout/PageHeader";
 import AppLayout from "../../Layout/appLayout";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import { toast } from "react-toastify";
 import { SettingsService } from "../../services/reportSettings.services";
+import { employeeReportGroupService, VoucherType } from "../../services/staffBasedReport.services";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -50,23 +57,20 @@ export interface ColumnConfig {
     metric?: "qty" | "count";
 }
 
-// Initial configurable role columns (all hidden by default as requested)
+// Configurable role columns matching backend stored procedure columns exactly
 const DEFAULT_ROLE_COLUMNS: ColumnConfig[] = [
-    { key: "ATTEN BY", label: "Atten By", enabled: false, order: 0, metric: "qty" },
-    { key: "CREATED", label: "Created", enabled: false, order: 1, metric: "qty" },
-    { key: "PRINT", label: "Print", enabled: false, order: 2, metric: "qty" },
-    { key: "TAKEN", label: "Taken", enabled: false, order: 3, metric: "qty" },
-    { key: "CHECK", label: "Check", enabled: false, order: 4, metric: "qty" },
-    { key: "DELIVERY", label: "Delivery", enabled: false, order: 5, metric: "qty" },
-    { key: "DRIVER", label: "Driver / Hindi", enabled: false, order: 6, metric: "qty" },
-    { key: "SUPERVISOR", label: "Supervisor", enabled: false, order: 7, metric: "qty" },
-    { key: "LADIES", label: "Ladies", enabled: false, order: 8, metric: "qty" },
-    { key: "Total Tonnage", label: "Total Tonnage", enabled: false, order: 9, metric: "qty" },
-    { key: "Count", label: "Count", enabled: false, order: 10, metric: "count" },
+    { key: "Unassigned", label: "Unassigned", enabled: false, order: 0, metric: "qty" },
+    { key: "Load Man", label: "Load Man", enabled: false, order: 1, metric: "qty" },
+    { key: "Printed", label: "Print", enabled: false, order: 2, metric: "qty" },
+    { key: "Supervisor", label: "Supervisor", enabled: false, order: 3, metric: "qty" },
+    { key: "Checked", label: "Check / Weight", enabled: false, order: 4, metric: "qty" },
+    { key: "Taken", label: "Taken", enabled: false, order: 5, metric: "qty" },
+    { key: "Total_Tonnage", label: "Total Tonnage", enabled: false, order: 6, metric: "qty" },
+    { key: "Invoice_Count", label: "Count", enabled: false, order: 7, metric: "count" },
 ];
 
 const getColumnLabel = (col: ColumnConfig) => {
-    if (col.key === "Total Tonnage" || col.key === "Count") {
+    if (col.key === "Total_Tonnage" || col.key === "Invoice_Count") {
         return col.label;
     }
     const metricLabel = col.metric === "count" ? "Count" : "Qty";
@@ -117,7 +121,7 @@ const SortableColumnRow: React.FC<SortableColumnRowProps> = ({ column, onToggle,
             </IconButton>
             <FormControlLabel
                 control={
-                    <Checkbox
+                    <Switch
                         checked={column.enabled}
                         onChange={() => onToggle(column.key)}
                         size="small"
@@ -126,7 +130,7 @@ const SortableColumnRow: React.FC<SortableColumnRowProps> = ({ column, onToggle,
                 label={column.label}
                 sx={{ flexGrow: 1, margin: 0 }}
             />
-            {column.key !== "Total Tonnage" && column.key !== "Count" && (
+            {column.key !== "Total_Tonnage" && column.key !== "Invoice_Count" && (
                 <Select
                     value={column.metric || "qty"}
                     onChange={(e) => onChangeMetric(column.key, e.target.value as "qty" | "count")}
@@ -141,745 +145,59 @@ const SortableColumnRow: React.FC<SortableColumnRowProps> = ({ column, onToggle,
     );
 };
 
-interface InvoiceDetail {
-    invoiceNo: string;
-    date: string;
-    customer: string;
-    qty: number;
-    count: number;
-}
-
-interface StaffContribution {
-    name: string;
-    roleValues: Record<string, { qty: number; count: number }>;
-    invoices: InvoiceDetail[];
-}
-
-interface VoucherTypeData {
-    name: string;
-    category: "INWARDS" | "OUTWARDS";
-    baseKgs: number;
-    staffContributions: StaffContribution[];
-}
-
-// Default layout voucher types and dummy data matching user screenshots
-const INITIAL_VOUCHERS_DATA: VoucherTypeData[] = [
-    // --- INWARDS Vouchers ---
-    {
-        name: "ON_G.INW - ADJ",
-        category: "INWARDS",
-        baseKgs: 930,
-        staffContributions: [
-            {
-                name: "BALAMURUGAN.K",
-                roleValues: {
-                    CREATED: { qty: 930, count: 3 },
-                    "Total Tonnage": { qty: 930, count: 3 },
-                    Count: { qty: 0, count: 3 },
-                },
-                invoices: [
-                    { invoiceNo: "GIA/000223/26-27", date: "2026-08-08", customer: "Supplier A", qty: 700, count: 1 },
-                    { invoiceNo: "GIA/000222/26-27", date: "2026-08-08", customer: "Supplier A", qty: 200, count: 1 },
-                    { invoiceNo: "GIA/000224/26-27", date: "2026-08-08", customer: "Supplier A", qty: 30, count: 1 }
-                ]
-            },
-            {
-                name: "VELMURUGAN",
-                roleValues: {
-                    CHECK: { qty: 930, count: 3 },
-                    "Total Tonnage": { qty: 930, count: 3 },
-                    Count: { qty: 0, count: 3 },
-                },
-                invoices: [
-                    { invoiceNo: "GIA/000223/26-27", date: "2026-08-08", customer: "Supplier A", qty: 700, count: 1 },
-                    { invoiceNo: "GIA/000222/26-27", date: "2026-08-08", customer: "Supplier A", qty: 200, count: 1 },
-                    { invoiceNo: "GIA/000224/26-27", date: "2026-08-08", customer: "Supplier A", qty: 30, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_M.INW - ADJ",
-        category: "INWARDS",
-        baseKgs: 37930,
-        staffContributions: [
-            {
-                name: "A.KAVITHA",
-                roleValues: {
-                    CREATED: { qty: 35280, count: 1 },
-                    "Total Tonnage": { qty: 35280, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INW-ADJ-003", date: "2026-08-08", customer: "Supplier B", qty: 35280, count: 1 }
-                ]
-            },
-            {
-                name: "ARUVAGA KALIDAS",
-                roleValues: {
-                    CREATED: { qty: 2650, count: 1 },
-                    "Total Tonnage": { qty: 2650, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INW-ADJ-004", date: "2026-08-08", customer: "Supplier C", qty: 2650, count: 1 }
-                ]
-            },
-            {
-                name: "MLM.Guna",
-                roleValues: {
-                    DRIVER: { qty: 9000, count: 1 },
-                    "Total Tonnage": { qty: 9000, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INW-ADJ-005", date: "2026-08-08", customer: "Supplier D", qty: 9000, count: 1 }
-                ]
-            },
-            {
-                name: "PALANICHAMY",
-                roleValues: {
-                    CHECK: { qty: 3000, count: 1 },
-                    "Total Tonnage": { qty: 3000, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INW-ADJ-006", date: "2026-08-08", customer: "Supplier B", qty: 3000, count: 1 }
-                ]
-            },
-            {
-                name: "S.PALANI",
-                roleValues: {
-                    SUPERVISOR: { qty: 2010, count: 1 },
-                    "Total Tonnage": { qty: 2010, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INW-ADJ-007", date: "2026-08-08", customer: "Supplier C", qty: 2010, count: 1 }
-                ]
-            },
-            {
-                name: "SARAVANAN",
-                roleValues: {
-                    TAKEN: { qty: 2650, count: 1 },
-                    CHECK: { qty: 30270, count: 1 },
-                    "Total Tonnage": { qty: 32920, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INW-ADJ-008", date: "2026-08-08", customer: "Supplier B", qty: 32920, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_O.INW - ADJ",
-        category: "INWARDS",
-        baseKgs: 21000,
-        staffContributions: [
-            {
-                name: "BACKIA",
-                roleValues: {
-                    CREATED: { qty: 21000, count: 1 },
-                    "Total Tonnage": { qty: 21000, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INW-ADJ-009", date: "2026-08-08", customer: "Supplier E", qty: 21000, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_O.M.INW - SJ",
-        category: "INWARDS",
-        baseKgs: 10235,
-        staffContributions: [
-            {
-                name: "SENTHIL KUMAR N",
-                roleValues: {
-                    CREATED: { qty: 10235, count: 1 },
-                    CHECK: { qty: 10235, count: 1 },
-                    "Total Tonnage": { qty: 20470, count: 2 },
-                    Count: { qty: 0, count: 2 },
-                },
-                invoices: [
-                    { invoiceNo: "INW-ADJ-010", date: "2026-08-08", customer: "Supplier F", qty: 10235, count: 1 },
-                    { invoiceNo: "INW-ADJ-011", date: "2026-08-08", customer: "Supplier F", qty: 10235, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_G.INTRF",
-        category: "INWARDS",
-        baseKgs: 18576,
-        staffContributions: [
-            {
-                name: "BALAMURUGAN.K",
-                roleValues: {
-                    CREATED: { qty: 16526, count: 1 },
-                    "Total Tonnage": { qty: 16526, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-001", date: "2026-08-08", customer: "Branch A", qty: 16526, count: 1 }
-                ]
-            },
-            {
-                name: "CHIDAMBARAM",
-                roleValues: {
-                    TAKEN: { qty: 5500, count: 1 },
-                    "Total Tonnage": { qty: 5500, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-002", date: "2026-08-08", customer: "Branch A", qty: 5500, count: 1 }
-                ]
-            },
-            {
-                name: "NANDHA",
-                roleValues: {
-                    CREATED: { qty: 2050, count: 1 },
-                    "Total Tonnage": { qty: 2050, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-003", date: "2026-08-08", customer: "Branch A", qty: 2050, count: 1 }
-                ]
-            },
-            {
-                name: "SOUNDARAPANDIAN",
-                roleValues: {
-                    TAKEN: { qty: 13076, count: 1 },
-                    "Total Tonnage": { qty: 13076, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-004", date: "2026-08-08", customer: "Branch B", qty: 13076, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_M.INTRF",
-        category: "INWARDS",
-        baseKgs: 13520,
-        staffContributions: [
-            {
-                name: "A.KAVITHA",
-                roleValues: {
-                    CREATED: { qty: 6000, count: 1 },
-                    "Total Tonnage": { qty: 6000, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-005", date: "2026-08-08", customer: "Branch B", qty: 6000, count: 1 }
-                ]
-            },
-            {
-                name: "ARUVAGA KALIDAS",
-                roleValues: {
-                    CREATED: { qty: 4000, count: 1 },
-                    "Total Tonnage": { qty: 4000, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-006", date: "2026-08-08", customer: "Branch B", qty: 4000, count: 1 }
-                ]
-            },
-            {
-                name: "MADHAN",
-                roleValues: {
-                    CREATED: { qty: 50, count: 1 },
-                    "Total Tonnage": { qty: 50, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-007", date: "2026-08-08", customer: "Branch B", qty: 50, count: 1 }
-                ]
-            },
-            {
-                name: "MLM.Guna",
-                roleValues: {
-                    DRIVER: { qty: 6450, count: 1 },
-                    "Total Tonnage": { qty: 6450, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-008", date: "2026-08-08", customer: "Branch C", qty: 6450, count: 1 }
-                ]
-            },
-            {
-                name: "MLM.Malaisamy",
-                roleValues: {
-                    DRIVER: { qty: 3000, count: 1 },
-                    "Total Tonnage": { qty: 3000, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-009", date: "2026-08-08", customer: "Branch C", qty: 3000, count: 1 }
-                ]
-            },
-            {
-                name: "MLM.SAMY DURAI",
-                roleValues: {
-                    DRIVER: { qty: 20, count: 1 },
-                    "Total Tonnage": { qty: 20, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-010", date: "2026-08-08", customer: "Branch C", qty: 20, count: 1 }
-                ]
-            },
-            {
-                name: "N.VIJAYALAKSHMI",
-                roleValues: {
-                    CREATED: { qty: 3470, count: 1 },
-                    "Total Tonnage": { qty: 3470, count: 1 },
-                    Count: { qty: 0, count: 1 },
-                },
-                invoices: [
-                    { invoiceNo: "INTRF-011", date: "2026-08-08", customer: "Branch B", qty: 3470, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_G.ADJ - SJ",
-        category: "INWARDS",
-        baseKgs: 1448,
-        staffContributions: [
-            {
-                name: "SARAVANAN",
-                roleValues: {
-                    TAKEN: { qty: 654, count: 1 },
-                    CHECK: { qty: 793, count: 1 },
-                    CREATED: { qty: 1448, count: 1 },
-                    "Total Tonnage": { qty: 2895, count: 2 },
-                    Count: { qty: 0, count: 2 }
-                },
-                invoices: [
-                    { invoiceNo: "ADJ-001", date: "2026-08-08", customer: "Adj Customer", qty: 1448, count: 2 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_M.ADJ - SJ",
-        category: "INWARDS",
-        baseKgs: 12720,
-        staffContributions: [
-            {
-                name: "SARAVANAN",
-                roleValues: {
-                    TAKEN: { qty: 1603, count: 1 },
-                    CREATED: { qty: 12720, count: 1 },
-                    "Total Tonnage": { qty: 14323, count: 2 },
-                    Count: { qty: 0, count: 2 }
-                },
-                invoices: [
-                    { invoiceNo: "ADJ-002", date: "2026-08-08", customer: "Adj Customer", qty: 12720, count: 2 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_M.ATTY",
-        category: "INWARDS",
-        baseKgs: 32700,
-        staffContributions: [
-            {
-                name: "S.PALANI",
-                roleValues: {
-                    SUPERVISOR: { qty: 32700, count: 1 },
-                    DRIVER: { qty: 16650, count: 1 },
-                    "Total Tonnage": { qty: 49350, count: 2 },
-                    Count: { qty: 0, count: 2 }
-                },
-                invoices: [
-                    { invoiceNo: "ATTY-001", date: "2026-08-08", customer: "Atty User", qty: 32700, count: 2 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_M.CLEANING",
-        category: "INWARDS",
-        baseKgs: 8986,
-        staffContributions: [
-            {
-                name: "LATA",
-                roleValues: {
-                    LADIES: { qty: 5270, count: 1 },
-                    SUPERVISOR: { qty: 14256, count: 1 },
-                    "Total Tonnage": { qty: 19526, count: 2 },
-                    Count: { qty: 0, count: 2 }
-                },
-                invoices: [
-                    { invoiceNo: "CLN-001", date: "2026-08-08", customer: "Cleaning User", qty: 8986, count: 2 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_M.WT-CHK",
-        category: "INWARDS",
-        baseKgs: 25414,
-        staffContributions: [
-            {
-                name: "SARAVANAN",
-                roleValues: {
-                    DRIVER: { qty: 8606, count: 1 },
-                    SUPERVISOR: { qty: 24904, count: 1 },
-                    LADIES: { qty: 23625, count: 1 },
-                    "Total Tonnage": { qty: 57135, count: 3 },
-                    Count: { qty: 0, count: 3 }
-                },
-                invoices: [
-                    { invoiceNo: "WTC-001", date: "2026-08-08", customer: "Wtc User", qty: 25414, count: 3 }
-                ]
-            }
-        ]
-    },
-    // --- OUTWARDS Vouchers ---
-    {
-        name: "1.ON_Sales - M",
-        category: "OUTWARDS",
-        baseKgs: 60,
-        staffContributions: [
-            {
-                name: "SALES_TEAM",
-                roleValues: {
-                    CREATED: { qty: 60, count: 1 },
-                    "Total Tonnage": { qty: 60, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "SAL-001", date: "2026-08-08", customer: "Retail Customer", qty: 60, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "1.ON_M Sales_SM",
-        category: "OUTWARDS",
-        baseKgs: 23330,
-        staffContributions: [
-            {
-                name: "SALES_TEAM",
-                roleValues: {
-                    CREATED: { qty: 23330, count: 1 },
-                    "Total Tonnage": { qty: 23330, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "SAL-002", date: "2026-08-08", customer: "Retail Customer", qty: 23330, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "1.ON_O Sales_SM",
-        category: "OUTWARDS",
-        baseKgs: 1440,
-        staffContributions: [
-            {
-                name: "SALES_TEAM",
-                roleValues: {
-                    CREATED: { qty: 1440, count: 1 },
-                    "Total Tonnage": { qty: 1440, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "SAL-003", date: "2026-08-08", customer: "Retail Customer", qty: 1440, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "1.ON_G Sales_SM",
-        category: "OUTWARDS",
-        baseKgs: 7066,
-        staffContributions: [
-            {
-                name: "SALES_TEAM",
-                roleValues: {
-                    CREATED: { qty: 7066, count: 1 },
-                    "Total Tonnage": { qty: 7066, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "SAL-004", date: "2026-08-08", customer: "Retail Customer", qty: 7066, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "1.ON_G.C.Bill_SM",
-        category: "OUTWARDS",
-        baseKgs: 6151,
-        staffContributions: [
-            {
-                name: "SALES_TEAM",
-                roleValues: {
-                    CREATED: { qty: 6151, count: 1 },
-                    "Total Tonnage": { qty: 6151, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "SAL-005", date: "2026-08-08", customer: "Retail Customer", qty: 6151, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "All Sales",
-        category: "OUTWARDS",
-        baseKgs: 53299.5,
-        staffContributions: [
-            {
-                name: "SALES_TEAM",
-                roleValues: {
-                    CREATED: { qty: 53299.5, count: 7 },
-                    ATTEN_BY: { qty: 53299.5, count: 7 },
-                    PRINT: { qty: 53299.5, count: 7 },
-                    TAKEN: { qty: 53299.5, count: 7 },
-                    CHECK: { qty: 53299.5, count: 7 },
-                    DELIVERY: { qty: 53299.5, count: 7 },
-                    DRIVER: { qty: 53299.5, count: 7 },
-                    "Total Tonnage": { qty: 373096.5, count: 7 },
-                    Count: { qty: 0, count: 7 }
-                },
-                invoices: [
-                    { invoiceNo: "ALL-SAL-001", date: "2026-08-08", customer: "Multiple Customers", qty: 53299.5, count: 7 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_O.M.OUTWARDS",
-        category: "OUTWARDS",
-        baseKgs: 4000,
-        staffContributions: [
-            {
-                name: "SENTHIL KUMAR N",
-                roleValues: {
-                    CREATED: { qty: 4000, count: 1 },
-                    CHECK: { qty: 4000, count: 1 },
-                    "Total Tonnage": { qty: 8000, count: 2 },
-                    Count: { qty: 0, count: 2 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-001", date: "2026-08-08", customer: "Outward Party A", qty: 4000, count: 1 }
-                ]
-            },
-            {
-                name: "BALAMURUGAN.K",
-                roleValues: {
-                    CREATED: { qty: 20, count: 1 },
-                    "Total Tonnage": { qty: 20, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-002", date: "2026-08-08", customer: "Outward Party B", qty: 20, count: 1 }
-                ]
-            },
-            {
-                name: "VELMURUGAN",
-                roleValues: {
-                    CHECK: { qty: 20, count: 1 },
-                    "Total Tonnage": { qty: 20, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-003", date: "2026-08-08", customer: "Outward Party C", qty: 20, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_G.OUTWARDS",
-        category: "OUTWARDS",
-        baseKgs: 20,
-        staffContributions: [
-            {
-                name: "AJAY",
-                roleValues: {
-                    SUPERVISOR: { qty: 2050, count: 1 },
-                    "Total Tonnage": { qty: 2050, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-004", date: "2026-08-08", customer: "Outward Party D", qty: 20, count: 1 }
-                ]
-            },
-            {
-                name: "KAMARAJ",
-                roleValues: {
-                    SUPERVISOR: { qty: 3450, count: 1 },
-                    "Total Tonnage": { qty: 3450, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-005", date: "2026-08-08", customer: "Outward Party E", qty: 20, count: 1 }
-                ]
-            },
-            {
-                name: "KUMAR K",
-                roleValues: {
-                    SUPERVISOR: { qty: 3616, count: 1 },
-                    "Total Tonnage": { qty: 3616, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-006", date: "2026-08-08", customer: "Outward Party F", qty: 20, count: 1 }
-                ]
-            },
-            {
-                name: "M.KRISHANAN",
-                roleValues: {
-                    DRIVER: { qty: 9460, count: 1 },
-                    "Total Tonnage": { qty: 9460, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-007", date: "2026-08-08", customer: "Outward Party A", qty: 20, count: 1 }
-                ]
-            },
-            {
-                name: "MLM.Malaisamy",
-                roleValues: {
-                    DRIVER: { qty: 7576, count: 1 },
-                    "Total Tonnage": { qty: 7576, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-008", date: "2026-08-08", customer: "Outward Party B", qty: 20, count: 1 }
-                ]
-            },
-            {
-                name: "MLM.PRABHU",
-                roleValues: {
-                    DRIVER: { qty: 2050, count: 1 },
-                    "Total Tonnage": { qty: 2050, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-009", date: "2026-08-08", customer: "Outward Party C", qty: 20, count: 1 }
-                ]
-            },
-            {
-                name: "MLM.RAJA",
-                roleValues: {
-                    DRIVER: { qty: 5500, count: 1 },
-                    "Total Tonnage": { qty: 5500, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-010", date: "2026-08-08", customer: "Outward Party D", qty: 20, count: 1 }
-                ]
-            },
-            {
-                name: "MLM.SAMY DURAI",
-                roleValues: {
-                    DRIVER: { qty: 3450, count: 1 },
-                    "Total Tonnage": { qty: 3450, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-011", date: "2026-08-08", customer: "Outward Party E", qty: 20, count: 1 }
-                ]
-            },
-            {
-                name: "SATHYA PRIYA",
-                roleValues: {
-                    CREATED: { qty: 20076, count: 1 },
-                    "Total Tonnage": { qty: 20076, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-012", date: "2026-08-08", customer: "Outward Party F", qty: 20, count: 1 }
-                ]
-            }
-        ]
-    },
-    {
-        name: "ON_M.OUTWARDS",
-        category: "OUTWARDS",
-        baseKgs: 20076,
-        staffContributions: [
-            {
-                name: "SATHYA PRIYA",
-                roleValues: {
-                    CREATED: { qty: 20076, count: 1 },
-                    "Total Tonnage": { qty: 20076, count: 1 },
-                    Count: { qty: 0, count: 1 }
-                },
-                invoices: [
-                    { invoiceNo: "OUT-013", date: "2026-08-08", customer: "Outward Party F", qty: 20076, count: 1 }
-                ]
-            }
-        ]
+// Helper to determine the value to render in a staff cell
+const getStaffCellValue = (sc: any, colKey: string, metric: "qty" | "count") => {
+    const isMatchedRole = sc.Cost_Category && colKey && sc.Cost_Category.toUpperCase() === colKey.toUpperCase();
+    if (isMatchedRole) {
+        return metric === "qty" ? (sc.Total_Qty || 0) : (sc.Invoice_Count || 0);
     }
-];
+    if (colKey === "Total_Tonnage") {
+        return metric === "qty" ? (sc.Total_Qty || 0) : (sc.Invoice_Count || 0);
+    }
+    if (colKey === "Invoice_Count") {
+        return metric === "qty" ? 0 : (sc.Invoice_Count || 0);
+    }
+    return 0;
+};
 
-// Initial Group Mapping Config (User groups)
+// Helper to determine the value to render in an invoice cell
+const getInvoiceCellValue = (inv: any, colKey: string, metric: "qty" | "count") => {
+    if (colKey === "Total_Tonnage") {
+        let total = 0;
+        if (inv.roleValues) {
+            Object.values(inv.roleValues).forEach((val: any) => {
+                total += metric === "qty" ? (val.qty || 0) : (val.count || 0);
+            });
+        }
+        return total;
+    }
+    if (colKey === "Invoice_Count") {
+        let total = 0;
+        if (inv.roleValues) {
+            Object.values(inv.roleValues).forEach((val: any) => {
+                total += metric === "qty" ? 0 : (val.count || 0);
+            });
+        }
+        return total;
+    }
+
+    // Look up role-specific value from aggregated roleValues
+    if (inv.roleValues) {
+        const matchedKey = Object.keys(inv.roleValues).find(k => k.toUpperCase() === colKey.toUpperCase());
+        if (matchedKey) {
+            const val = inv.roleValues[matchedKey];
+            return metric === "qty" ? (val.qty || 0) : (val.count || 0);
+        }
+    }
+    return 0;
+};
+
+// Group Mapping Config (User groups)
 interface GroupConfig {
     name: string;
-    parentCategory: "INWARDS" | "OUTWARDS";
+    parentCategory: "INWARDS" | "OUTWARDS" | "ADJUSTMENTS";
     voucherTypes: string[];
 }
-
-const INITIAL_GROUPS: GroupConfig[] = [
-    {
-        name: "PUR / RET",
-        parentCategory: "INWARDS",
-        voucherTypes: ["ON_G.INW - ADJ", "ON_M.INW - ADJ", "ON_O.INW - ADJ", "ON_O.M.INW - SJ"],
-    },
-    {
-        name: "INT TRF",
-        parentCategory: "INWARDS",
-        voucherTypes: ["ON_G.INTRF", "ON_M.INTRF"],
-    },
-    {
-        name: "ADJ",
-        parentCategory: "INWARDS",
-        voucherTypes: ["ON_G.ADJ - SJ", "ON_M.ADJ - SJ"],
-    },
-    {
-        name: "ATTY",
-        parentCategory: "INWARDS",
-        voucherTypes: ["ON_M.ATTY"],
-    },
-    {
-        name: "CLEANING",
-        parentCategory: "INWARDS",
-        voucherTypes: ["ON_M.CLEANING"],
-    },
-    {
-        name: "WT.CHECK",
-        parentCategory: "INWARDS",
-        voucherTypes: ["ON_M.WT-CHK"],
-    },
-    {
-        name: "SALES",
-        parentCategory: "OUTWARDS",
-        voucherTypes: [
-            "1.ON_Sales - M",
-            "1.ON_M Sales_SM",
-            "1.ON_O Sales_SM",
-            "1.ON_G Sales_SM",
-            "1.ON_G.C.Bill_SM",
-            "All Sales",
-        ],
-    },
-    {
-        name: "OUTWARDS / INT TRF",
-        parentCategory: "OUTWARDS",
-        voucherTypes: ["ON_O.M.OUTWARDS", "ON_G.OUTWARDS", "ON_M.OUTWARDS"],
-    },
-];
 
 const OverallStaffReport: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
@@ -887,33 +205,33 @@ const OverallStaffReport: React.FC = () => {
     // UI States
     const [fromDate, setFromDate] = useState(today);
     const [toDate, setToDate] = useState(today);
+    const [tempFromDate, setTempFromDate] = useState(today);
+    const [tempToDate, setTempToDate] = useState(today);
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        if (drawerOpen) {
+            setTempFromDate(fromDate);
+            setTempToDate(toDate);
+        }
+    }, [drawerOpen, fromDate, toDate]);
+
+
+
+    // Live Report Data State
+    const [reportData, setReportData] = useState<any[]>([]);
+
+    // Expanded Staff & Invoices Dynamic Data State
+    const [staffData, setStaffData] = useState<Record<string, any[]>>({});
+    const [invoiceData, setInvoiceData] = useState<Record<string, any[]>>({});
 
     // Column Config State
-    const [roleColumns, setRoleColumns] = useState<ColumnConfig[]>(() => {
-        const saved = sessionStorage.getItem("overallStaffColumns");
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                // Check if the saved columns have the correct format (original keys and a metric field present)
-                const isCorrectFormat = parsed.every((c: any) => !c.key.endsWith("_qty") && !c.key.endsWith("_cnt") && ("metric" in c));
-                if (isCorrectFormat) {
-                    return parsed;
-                }
-            } catch (e) {
-                console.error("Error parsing saved columns", e);
-            }
-        }
-        return DEFAULT_ROLE_COLUMNS;
-    });
+    const [roleColumns, setRoleColumns] = useState<ColumnConfig[]>(DEFAULT_ROLE_COLUMNS);
 
     const handleChangeMetric = (key: string, metric: "qty" | "count") => {
         setRoleColumns(p => p.map(col => col.key === key ? { ...col, metric } : col));
     };
-
-    useEffect(() => {
-        sessionStorage.setItem("overallStaffColumns", JSON.stringify(roleColumns));
-    }, [roleColumns]);
 
     // Drag-and-drop sensors
     const sensors = useSensors(
@@ -938,25 +256,195 @@ const OverallStaffReport: React.FC = () => {
     };
 
     // Grouping Config State
-    const [groups, setGroups] = useState<GroupConfig[]>(() => {
-        const saved = localStorage.getItem("overallStaffGroups");
-        return saved ? JSON.parse(saved) : INITIAL_GROUPS;
-    });
+    const [groups, setGroups] = useState<GroupConfig[]>([]);
+
+    // Master Voucher Types loaded from DB
+    const [voucherTypes, setVoucherTypes] = useState<VoucherType[]>([]);
+
+    // Involved Staff Filter States
+    const [involvedStaff, setInvolvedStaff] = useState<any[]>([]);
+    const [selectedStaffFilters, setSelectedStaffFilters] = useState<string[]>([]);
+    const [staffFilterAnchor, setStaffFilterAnchor] = useState<null | HTMLElement>(null);
+
+    const fetchInvolvedStaff = async () => {
+        try {
+            const res = await employeeReportGroupService.getGroupEmployees({
+                Fromdate: fromDate,
+                Todate: toDate
+            });
+            if (res.data.success) {
+                const uniqueStaff: any[] = [];
+                const seen = new Set();
+                (res.data.data || []).forEach((s: any) => {
+                    const name = s.Cost_Center_Name || "Unassigned";
+                    if (!seen.has(name)) {
+                        seen.add(name);
+                        uniqueStaff.push(s);
+                    }
+                });
+                setInvolvedStaff(uniqueStaff);
+            }
+        } catch (err) {
+            console.error("Error fetching involved staff list:", err);
+        }
+    };
 
     useEffect(() => {
-        localStorage.setItem("overallStaffGroups", JSON.stringify(groups));
-    }, [groups]);
+        if (groups.length > 0) {
+            fetchInvolvedStaff();
+        }
+        setSelectedStaffFilters([]);
+    }, [fromDate, toDate, groups]);
 
-    // Selected Expanded Voucher Types
+    // Pre-load all staff data in background on data/date change to support top-level filter recalculation
+    useEffect(() => {
+        const loadAllStaffData = async () => {
+            if (reportData.length === 0) return;
+
+            const normalizeCategory = (cat: string) => {
+                if (!cat) return "";
+                const c = cat.toUpperCase();
+                if (c === "PROCESS") return "ADJUSTMENTS";
+                return c;
+            };
+
+            const promises = reportData.map(async (row) => {
+                const parentCategory = normalizeCategory(row.Overall_GroupName);
+                const groupName = row.Group_Name || "UNASSIGNED";
+                const voucherName = row.Voucher_Type;
+                if (!voucherName) return;
+
+                const vKey = `${parentCategory}_${groupName}_${voucherName}`;
+                if (!staffData[vKey]) {
+                    try {
+                        const res = await employeeReportGroupService.getGroupEmployees({
+                            Fromdate: fromDate,
+                            Todate: toDate,
+                            Overall_GroupName: parentCategory === "ADJUSTMENTS" ? "PROCESS" : parentCategory,
+                            Group_Name: groupName,
+                            Voucher_Type: voucherName
+                        });
+                        if (res.data.success) {
+                            setStaffData(prev => ({
+                                ...prev,
+                                [vKey]: res.data.data
+                            }));
+                        }
+                    } catch (err) {
+                        console.error(`Error pre-loading staff for ${vKey}:`, err);
+                    }
+                }
+            });
+            await Promise.all(promises);
+        };
+
+        loadAllStaffData();
+    }, [reportData, fromDate, toDate]);
+
+    const handleToggleStaff = (name: string) => {
+        setSelectedStaffFilters(prev => {
+            if (prev.includes(name)) {
+                return prev.filter(n => n !== name);
+            } else {
+                return [...prev, name];
+            }
+        });
+    };
+
+    const handleToggleSelectAll = () => {
+        setSelectedStaffFilters([]);
+    };
+
+    // Fetch voucher types and employee report groups from backend on mount
+    useEffect(() => {
+        const fetchMetadata = async () => {
+            try {
+                // 1. Fetch Voucher Types
+                const vtRes = await employeeReportGroupService.getVoucherTypes();
+                if (vtRes.data.success) {
+                    setVoucherTypes(vtRes.data.data);
+                }
+
+                // 2. Fetch Employee Report Groups
+                const ergRes = await employeeReportGroupService.getEmployeeReportGroups();
+                if (ergRes.data.success && ergRes.data.data.length > 0) {
+                    const groupsMap: Record<string, {
+                        name: string;
+                        parentCategory: "INWARDS" | "OUTWARDS" | "ADJUSTMENTS";
+                        voucherTypes: string[];
+                    }> = {};
+
+                    ergRes.data.data.forEach(row => {
+                        const name = row.Group_Name;
+                        if (!groupsMap[name]) {
+                            const catId = Number(row.Overall_GroupId);
+                            const parentCategory = catId === 1 ? "INWARDS" : catId === 2 ? "ADJUSTMENTS" : "OUTWARDS";
+                            groupsMap[name] = {
+                                name,
+                                parentCategory,
+                                voucherTypes: []
+                            };
+                        }
+                        if (row.Voucher_Type_Name) {
+                            groupsMap[name].voucherTypes.push(row.Voucher_Type_Name);
+                        }
+                    });
+
+                    setGroups(Object.values(groupsMap));
+                }
+            } catch (err) {
+                console.error("Error loading group/voucher metadata:", err);
+                toast.error("Failed to load metadata from backend");
+            }
+        };
+
+        fetchMetadata();
+    }, []);
+
+    // Fetch Overall Staff Report Data
+    const fetchReportData = async () => {
+        setLoading(true);
+        try {
+            const res = await employeeReportGroupService.getOverallStaffCategorywise({
+                Fromdate: fromDate,
+                Todate: toDate
+            });
+            if (res.data.success) {
+                setReportData(res.data.data);
+            } else {
+                setReportData([]);
+            }
+        } catch (err) {
+            console.error("Error loading report data:", err);
+            toast.error("Failed to load report data");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (groups.length > 0) {
+            fetchReportData();
+        }
+    }, [fromDate, toDate, groups]);
+
+    // Selected Expanded Voucher Types (First Expansion level)
     const [expandedVouchers, setExpandedVouchers] = useState<string[]>([]);
 
-    // Selected Expanded Staff Invoices inline
+    // Selected Expanded Staff Invoices inline (Second Expansion level)
     const [expandedStaff, setExpandedStaff] = useState<string[]>([]);
+
+    useEffect(() => {
+        setExpandedVouchers([]);
+        setExpandedStaff([]);
+        setStaffData({});
+        setInvoiceData({});
+    }, [fromDate, toDate]);
 
     // Group Creation Modal Dialog
     const [groupCreateOpen, setGroupCreateOpen] = useState(false);
     const [newGroupName, setNewGroupName] = useState("");
-    const [newGroupCategory, setNewGroupCategory] = useState<"INWARDS" | "OUTWARDS">("INWARDS");
+    const [newGroupCategory, setNewGroupCategory] = useState<"INWARDS" | "OUTWARDS" | "ADJUSTMENTS">("INWARDS");
     const [newGroupVouchers, setNewGroupVouchers] = useState<string[]>([]);
     const [selectedGroupToEdit, setSelectedGroupToEdit] = useState<string>("");
 
@@ -984,13 +472,19 @@ const OverallStaffReport: React.FC = () => {
                 enabled: c.enabled,
                 order: c.order,
                 groupBy: 0,
-                dataType: "nvarchar"
+                dataType: c.metric || "qty"
             }));
 
             if (selectedTemplateId) {
                 await SettingsService.updateReport({
                     reportId: selectedTemplateId,
                     typeId: 1,
+                    reportName: reportName.trim(),
+                    columns: payloadColumns
+                });
+                await SettingsService.updateReport({
+                    reportId: selectedTemplateId,
+                    typeId: 2,
                     reportName: reportName.trim(),
                     columns: payloadColumns
                 });
@@ -1002,8 +496,8 @@ const OverallStaffReport: React.FC = () => {
                 await SettingsService.saveReportSettings({
                     reportName,
                     parentReport: parentReportName,
-                    abstractSP: "sp_OverallStaffReport",
-                    expandedSP: "sp_OverallStaffReport",
+                    abstractSP: "SP_Get_EmployeeReport_By_CostCategory_AllModules",
+                    expandedSP: "SP_Get_EmployeeReport_By_CostCategory_AllModules",
                     abstractColumns: payloadColumns,
                     expandedColumns: payloadColumns,
                     createdBy
@@ -1011,6 +505,9 @@ const OverallStaffReport: React.FC = () => {
                 toast.success("Template Saved Successfully ✅");
             }
             setSaveDialogOpen(false);
+            setTimeout(() => {
+                window.location.reload();
+            }, 300);
         } catch (err) {
             console.error(err);
             toast.error("Failed to save template ❌");
@@ -1022,14 +519,33 @@ const OverallStaffReport: React.FC = () => {
         try {
             setSelectedTemplateId(templateId);
             setIsEditTemplate(true);
+            setExpandedVouchers([]);
+            setExpandedStaff([]);
+            setStaffData({});
+            setInvoiceData({});
             const res = await SettingsService.getReportEditData({ reportId: templateId, typeId: 1 });
+            if (res.data.success && res.data.data.reportInfo) {
+                setReportName(res.data.data.reportInfo.Report_Name || "");
+            }
             const templateCols = res.data.data.columns || [];
 
-            // Map settings
+            // Map settings and sort by order
             const updatedCols = roleColumns.map(col => {
                 const matched = templateCols.find((t: any) => t.key === col.key);
-                return matched ? { ...col, enabled: matched.enabled } : col;
-            });
+                if (matched) {
+                    return {
+                        ...col,
+                        enabled: matched.enabled ?? matched.Enabled ?? false,
+                        order: matched.order ?? matched.Order ?? col.order,
+                        metric: (matched.dataType === "qty" || matched.dataType === "count") ? matched.dataType : col.metric
+                    };
+                }
+                return {
+                    ...col,
+                    enabled: false
+                };
+            }).sort((a, b) => a.order - b.order);
+
             setRoleColumns(updatedCols);
             toast.success("Template Loaded Successfully ✅");
         } catch (err) {
@@ -1044,6 +560,10 @@ const OverallStaffReport: React.FC = () => {
         setIsEditTemplate(false);
         setReportName("");
         setRoleColumns(DEFAULT_ROLE_COLUMNS);
+        setExpandedVouchers([]);
+        setExpandedStaff([]);
+        setStaffData({});
+        setInvoiceData({});
     };
 
     // Toggle Role column visibility
@@ -1052,7 +572,7 @@ const OverallStaffReport: React.FC = () => {
     };
 
     // Create custom group
-    const handleCreateGroup = () => {
+    const handleCreateGroup = async () => {
         if (!newGroupName.trim()) {
             toast.error("Please enter a group name");
             return;
@@ -1062,39 +582,70 @@ const OverallStaffReport: React.FC = () => {
             return;
         }
 
-        // Add or replace group
-        const newGroup: GroupConfig = {
-            name: newGroupName.trim(),
-            parentCategory: newGroupCategory,
-            voucherTypes: newGroupVouchers
+        const categoryIdMap = {
+            "INWARDS": 1,
+            "ADJUSTMENTS": 2,
+            "OUTWARDS": 3
         };
+        const overallGroupId = categoryIdMap[newGroupCategory];
 
-        let updatedGroups = [...groups];
+        const voucherIds = newGroupVouchers
+            .map(vName => voucherTypes.find(vt => vt.label === vName)?.Value)
+            .filter((id): id is number => id !== undefined);
 
-        // If editing an existing group, filter out the old group definition
-        if (selectedGroupToEdit && selectedGroupToEdit !== "new") {
-            updatedGroups = updatedGroups.filter(g => g.name !== selectedGroupToEdit);
+        if (voucherIds.length === 0) {
+            toast.error("Voucher types could not be mapped to IDs");
+            return;
         }
 
-        // Ensure these voucher types are removed from any existing group first
-        updatedGroups = updatedGroups.map(g => ({
-            ...g,
-            voucherTypes: g.voucherTypes.filter(v => !newGroupVouchers.includes(v))
-        })).filter(g => g.voucherTypes.length > 0);
+        try {
+            const saveRes = await employeeReportGroupService.updateEmployeeReportGroup({
+                groupName: newGroupName.trim(),
+                overallGroupId,
+                voucherIds,
+            });
 
-        const groupIndex = updatedGroups.findIndex(g => g.name.toLowerCase() === newGroupName.trim().toLowerCase());
-        if (groupIndex > -1) {
-            updatedGroups[groupIndex] = newGroup;
-        } else {
-            updatedGroups.push(newGroup);
+            if (saveRes.data.success) {
+                toast.success(`Group "${newGroupName.trim()}" saved successfully 🎉`);
+
+                const ergRes = await employeeReportGroupService.getEmployeeReportGroups();
+                if (ergRes.data.success) {
+                    const groupsMap: Record<string, {
+                        name: string;
+                        parentCategory: "INWARDS" | "OUTWARDS" | "ADJUSTMENTS";
+                        voucherTypes: string[];
+                    }> = {};
+
+                    ergRes.data.data.forEach(row => {
+                        const name = row.Group_Name;
+                        if (!groupsMap[name]) {
+                            const catId = Number(row.Overall_GroupId);
+                            const parentCategory = catId === 1 ? "INWARDS" : catId === 2 ? "ADJUSTMENTS" : "OUTWARDS";
+                            groupsMap[name] = {
+                                name,
+                                parentCategory,
+                                voucherTypes: []
+                            };
+                        }
+                        if (row.Voucher_Type_Name) {
+                            groupsMap[name].voucherTypes.push(row.Voucher_Type_Name);
+                        }
+                    });
+
+                    setGroups(Object.values(groupsMap));
+                }
+
+                setNewGroupName("");
+                setNewGroupVouchers([]);
+                setSelectedGroupToEdit("");
+                setGroupCreateOpen(false);
+            } else {
+                toast.error("Failed to save group to server ❌");
+            }
+        } catch (err) {
+            console.error("Error saving group:", err);
+            toast.error("Failed to save group to server ❌");
         }
-
-        setGroups(updatedGroups);
-        setNewGroupName("");
-        setNewGroupVouchers([]);
-        setSelectedGroupToEdit("");
-        setGroupCreateOpen(false);
-        toast.success(`Group "${newGroup.name}" saved successfully 🎉`);
     };
 
     const handleCloseGroupDialog = () => {
@@ -1105,92 +656,214 @@ const OverallStaffReport: React.FC = () => {
     };
 
     // Available voucher types that can be selected in Group Creation
-    const allVoucherNames = useMemo(() => INITIAL_VOUCHERS_DATA.map(v => v.name), []);
+    const allVoucherNames = useMemo(() => voucherTypes.map(v => v.label), [voucherTypes]);
 
-    // Build hierarchical table data dynamically based on active grouping configuration
+    // Build hierarchical table data dynamically based on active grouping config and live reportData
     const tableCategories = useMemo(() => {
-        // Group the raw vouchers data by the configured group name
-        const inwardsGroups: any[] = [];
-        const outwardsGroups: any[] = [];
+        const normalizeCategory = (cat: string) => {
+            if (!cat) return "";
+            const c = cat.toUpperCase();
+            if (c === "PROCESS") return "ADJUSTMENTS";
+            return c;
+        };
 
+        const catList = ["INWARDS", "ADJUSTMENTS", "OUTWARDS"];
+        const categoryGroupsMap: Record<string, any[]> = {
+            INWARDS: [],
+            ADJUSTMENTS: [],
+            OUTWARDS: []
+        };
+
+        // 1. Process defined groups
         groups.forEach(group => {
-            const matchedVouchers = INITIAL_VOUCHERS_DATA.filter(v => group.voucherTypes.includes(v.name));
-            if (matchedVouchers.length === 0) return;
+            const matchedRows = reportData.filter(row =>
+                row.Group_Name === group.name &&
+                normalizeCategory(row.Overall_GroupName) === group.parentCategory &&
+                row.Voucher_Type
+            );
+            if (matchedRows.length === 0) return;
 
-            // Calculate Group Totals
-            const groupKgsSum = matchedVouchers.reduce((sum, v) => sum + v.baseKgs, 0);
+            const voucherTypesData = matchedRows.map(r => {
+                const vKey = `${group.parentCategory}_${group.name}_${r.Voucher_Type}`;
+                const staffList = staffData[vKey] || [];
+                const filteredStaffList = staffList.filter((sc: any) => {
+                    if (selectedStaffFilters.length === 0) return true;
+                    const name = sc.Cost_Center_Name || "Unassigned";
+                    return selectedStaffFilters.includes(name);
+                });
+
+                const roleSums: Record<string, number> = {};
+                let totalTonnage = 0;
+                let totalCount = 0;
+
+                if (selectedStaffFilters.length > 0) {
+                    roleColumns.forEach(roleCol => {
+                        let sumVal = 0;
+                        filteredStaffList.forEach(sc => {
+                            sumVal += getStaffCellValue(sc, roleCol.key, roleCol.metric || "qty");
+                        });
+                        roleSums[roleCol.key] = sumVal;
+                    });
+                    filteredStaffList.forEach(sc => {
+                        totalTonnage += getStaffCellValue(sc, "Total_Tonnage", "qty");
+                        totalCount += getStaffCellValue(sc, "Invoice_Count", "count");
+                    });
+                } else {
+                    roleColumns.forEach(roleCol => {
+                        if (roleCol.key === "Total_Tonnage") {
+                            roleSums[roleCol.key] = roleCol.metric === "count" ? (Number(r.Invoice_Count) || 0) : (Number(r.Total_Tonnage) || 0);
+                        } else if (roleCol.key === "Invoice_Count") {
+                            roleSums[roleCol.key] = Number(r.Invoice_Count) || 0;
+                        } else {
+                            if (roleCol.metric === "count") {
+                                roleSums[roleCol.key] = Number(r[`${roleCol.key}_Count`]) || 0;
+                            } else {
+                                roleSums[roleCol.key] = Number(r[roleCol.key]) || 0;
+                            }
+                        }
+                    });
+                    totalTonnage = r.Total_Tonnage || 0;
+                    totalCount = r.Invoice_Count || 0;
+                }
+
+                return {
+                    name: r.Voucher_Type,
+                    baseKgs: totalTonnage,
+                    roleSums,
+                    totalTonnage,
+                    totalCount,
+                    staff: staffList
+                };
+            });
+
+            const groupKgsSum = voucherTypesData.reduce((sum, vt) => sum + vt.totalTonnage, 0);
 
             const groupData = {
                 groupName: group.name,
                 groupKgs: groupKgsSum,
-                voucherTypes: matchedVouchers.map(v => {
-                    // Compute columns sum for this voucher type
-                    const totalTonnageSum = v.staffContributions.reduce((sum: number, sc: StaffContribution) => {
-                        return sum + (sc.roleValues["Total Tonnage"]?.qty || 0);
-                    }, 0);
-                    const totalCountSum = v.staffContributions.reduce((sum: number, sc: StaffContribution) => {
-                        return sum + (sc.roleValues["Count"]?.count || 0);
-                    }, 0);
-
-                    // Compute specific role column sums for header row
-                    const roleSums: Record<string, number> = {};
-                    roleColumns.forEach(roleCol => {
-                        const metric: "qty" | "count" = roleCol.metric || "qty";
-                        roleSums[roleCol.key] = v.staffContributions.reduce((sum: number, sc: StaffContribution) => {
-                            const scVal = sc.roleValues[roleCol.key]?.[metric] || 0;
-                            return sum + scVal;
-                        }, 0);
-                    });
-
-                    return {
-                        name: v.name,
-                        baseKgs: v.baseKgs,
-                        roleSums,
-                        totalTonnage: totalTonnageSum,
-                        totalCount: totalCountSum,
-                        staff: v.staffContributions
-                    };
-                })
+                voucherTypes: voucherTypesData
             };
 
-            if (group.parentCategory === "INWARDS") {
-                inwardsGroups.push(groupData);
-            } else {
-                outwardsGroups.push(groupData);
+            if (categoryGroupsMap[group.parentCategory]) {
+                categoryGroupsMap[group.parentCategory].push(groupData);
             }
         });
 
-        // Split inwardsGroups into blocks for display mapping if matching screenshots
-        // Block 1 (PUR/RET + INT TRF), Block 2 (ADJ + ATTY + CLEANING + WT.CHECK)
-        const inBlock1 = inwardsGroups.filter(g => ["PUR / RET", "INT TRF"].includes(g.groupName));
-        const inBlock2 = inwardsGroups.filter(g => ["ADJ", "ATTY", "CLEANING", "WT.CHECK"].includes(g.groupName));
+        // 2. Process Unassigned / Null groups for each category
+        catList.forEach(cat => {
+            const definedGroupNames = groups.filter(g => g.parentCategory === cat).map(g => g.name);
 
-        const categories = [
-            {
-                name: "INWARDS",
-                groups: inBlock1,
-                categoryKgs: inBlock1.reduce((sum, g) => sum + g.groupKgs, 0)
-            },
-            {
-                name: "ADJUSTMENTS",
-                groups: inBlock2,
-                categoryKgs: inBlock2.reduce((sum, g) => sum + g.groupKgs, 0)
-            },
-            {
-                name: "OUTWARDS",
-                groups: outwardsGroups,
-                categoryKgs: outwardsGroups.reduce((sum, g) => sum + g.groupKgs, 0)
+            // Find rows for this category that don't belong to any defined group
+            const unassignedRows = reportData.filter(row =>
+                normalizeCategory(row.Overall_GroupName) === cat &&
+                row.Voucher_Type &&
+                (row.Group_Name === null || row.Group_Name === undefined || !definedGroupNames.includes(row.Group_Name))
+            );
+
+            if (unassignedRows.length > 0) {
+                const voucherTypesData = unassignedRows.map(r => {
+                    const vKey = `${cat}_UNASSIGNED_${r.Voucher_Type}`;
+                    const staffList = staffData[vKey] || [];
+                    const filteredStaffList = staffList.filter((sc: any) => {
+                        if (selectedStaffFilters.length === 0) return true;
+                        const name = sc.Cost_Center_Name || "Unassigned";
+                        return selectedStaffFilters.includes(name);
+                    });
+
+                    const roleSums: Record<string, number> = {};
+                    let totalTonnage = 0;
+                    let totalCount = 0;
+
+                    if (selectedStaffFilters.length > 0) {
+                        roleColumns.forEach(roleCol => {
+                            let sumVal = 0;
+                            filteredStaffList.forEach(sc => {
+                                sumVal += getStaffCellValue(sc, roleCol.key, roleCol.metric || "qty");
+                            });
+                            roleSums[roleCol.key] = sumVal;
+                        });
+                        filteredStaffList.forEach(sc => {
+                            totalTonnage += getStaffCellValue(sc, "Total_Tonnage", "qty");
+                            totalCount += getStaffCellValue(sc, "Invoice_Count", "count");
+                        });
+                    } else {
+                        roleColumns.forEach(roleCol => {
+                            if (roleCol.key === "Total_Tonnage") {
+                                roleSums[roleCol.key] = roleCol.metric === "count" ? (Number(r.Invoice_Count) || 0) : (Number(r.Total_Tonnage) || 0);
+                            } else if (roleCol.key === "Invoice_Count") {
+                                roleSums[roleCol.key] = Number(r.Invoice_Count) || 0;
+                            } else {
+                                if (roleCol.metric === "count") {
+                                    roleSums[roleCol.key] = Number(r[`${roleCol.key}_Count`]) || 0;
+                                } else {
+                                    roleSums[roleCol.key] = Number(r[roleCol.key]) || 0;
+                                }
+                            }
+                        });
+                        totalTonnage = r.Total_Tonnage || 0;
+                        totalCount = r.Invoice_Count || 0;
+                    }
+
+                    return {
+                        name: r.Voucher_Type,
+                        baseKgs: totalTonnage,
+                        roleSums,
+                        totalTonnage,
+                        totalCount,
+                        staff: staffList
+                    };
+                });
+
+                const groupKgsSum = voucherTypesData.reduce((sum, vt) => sum + vt.totalTonnage, 0);
+                const unassignedGroupData = {
+                    groupName: "UNASSIGNED",
+                    groupKgs: groupKgsSum,
+                    voucherTypes: voucherTypesData
+                };
+                categoryGroupsMap[cat].push(unassignedGroupData);
             }
-        ].filter(cat => cat.groups.length > 0);
+        });
+
+        // 3. Construct categories output
+        const categories = catList.map(cat => ({
+            name: cat,
+            groups: categoryGroupsMap[cat],
+            categoryKgs: categoryGroupsMap[cat].reduce((sum, g) => sum + g.groupKgs, 0)
+        })).filter(cat => cat.groups.length > 0);
 
         return categories;
-    }, [groups, roleColumns]);
+    }, [groups, reportData, roleColumns, staffData, selectedStaffFilters]);
 
-    // Toggles expanded voucher state
-    const handleToggleExpandVoucher = (voucherName: string) => {
-        setExpandedVouchers(prev =>
-            prev.includes(voucherName) ? prev.filter(v => v !== voucherName) : [...prev, voucherName]
-        );
+    // Toggles expanded voucher state & fetches group employees dynamically
+    const handleToggleExpandVoucher = async (parentCategory: string, groupName: string, voucherName: string) => {
+        const key = `${parentCategory}_${groupName}_${voucherName}`;
+        const isExpanded = expandedVouchers.includes(key);
+
+        if (!isExpanded) {
+            setExpandedVouchers(prev => [...prev, key]);
+            if (!staffData[key]) {
+                try {
+                    const res = await employeeReportGroupService.getGroupEmployees({
+                        Fromdate: fromDate,
+                        Todate: toDate,
+                        Overall_GroupName: parentCategory === "ADJUSTMENTS" ? "PROCESS" : parentCategory,
+                        Group_Name: groupName,
+                        Voucher_Type: voucherName
+                    });
+                    if (res.data.success) {
+                        setStaffData(prev => ({
+                            ...prev,
+                            [key]: res.data.data
+                        }));
+                    }
+                } catch (err) {
+                    console.error("Error loading group employees:", err);
+                    toast.error("Failed to load staff list");
+                }
+            }
+        } else {
+            setExpandedVouchers(prev => prev.filter(v => v !== key));
+        }
     };
 
     // Calculate Grand Tonnage & Count Totals
@@ -1210,25 +883,379 @@ const OverallStaffReport: React.FC = () => {
             });
         });
 
+        let dynamicQtyTotal = 0;
+        let dynamicCountTotal = 0;
+        roleColumns.filter(c => c.enabled).forEach(c => {
+            const val = roleTotals[c.key] || 0;
+            if (c.metric === "count") {
+                dynamicCountTotal += val;
+            } else {
+                dynamicQtyTotal += val;
+            }
+        });
+
         return {
             totalKgs,
-            roleTotals
+            roleTotals,
+            dynamicQtyTotal,
+            dynamicCountTotal
         };
     }, [tableCategories, roleColumns]);
 
-    // Toggle expand staff invoices inline
-    const handleToggleExpandStaff = (voucherName: string, staffName: string) => {
-        const key = `${voucherName}_${staffName}`;
-        setExpandedStaff(prev =>
-            prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
-        );
+    const getRowTotalValues = (rowType: 'vt' | 'staff' | 'invoice', rowData: any) => {
+        let qtyTotal = 0;
+        let countTotal = 0;
+
+        roleColumns.filter(c => c.enabled).forEach(col => {
+            const metric = col.metric || "qty";
+            if (rowType === 'vt') {
+                const val = rowData.roleSums[col.key] || 0;
+                if (metric === "qty") qtyTotal += val;
+                else countTotal += val;
+            } else if (rowType === 'staff') {
+                const val = getStaffCellValue(rowData, col.key, metric);
+                if (metric === "qty") qtyTotal += val;
+                else countTotal += val;
+            } else if (rowType === 'invoice') {
+                const val = getInvoiceCellValue(rowData, col.key, metric);
+                if (metric === "qty") qtyTotal += val;
+                else countTotal += val;
+            }
+        });
+
+        return { qtyTotal, countTotal };
+    };
+
+    // Toggle expand staff invoices inline & fetches invoices dynamically
+    const handleToggleExpandStaff = async (parentCategory: string, groupName: string, voucherName: string, empId: number, _staffName: string) => {
+        const vKey = `${parentCategory}_${groupName}_${voucherName}`;
+        const staffKey = `${vKey}_${empId || 'unassigned'}`;
+        const isExpanded = expandedStaff.includes(staffKey);
+
+        if (!isExpanded) {
+            setExpandedStaff(prev => [...prev, staffKey]);
+            if (!invoiceData[staffKey]) {
+                try {
+                    const res = await employeeReportGroupService.getEmployeeInvoices({
+                        Fromdate: fromDate,
+                        Todate: toDate,
+                        Overall_GroupName: parentCategory === "ADJUSTMENTS" ? "PROCESS" : parentCategory,
+                        Group_Name: groupName,
+                        Voucher_Type: voucherName,
+                        Emp_Id: empId || undefined,
+                        Emp_Id_Is_Unassigned: empId ? 0 : 1
+                    });
+                    if (res.data.success) {
+                        // Group raw invoices by Voucher_Ref_Id
+                        const rawInvoices = res.data.data || [];
+                        const groupedInvoices: any[] = [];
+                        const groupMap: Record<string, any> = {};
+
+                        rawInvoices.forEach((row: any) => {
+                            const refId = String(row.Voucher_Ref_Id);
+                            if (!groupMap[refId]) {
+                                groupMap[refId] = {
+                                    Voucher_Ref_Id: row.Voucher_Ref_Id,
+                                    Inv_No: row.Inv_No,
+                                    Voucher_Type: row.Voucher_Type,
+                                    Group_Name: row.Group_Name,
+                                    Overall_GroupName: row.Overall_GroupName,
+                                    Voucher_Date: row.Voucher_Date,
+                                    Cost_Center_Id: row.Cost_Center_Id,
+                                    Cost_Center_Name: row.Cost_Center_Name,
+                                    roleValues: {}
+                                };
+                                groupedInvoices.push(groupMap[refId]);
+                            }
+
+                            const inv = groupMap[refId];
+                            const category = row.Cost_Category;
+                            if (category) {
+                                if (!inv.roleValues[category]) {
+                                    inv.roleValues[category] = { qty: 0, count: 0 };
+                                }
+                                inv.roleValues[category].qty += Number(row.Bill_Qty) || 0;
+                                inv.roleValues[category].count = 1;
+                            }
+                        });
+
+                        setInvoiceData(prev => ({
+                            ...prev,
+                            [staffKey]: groupedInvoices
+                        }));
+                    }
+                } catch (err) {
+                    console.error("Error loading employee invoices:", err);
+                    toast.error("Failed to load invoices list");
+                }
+            }
+        } else {
+            setExpandedStaff(prev => prev.filter(k => k !== staffKey));
+        }
+    };
+
+    const headerCellHeight = 38;
+    const headerCellSx = {
+        color: "#ffffff",
+        fontWeight: 700,
+        height: headerCellHeight,
+        py: 0,
+        borderRight: "1px solid #2448b2",
+        fontSize: "0.75rem",
+        bgcolor: "#1E3A8A",
+        whiteSpace: "nowrap",
+        position: "sticky",
+        top: 0,
+        zIndex: 3
+    };
+
+    const totalCellSx = {
+        color: "#1e3a8a",
+        fontWeight: 800,
+        fontSize: "0.725rem",
+        py: 1,
+        bgcolor: "#bfdbfe",
+        borderRight: "1px solid #93c5fd",
+        whiteSpace: "nowrap",
+        position: "sticky",
+        top: headerCellHeight,
+        zIndex: 2
+    };
+
+    const handleExportExcel = () => {
+        const enabledRoles = roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order);
+        const rows: any[] = [];
+
+        tableCategories.forEach((category) => {
+            category.groups.forEach((group) => {
+                group.voucherTypes.forEach((vt: any) => {
+                    const vKey = `${category.name}_${group.groupName}_${vt.name}`;
+                    const isExpanded = expandedVouchers.includes(vKey);
+                    const filteredStaff = (vt.staff || []).filter((sc: any) => {
+                        if (selectedStaffFilters.length === 0) return true;
+                        const name = sc.Cost_Center_Name || "Unassigned";
+                        return selectedStaffFilters.includes(name);
+                    });
+                    const hasStaff = filteredStaff.length > 0;
+
+                    // 1. Voucher Type (Main Row)
+                    const { qtyTotal: vtQty, countTotal: vtCount } = getRowTotalValues('vt', vt);
+                    const vtRow: any = {};
+                    vtRow["Category"] = category.name;
+                    vtRow["Groups"] = group.groupName;
+                    vtRow["Group Kgs"] = group.groupKgs;
+                    vtRow["Voucher Type"] = vt.name;
+                    vtRow["Voucher Kgs"] = vt.baseKgs;
+                    vtRow["Total Kgs / Total Count"] = `${vtQty.toLocaleString()} / ${vtCount.toLocaleString()}`;
+                    vtRow["Staff Name / Inv No"] = "-";
+                    enabledRoles.forEach(col => {
+                        const val = vt.roleSums[col.key] || 0;
+                        vtRow[getColumnLabel(col)] = val;
+                    });
+                    rows.push(vtRow);
+
+                    // 2. Staff Rows (if expanded)
+                    if (isExpanded && hasStaff) {
+                        filteredStaff.forEach((sc: any) => {
+                            const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
+                            const isStaffExpanded = expandedStaff.includes(staffKey);
+                            const invoicesList = invoiceData[staffKey] || [];
+                            const hasInvoices = invoicesList.length > 0;
+
+                            const { qtyTotal: scQty, countTotal: scCount } = getRowTotalValues('staff', sc);
+                            const staffRow: any = {};
+                            staffRow["Category"] = "";
+                            staffRow["Groups"] = "";
+                            staffRow["Group Kgs"] = "";
+                            staffRow["Voucher Type"] = "";
+                            staffRow["Voucher Kgs"] = "";
+                            staffRow["Total Kgs / Total Count"] = `${scQty.toLocaleString()} / ${scCount.toLocaleString()}`;
+                            staffRow["Staff Name / Inv No"] = sc.Cost_Center_Name || "Unassigned";
+                            enabledRoles.forEach(col => {
+                                const val = getStaffCellValue(sc, col.key, col.metric || "qty");
+                                staffRow[getColumnLabel(col)] = val;
+                            });
+                            rows.push(staffRow);
+
+                            // 3. Invoice Rows (if staff is expanded)
+                            if (isStaffExpanded && hasInvoices) {
+                                invoicesList.forEach((inv: any) => {
+                                    const { qtyTotal: invQty, countTotal: invCount } = getRowTotalValues('invoice', inv);
+                                    const invRow: any = {};
+                                    invRow["Category"] = "";
+                                    invRow["Groups"] = "";
+                                    invRow["Group Kgs"] = "";
+                                    invRow["Voucher Type"] = "";
+                                    invRow["Voucher Kgs"] = "";
+                                    invRow["Total Kgs / Total Count"] = `${invQty.toLocaleString()} / ${invCount.toLocaleString()}`;
+                                    invRow["Staff Name / Inv No"] = inv.Inv_No;
+                                    enabledRoles.forEach(col => {
+                                        const val = getInvoiceCellValue(inv, col.key, col.metric || "qty");
+                                        invRow[getColumnLabel(col)] = val;
+                                    });
+                                    rows.push(invRow);
+                                });
+                            }
+                        });
+                    }
+                });
+            });
+        });
+
+        // 4. Grand Total Row
+        const grandRow: any = {};
+        grandRow["Category"] = "Total";
+        grandRow["Groups"] = "Grand Total";
+        grandRow["Group Kgs"] = grandTotals.totalKgs;
+        grandRow["Voucher Type"] = "";
+        grandRow["Voucher Kgs"] = "";
+        grandRow["Total Kgs / Total Count"] = `${grandTotals.dynamicQtyTotal.toLocaleString()} / ${grandTotals.dynamicCountTotal.toLocaleString()}`;
+        grandRow["Staff Name / Inv No"] = "";
+        enabledRoles.forEach(col => {
+            grandRow[getColumnLabel(col)] = grandTotals.roleTotals[col.key] || 0;
+        });
+        rows.push(grandRow);
+
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Overall Staff Report");
+        XLSX.writeFile(workbook, `Overall Staff Report_${dayjs().format("DDMMYYYY")}.xlsx`);
+        toast.success("Excel Exported ✅");
+    };
+
+    const handleExportPDF = () => {
+        const cols = [
+            "Category",
+            "Groups",
+            "Group Kgs",
+            "Voucher Type",
+            "Voucher Kgs",
+            "Total Kgs / Total Count",
+            "Staff Name / Inv No"
+        ];
+
+        const enabledRoles = roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order);
+        enabledRoles.forEach(col => {
+            cols.push(getColumnLabel(col));
+        });
+
+        const rows: any[] = [];
+
+        tableCategories.forEach((category) => {
+            category.groups.forEach((group) => {
+                group.voucherTypes.forEach((vt: any) => {
+                    const vKey = `${category.name}_${group.groupName}_${vt.name}`;
+                    const isExpanded = expandedVouchers.includes(vKey);
+                    const filteredStaff = (vt.staff || []).filter((sc: any) => {
+                        if (selectedStaffFilters.length === 0) return true;
+                        const name = sc.Cost_Center_Name || "Unassigned";
+                        return selectedStaffFilters.includes(name);
+                    });
+                    const hasStaff = filteredStaff.length > 0;
+
+                    // 1. Voucher Type (Main Row)
+                    const { qtyTotal: vtQty, countTotal: vtCount } = getRowTotalValues('vt', vt);
+                    const vtRowData = [
+                        category.name,
+                        group.groupName,
+                        group.groupKgs.toLocaleString(),
+                        vt.name,
+                        vt.baseKgs.toLocaleString(),
+                        `${vtQty.toLocaleString()} / ${vtCount.toLocaleString()}`,
+                        "-"
+                    ];
+                    enabledRoles.forEach(col => {
+                        const val = vt.roleSums[col.key] || 0;
+                        vtRowData.push(val.toLocaleString());
+                    });
+                    rows.push(vtRowData);
+
+                    // 2. Staff Rows (if expanded)
+                    if (isExpanded && hasStaff) {
+                        filteredStaff.forEach((sc: any) => {
+                            const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
+                            const isStaffExpanded = expandedStaff.includes(staffKey);
+                            const invoicesList = invoiceData[staffKey] || [];
+                            const hasInvoices = invoicesList.length > 0;
+
+                            const { qtyTotal: scQty, countTotal: scCount } = getRowTotalValues('staff', sc);
+                            const staffRowData = [
+                                "",
+                                "",
+                                "",
+                                "",
+                                "",
+                                `${scQty.toLocaleString()} / ${scCount.toLocaleString()}`,
+                                sc.Cost_Center_Name || "Unassigned"
+                            ];
+                            enabledRoles.forEach(col => {
+                                const val = getStaffCellValue(sc, col.key, col.metric || "qty");
+                                staffRowData.push(val.toLocaleString());
+                            });
+                            rows.push(staffRowData);
+
+                            // 3. Invoice Rows (if staff is expanded)
+                            if (isStaffExpanded && hasInvoices) {
+                                invoicesList.forEach((inv: any) => {
+                                    const { qtyTotal: invQty, countTotal: invCount } = getRowTotalValues('invoice', inv);
+                                    const invRowData = [
+                                        "",
+                                        "",
+                                        "",
+                                        "",
+                                        "",
+                                        `${invQty.toLocaleString()} / ${invCount.toLocaleString()}`,
+                                        inv.Inv_No
+                                    ];
+                                    enabledRoles.forEach(col => {
+                                        const val = getInvoiceCellValue(inv, col.key, col.metric || "qty");
+                                        invRowData.push(val.toLocaleString());
+                                    });
+                                    rows.push(invRowData);
+                                });
+                            }
+                        });
+                    }
+                });
+            });
+        });
+
+        // 4. Grand Total Row
+        const grandRowData = [
+            "Total",
+            "Grand Total",
+            grandTotals.totalKgs.toLocaleString(),
+            "",
+            "",
+            `${grandTotals.dynamicQtyTotal.toLocaleString()} / ${grandTotals.dynamicCountTotal.toLocaleString()}`,
+            ""
+        ];
+        enabledRoles.forEach(col => {
+            const val = grandTotals.roleTotals[col.key] || 0;
+            grandRowData.push(val.toLocaleString());
+        });
+        rows.push(grandRowData);
+
+        const doc = new jsPDF("l", "mm", "a4");
+        doc.text("Overall Staff Report", 14, 10);
+        autoTable(doc, {
+            startY: 15,
+            head: [cols],
+            body: rows,
+            styles: { fontSize: 7 },
+            headStyles: { fillColor: [30, 58, 138] },
+        });
+
+        doc.save(`Overall Staff Report_${dayjs().format("DDMMYYYY")}.pdf`);
+        toast.success("PDF Exported ✅");
     };
 
     return (
         <>
             <PageHeader
-                onExportExcel={() => toast.success("Excel Exported ✅")}
-                onExportPDF={() => toast.success("PDF Exported ✅")}
+                parentReportName="Overall Staff Report"
+                onExportExcel={handleExportExcel}
+                onExportPDF={handleExportPDF}
                 onReportChange={(template) => {
                     if (!template || !template.Report_Id) {
                         handleClearTemplate();
@@ -1279,84 +1306,108 @@ const OverallStaffReport: React.FC = () => {
                 open={drawerOpen}
                 onToggle={() => setDrawerOpen((prev) => !prev)}
                 onClose={() => setDrawerOpen(false)}
-                fromDate={fromDate}
-                onFromDateChange={setFromDate}
-                toDate={toDate}
-                onToDateChange={setToDate}
-                onApply={() => setDrawerOpen(false)}
+                fromDate={tempFromDate}
+                onFromDateChange={setTempFromDate}
+                toDate={tempToDate}
+                onToDateChange={setTempToDate}
+                onApply={() => {
+                    setFromDate(tempFromDate);
+                    setToDate(tempToDate);
+                    setDrawerOpen(false);
+                }}
             />
 
             <AppLayout fullWidth>
-                <Box px={3} pb={4} pt={4}>
-                    <Typography variant="subtitle1" fontWeight="bold" color="#1e3a8a" mb={2} sx={{ letterSpacing: 0.5 }}>
-                        OVERALL STAFF REPORT {isEditTemplate && ` - ${reportName}`}
-                    </Typography>
+                <Box px={2} pb={1} pt={1}>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                        <Typography variant="subtitle1" fontWeight="bold" color="#1e3a8a" sx={{ letterSpacing: 0.5 }}>
+                            OVERALL STAFF REPORT {isEditTemplate && ` - ${reportName}`}
+                        </Typography>
+                        {loading && <CircularProgress size={20} color="primary" />}
+                    </Box>
 
-                    <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 180px)" }}>
+                    <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 110px)" }}>
                         <Table size="medium" stickyHeader>
                             <TableHead>
                                 <TableRow sx={{ bgcolor: "#1E3A8A" }}>
-                                    <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.85rem", bgcolor: "#1E3A8A" }} align="center">
-                                        Kgs
+                                    <TableCell sx={headerCellSx} align="center">
+                                        Category
                                     </TableCell>
-                                    <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.85rem", bgcolor: "#1E3A8A" }} align="center">
+                                    <TableCell sx={headerCellSx} align="center">
                                         Groups
                                     </TableCell>
-                                    <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.85rem", bgcolor: "#1E3A8A" }} align="center">
+                                    <TableCell sx={headerCellSx} align="center">
                                         Kgs
                                     </TableCell>
-                                    <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.85rem", bgcolor: "#1E3A8A" }}>
+                                    <TableCell sx={headerCellSx}>
                                         Voucher Type
                                     </TableCell>
-                                    <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.85rem", bgcolor: "#1E3A8A" }} align="center">
+                                    <TableCell sx={headerCellSx} align="center">
                                         Kgs
                                     </TableCell>
-
-                                    {/* STAFF NAME Header only shown when rows are expanded */}
-                                    <TableCell sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.85rem", bgcolor: "#1E3A8A" }}>
+                                    <TableCell sx={headerCellSx} align="center">
+                                        Total Kgs / Total Count
+                                    </TableCell>
+                                    <TableCell
+                                        sx={{
+                                            ...headerCellSx,
+                                            cursor: "pointer",
+                                            "&:hover": { bgcolor: "#1b3580" }
+                                        }}
+                                        onClick={(e) => setStaffFilterAnchor(e.currentTarget)}
+                                    >
                                         STAFF NAME
                                     </TableCell>
 
-                                    {/* Dynamically enabled role columns */}
                                     {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => (
-                                        <TableCell key={col.key} sx={{ color: "#ffffff", fontWeight: 700, py: 1.5, borderRight: "1px solid #2448b2", fontSize: "0.85rem", bgcolor: "#1E3A8A" }} align="center">
+                                        <TableCell key={col.key} sx={headerCellSx} align="center">
                                             {getColumnLabel(col)}
                                         </TableCell>
-                                    ))}                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {/* Grand Total Row at the top of the body, styled as sticky */}
-                                <TableRow sx={{ borderBottom: "2px solid #1e3a8a" }}>
-                                    <TableCell colSpan={3} sx={{ color: "#1e3a8a", fontWeight: 800, fontSize: "0.85rem", position: "sticky", top: 48, zIndex: 100, bgcolor: "#bfdbfe", borderRight: "1px solid #93c5fd" }} align="center">
+                                    ))}
+                                </TableRow>
+                                <TableRow sx={{ borderBottom: "2px solid #1e3a8a", bgcolor: "#bfdbfe" }}>
+                                    <TableCell colSpan={3} sx={totalCellSx} align="center">
                                         Total
                                     </TableCell>
-                                    <TableCell sx={{ color: "#1e3a8a", fontWeight: 800, fontSize: "0.85rem", position: "sticky", top: 48, zIndex: 100, bgcolor: "#bfdbfe", borderRight: "1px solid #e2e8f0" }}>
+                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }}>
                                         Grand Total
                                     </TableCell>
-                                    <TableCell sx={{ color: "#1e3a8a", fontWeight: 800, fontSize: "0.85rem", position: "sticky", top: 48, zIndex: 100, bgcolor: "#bfdbfe", borderRight: "1px solid #e2e8f0" }} align="center">
+                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
                                         {grandTotals.totalKgs.toLocaleString()}
                                     </TableCell>
-                                    <TableCell sx={{ borderRight: "1px solid #93c5fd", position: "sticky", top: 48, zIndex: 100, bgcolor: "#bfdbfe" }} />
+                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
+                                        {grandTotals.dynamicQtyTotal.toLocaleString()} / {grandTotals.dynamicCountTotal.toLocaleString()}
+                                    </TableCell>
+                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #93c5fd" }} />
                                     {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => (
-                                        <TableCell key={col.key} sx={{ color: "#1e3a8a", fontWeight: 900, fontSize: "0.85rem", position: "sticky", top: 48, zIndex: 100, bgcolor: "#bfdbfe", borderRight: "1px solid #e2e8f0" }} align="center">
+                                        <TableCell key={col.key} sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
                                             {grandTotals.roleTotals[col.key].toLocaleString()}
                                         </TableCell>
                                     ))}
                                 </TableRow>
-
+                            </TableHead>
+                            <TableBody>
                                 {tableCategories.length > 0 ? (
                                     tableCategories.map((category) => {
-                                        // Count visible rows for category rowspan calculation
                                         let categorySpan = 0;
                                         category.groups.forEach((group) => {
                                             group.voucherTypes.forEach((vt: any) => {
                                                 categorySpan += 1;
-                                                if (expandedVouchers.includes(vt.name)) {
-                                                    categorySpan += vt.staff.length;
-                                                    vt.staff.forEach((sc: StaffContribution) => {
-                                                        const staffKey = `${vt.name}_${sc.name}`;
-                                                        if (expandedStaff.includes(staffKey) && sc.invoices) {
-                                                            categorySpan += sc.invoices.length;
+                                                const vKey = `${category.name}_${group.groupName}_${vt.name}`;
+                                                if (expandedVouchers.includes(vKey)) {
+                                                    const staffList = staffData[vKey] || [];
+                                                    const filteredStaffList = staffList.filter((sc: any) => {
+                                                        if (selectedStaffFilters.length === 0) return true;
+
+                                                        const name = sc.Cost_Center_Name || "Unassigned";
+                                                        return selectedStaffFilters.includes(name);
+                                                    });
+                                                    categorySpan += filteredStaffList.length;
+                                                    filteredStaffList.forEach((sc: any) => {
+                                                        const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
+                                                        if (expandedStaff.includes(staffKey)) {
+                                                            const invoicesList = invoiceData[staffKey] || [];
+                                                            categorySpan += invoicesList.length;
                                                         }
                                                     });
                                                 }
@@ -1366,16 +1417,24 @@ const OverallStaffReport: React.FC = () => {
                                         let isFirstCategoryRow = true;
 
                                         return category.groups.map((group) => {
-                                            // Count visible rows for group rowspan calculation
                                             let groupSpan = 0;
                                             group.voucherTypes.forEach((vt: any) => {
                                                 groupSpan += 1;
-                                                if (expandedVouchers.includes(vt.name)) {
-                                                    groupSpan += vt.staff.length;
-                                                    vt.staff.forEach((sc: StaffContribution) => {
-                                                        const staffKey = `${vt.name}_${sc.name}`;
-                                                        if (expandedStaff.includes(staffKey) && sc.invoices) {
-                                                            groupSpan += sc.invoices.length;
+                                                const vKey = `${category.name}_${group.groupName}_${vt.name}`;
+                                                if (expandedVouchers.includes(vKey)) {
+                                                    const staffList = staffData[vKey] || [];
+                                                    const filteredStaffList = staffList.filter((sc: any) => {
+                                                        if (selectedStaffFilters.length === 0) return true;
+
+                                                        const name = sc.Cost_Center_Name || "Unassigned";
+                                                        return selectedStaffFilters.includes(name);
+                                                    });
+                                                    groupSpan += filteredStaffList.length;
+                                                    filteredStaffList.forEach((sc: any) => {
+                                                        const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
+                                                        if (expandedStaff.includes(staffKey)) {
+                                                            const invoicesList = invoiceData[staffKey] || [];
+                                                            groupSpan += invoicesList.length;
                                                         }
                                                     });
                                                 }
@@ -1384,18 +1443,24 @@ const OverallStaffReport: React.FC = () => {
                                             let isFirstGroupRow = true;
 
                                             return group.voucherTypes.map((vt: any) => {
-                                                const isExpanded = expandedVouchers.includes(vt.name);
-                                                const hasStaff = vt.staff && vt.staff.length > 0;
+                                                const vKey = `${category.name}_${group.groupName}_${vt.name}`;
+                                                const isExpanded = expandedVouchers.includes(vKey);
+                                                const filteredStaff = (vt.staff || []).filter((sc: any) => {
+                                                    if (selectedStaffFilters.length === 0) return true;
+
+                                                    const name = sc.Cost_Center_Name || "Unassigned";
+                                                    return selectedStaffFilters.includes(name);
+                                                });
+                                                const hasStaff = filteredStaff.length > 0;
 
                                                 const mainRow = (
                                                     <TableRow key={vt.name} sx={{ bgcolor: "#f8fafc", "&:hover": { bgcolor: "#f1f5f9" } }}>
-                                                        {/* Yellow Category Spanned Cell */}
                                                         {isFirstCategoryRow && (
                                                             <TableCell
                                                                 rowSpan={categorySpan}
                                                                 sx={{
                                                                     fontWeight: 800,
-                                                                    bgcolor: "#e0f2fe", // Light Blue
+                                                                    bgcolor: "#e0f2fe",
                                                                     color: "#0369a1",
                                                                     borderRight: "2px solid #7dd3fc",
                                                                     borderBottom: "2px solid #7dd3fc",
@@ -1411,7 +1476,6 @@ const OverallStaffReport: React.FC = () => {
                                                             </TableCell>
                                                         )}
 
-                                                        {/* Peach Group Name Spanned Cell */}
                                                         {isFirstGroupRow && (
                                                             <TableCell
                                                                 rowSpan={groupSpan}
@@ -1430,13 +1494,12 @@ const OverallStaffReport: React.FC = () => {
                                                             </TableCell>
                                                         )}
 
-                                                        {/* Peach Group Kgs Spanned Cell */}
                                                         {isFirstGroupRow && (
                                                             <TableCell
                                                                 rowSpan={groupSpan}
                                                                 sx={{
                                                                     fontWeight: 750,
-                                                                    bgcolor: "#f0f9ff", // Very Light Blue
+                                                                    bgcolor: "#f0f9ff",
                                                                     color: "#0c4a6e",
                                                                     borderRight: "2px solid #bae6fd",
                                                                     borderBottom: "2px solid #bae6fd",
@@ -1449,7 +1512,6 @@ const OverallStaffReport: React.FC = () => {
                                                             </TableCell>
                                                         )}
 
-                                                        {/* Voucher Type Name */}
                                                         <TableCell
                                                             sx={{
                                                                 fontWeight: 700,
@@ -1460,7 +1522,7 @@ const OverallStaffReport: React.FC = () => {
                                                                 fontSize: "0.825rem",
                                                                 py: 1
                                                             }}
-                                                            onClick={() => handleToggleExpandVoucher(vt.name)}
+                                                            onClick={() => handleToggleExpandVoucher(category.name, group.groupName, vt.name)}
                                                         >
                                                             <Box display="flex" alignItems="center" gap={0.5}>
                                                                 {isExpanded ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
@@ -1468,44 +1530,54 @@ const OverallStaffReport: React.FC = () => {
                                                             </Box>
                                                         </TableCell>
 
-                                                        {/* Voucher Type Kgs */}
                                                         <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
                                                             {vt.baseKgs.toLocaleString()}
                                                         </TableCell>
 
-                                                        {/* Staff Name placeholder for Voucher Type Row */}
+                                                        <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
+                                                            {(() => {
+                                                                const { qtyTotal, countTotal } = getRowTotalValues('vt', vt);
+                                                                return `${qtyTotal.toLocaleString()} / ${countTotal.toLocaleString()}`;
+                                                            })()}
+                                                        </TableCell>
+
                                                         <TableCell sx={{ fontStyle: "italic", color: "text.secondary", borderRight: "1px solid #cbd5e1", py: 1 }} align="center">
                                                             -
                                                         </TableCell>
 
-                                                        {/* Role wise sums for Voucher Type headers */}
                                                         {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => {
                                                             const value = vt.roleSums[col.key] || 0;
-
                                                             return (
                                                                 <TableCell key={col.key} sx={{ fontWeight: 800, borderRight: "1px solid #cbd5e1", py: 1, bgcolor: "#f1f5f9" }} align="center">
                                                                     {value > 0 ? value.toLocaleString() : "0"}
                                                                 </TableCell>
                                                             );
-                                                        })}                                                    </TableRow>
+                                                        })}
+                                                    </TableRow>
                                                 );
 
                                                 isFirstCategoryRow = false;
                                                 isFirstGroupRow = false;
 
-                                                // Render Staff nested rows if expanded
                                                 const staffRows = isExpanded && hasStaff ? (
-                                                    vt.staff.map((sc: StaffContribution) => {
-                                                        const isStaffExpanded = expandedStaff.includes(`${vt.name}_${sc.name}`);
-                                                        const hasInvoices = sc.invoices && sc.invoices.length > 0;
+                                                    filteredStaff.map((sc: any) => {
+                                                        const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
+                                                        const isStaffExpanded = expandedStaff.includes(staffKey);
+                                                        const invoicesList = invoiceData[staffKey] || [];
+                                                        const hasInvoices = invoicesList.length > 0;
 
                                                         const staffRow = (
-                                                            <TableRow key={sc.name} sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
-                                                                {/* Empty placeholders for columns spanned by Group & Voucher Type */}
+                                                            <TableRow key={sc.Cost_Center_Id || sc.Cost_Center_Name} sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
                                                                 <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} />
                                                                 <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} align="center" />
 
-                                                                {/* Clickable Staff Name to Drill down Invoice Details */}
+                                                                <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
+                                                                    {(() => {
+                                                                        const { qtyTotal, countTotal } = getRowTotalValues('staff', sc);
+                                                                        return `${qtyTotal.toLocaleString()} / ${countTotal.toLocaleString()}`;
+                                                                    })()}
+                                                                </TableCell>
+
                                                                 <TableCell
                                                                     sx={{
                                                                         fontWeight: 650,
@@ -1517,7 +1589,7 @@ const OverallStaffReport: React.FC = () => {
                                                                         pl: 4,
                                                                         "&:hover": { textDecoration: "underline" }
                                                                     }}
-                                                                    onClick={() => handleToggleExpandStaff(vt.name, sc.name)}
+                                                                    onClick={() => handleToggleExpandStaff(category.name, group.groupName, vt.name, sc.Emp_Id, sc.Cost_Center_Name)}
                                                                 >
                                                                     <Box display="flex" alignItems="center" gap={0.5}>
                                                                         {isStaffExpanded ? (
@@ -1525,30 +1597,35 @@ const OverallStaffReport: React.FC = () => {
                                                                         ) : (
                                                                             <KeyboardArrowDownIcon sx={{ fontSize: "0.9rem" }} />
                                                                         )}
-                                                                        {sc.name}
+                                                                        {sc.Cost_Center_Name}
                                                                     </Box>
                                                                 </TableCell>
 
-                                                                {/* Staff role values */}
                                                                 {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => {
                                                                     const metric: "qty" | "count" = col.metric || "qty";
-                                                                    const roleVal = sc.roleValues[col.key]?.[metric] || 0;
+                                                                    const roleVal = getStaffCellValue(sc, col.key, metric);
                                                                     return (
                                                                         <TableCell key={col.key} sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
                                                                             {roleVal > 0 ? roleVal.toLocaleString() : "0"}
                                                                         </TableCell>
                                                                     );
-                                                                })}                                                            </TableRow>
+                                                                })}
+                                                            </TableRow>
                                                         );
 
                                                         const invoiceRows = isStaffExpanded && hasInvoices ? (
-                                                            sc.invoices.map((inv, idx) => (
-                                                                <TableRow key={`${sc.name}_${inv.invoiceNo}_${idx}`} sx={{ bgcolor: "#ffffff", "&:hover": { bgcolor: "#f8fafc" } }}>
-                                                                    {/* Empty placeholders for category, group, voucher type columns */}
+                                                            invoicesList.map((inv: any, idx: number) => (
+                                                                <TableRow key={`${staffKey}_${inv.Voucher_Ref_Id}_${idx}`} sx={{ bgcolor: "#ffffff", "&:hover": { bgcolor: "#f8fafc" } }}>
                                                                     <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} />
                                                                     <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} align="center" />
 
-                                                                    {/* Invoice number in STAFF NAME column */}
+                                                                    <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
+                                                                        {(() => {
+                                                                            const { qtyTotal, countTotal } = getRowTotalValues('invoice', inv);
+                                                                            return `${qtyTotal.toLocaleString()} / ${countTotal.toLocaleString()}`;
+                                                                        })()}
+                                                                    </TableCell>
+
                                                                     <TableCell
                                                                         sx={{
                                                                             color: "#334155",
@@ -1558,26 +1635,12 @@ const OverallStaffReport: React.FC = () => {
                                                                             pl: 6
                                                                         }}
                                                                     >
-                                                                        {inv.invoiceNo}
+                                                                        {inv.Inv_No}
                                                                     </TableCell>
 
-                                                                    {/* Invoice values corresponding to active role columns */}
                                                                     {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => {
                                                                         const metric: "qty" | "count" = col.metric || "qty";
-                                                                        let val = 0;
-                                                                        if (col.key === "Total Tonnage") {
-                                                                            val = metric === "qty" ? inv.qty : inv.count;
-                                                                        } else if (col.key === "Count") {
-                                                                            val = metric === "qty" ? 0 : inv.count;
-                                                                        } else {
-                                                                            const staffHasRole = sc.roleValues[col.key] && (
-                                                                                sc.roleValues[col.key][metric] > 0
-                                                                            );
-                                                                            if (staffHasRole) {
-                                                                                val = metric === "qty" ? inv.qty : inv.count;
-                                                                            }
-                                                                        }
-
+                                                                        const val = getInvoiceCellValue(inv, col.key, metric);
                                                                         return (
                                                                             <TableCell
                                                                                 key={col.key}
@@ -1592,12 +1655,13 @@ const OverallStaffReport: React.FC = () => {
                                                                                 {val.toLocaleString()}
                                                                             </TableCell>
                                                                         );
-                                                                    })}                                                                </TableRow>
+                                                                    })}
+                                                                </TableRow>
                                                             ))
                                                         ) : null;
 
                                                         return (
-                                                            <React.Fragment key={sc.name}>
+                                                            <React.Fragment key={sc.Emp_Id || sc.Cost_Center_Name}>
                                                                 {staffRow}
                                                                 {invoiceRows}
                                                             </React.Fragment>
@@ -1616,19 +1680,74 @@ const OverallStaffReport: React.FC = () => {
                                     })
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={5 + roleColumns.filter(c => c.enabled).length} align="center" sx={{ py: 6 }}>
+                                        <TableCell colSpan={7 + roleColumns.filter(c => c.enabled).length} align="center" sx={{ py: 6 }}>
                                             No records found. Please create or update groups.
                                         </TableCell>
                                     </TableRow>
                                 )}
-
-                                {/* Grand Total moved to top */}
                             </TableBody>
                         </Table>
                     </TableContainer>
                 </Box>
             </AppLayout>
 
+            {/* Staff Filter Popover */}
+            <Popover
+                open={Boolean(staffFilterAnchor)}
+                anchorEl={staffFilterAnchor}
+                onClose={() => setStaffFilterAnchor(null)}
+                anchorOrigin={{
+                    vertical: "bottom",
+                    horizontal: "left",
+                }}
+                transformOrigin={{
+                    vertical: "top",
+                    horizontal: "left",
+                }}
+            >
+                <Box p={2} width={250} display="flex" flexDirection="column" gap={1}>
+
+                    <Box sx={{ maxHeight: 250, overflowY: "auto", my: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
+                        {involvedStaff.length === 0 ? (
+                            <Typography variant="caption" color="text.secondary" p={1}>
+                                No staff active on this day
+                            </Typography>
+                        ) : (
+                            <>
+                                <FormControlLabel
+                                    control={
+                                        <Checkbox
+                                            size="small"
+                                            checked={selectedStaffFilters.length === 0}
+                                            onChange={handleToggleSelectAll}
+                                        />
+                                    }
+                                    label="All"
+                                    sx={{ margin: 0, "& .MuiFormControlLabel-label": { fontSize: "0.8rem", fontWeight: 700 } }}
+                                />
+                                {involvedStaff.map(s => {
+                                    const name = s.Cost_Center_Name || "Unassigned";
+                                    const isChecked = selectedStaffFilters.includes(name);
+                                    return (
+                                        <FormControlLabel
+                                            key={name}
+                                            control={
+                                                <Checkbox
+                                                    size="small"
+                                                    checked={isChecked}
+                                                    onChange={() => handleToggleStaff(name)}
+                                                />
+                                            }
+                                            label={name}
+                                            sx={{ margin: 0, "& .MuiFormControlLabel-label": { fontSize: "0.8rem" } }}
+                                        />
+                                    );
+                                })}
+                            </>
+                        )}
+                    </Box>
+                </Box>
+            </Popover>
 
             {/* Column Config Settings Dialog popover */}
             <Dialog
@@ -1667,16 +1786,14 @@ const OverallStaffReport: React.FC = () => {
                                             onToggle={handleToggleColumn}
                                             onChangeMetric={handleChangeMetric}
                                         />
-                                    ))}                            </Box>
+                                    ))}
+                            </Box>
                         </SortableContext>
                     </DndContext>
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setSettingsAnchor(null)} color="primary" variant="contained">
-                        Close
-                    </Button>
-                </DialogActions>
             </Dialog>
+
+            {/* Group Dialog */}
             <Dialog
                 open={groupCreateOpen}
                 onClose={handleCloseGroupDialog}
@@ -1684,49 +1801,51 @@ const OverallStaffReport: React.FC = () => {
                 fullWidth
             >
                 <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    Group Creation
+                    Group Management
                     <IconButton size="small" onClick={handleCloseGroupDialog}>
                         <CloseIcon />
                     </IconButton>
                 </DialogTitle>
                 <DialogContent dividers>
-                    <FormControl fullWidth size="small" sx={{ mb: 2.5 }}>
-                        <InputLabel>Select Group to Edit</InputLabel>
-                        <Select
-                            value={selectedGroupToEdit}
-                            label="Select Group to Edit"
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                setSelectedGroupToEdit(val);
-                                if (val && val !== "new") {
-                                    const grp = groups.find(g => g.name === val);
-                                    if (grp) {
-                                        setNewGroupName(grp.name);
-                                        setNewGroupCategory(grp.parentCategory);
-                                        setNewGroupVouchers(grp.voucherTypes);
-                                    }
-                                } else {
-                                    setNewGroupName("");
-                                    setNewGroupCategory("INWARDS");
-                                    setNewGroupVouchers([]);
-                                }
-                            }}
-                        >
-                            <MenuItem value="new">-- Create New Group --</MenuItem>
-                            {groups.map(g => (
-                                <MenuItem key={g.name} value={g.name}>{g.name}</MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-
-                    <TextField
-                        fullWidth
-                        label="Group Name"
+                    <Autocomplete
+                        freeSolo
+                        options={groups.map(g => g.name)}
                         value={newGroupName}
-                        onChange={(e) => setNewGroupName(e.target.value)}
-                        placeholder="e.g. PUR / RET, SALES..."
-                        sx={{ mb: 2.5 }}
-                        size="small"
+                        onChange={(_, newValue) => {
+                            if (newValue) {
+                                const grp = groups.find(g => g.name === newValue);
+                                if (grp) {
+                                    setSelectedGroupToEdit(grp.name);
+                                    setNewGroupName(grp.name);
+                                    setNewGroupCategory(grp.parentCategory);
+                                    setNewGroupVouchers(grp.voucherTypes);
+                                    return;
+                                }
+                            }
+                            setSelectedGroupToEdit("");
+                            setNewGroupName(newValue || "");
+                        }}
+                        onInputChange={(_, newInputValue) => {
+                            setNewGroupName(newInputValue);
+                            const grp = groups.find(g => g.name.toLowerCase() === newInputValue.trim().toLowerCase());
+                            if (grp) {
+                                setSelectedGroupToEdit(grp.name);
+                                setNewGroupCategory(grp.parentCategory);
+                                setNewGroupVouchers(grp.voucherTypes);
+                            } else {
+                                setSelectedGroupToEdit("");
+                            }
+                        }}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                label="Group Name"
+                                placeholder="Select existing group or type new..."
+                                size="small"
+                                sx={{ mb: 2.5 }}
+                                fullWidth
+                            />
+                        )}
                     />
 
                     <FormControl fullWidth size="small" sx={{ mb: 2.5 }}>
@@ -1742,33 +1861,48 @@ const OverallStaffReport: React.FC = () => {
                         </Select>
                     </FormControl>
 
-                    <FormControl fullWidth size="small">
-                        <InputLabel>Voucher Types</InputLabel>
-                        <Select
-                            multiple
-                            value={newGroupVouchers}
-                            onChange={(e) => setNewGroupVouchers(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
-                            renderValue={(selected) => selected.join(', ')}
-                            label="Voucher Types"
-                        >
-                            {allVoucherNames.map((name) => (
-                                <MenuItem key={name} value={name}>
-                                    <Checkbox checked={newGroupVouchers.indexOf(name) > -1} size="small" />
-                                    <ListItemText primary={name} />
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
+                    <Autocomplete
+                        multiple
+                        size="small"
+                        options={allVoucherNames}
+                        value={newGroupVouchers}
+                        onChange={(_, newValue) => setNewGroupVouchers(newValue)}
+                        disableCloseOnSelect
+                        getOptionLabel={(option) => option}
+                        renderOption={(props, option, { selected }) => {
+                            const { key, ...rest } = props;
+                            return (
+                                <li key={key} {...rest}>
+                                    <Checkbox
+                                        checked={selected}
+                                        size="small"
+                                        style={{ marginRight: 8 }}
+                                    />
+                                    {option}
+                                </li>
+                            );
+                        }}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                label="Voucher Types"
+                                placeholder="Select voucher types..."
+                            />
+                        )}
+                        fullWidth
+                    />
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={handleCloseGroupDialog}>Cancel</Button>
-                    <Button onClick={handleCreateGroup} variant="contained" color="primary">
-                        {selectedGroupToEdit && selectedGroupToEdit !== "new" ? "Save Group" : "Create Group"}
+                    <Button
+                        onClick={handleCreateGroup}
+                        variant="contained"
+                        color="primary"
+                    >
+                        {selectedGroupToEdit ? "Save Changes" : "Create Group"}
                     </Button>
                 </DialogActions>
             </Dialog>
-
-            {/* Inline Drill Down replacement - no dialog popup needed */}
 
             {/* Template Save Dialog */}
             <Dialog

@@ -517,7 +517,7 @@ const LedgerItemWiseDetails: React.FC = () => {
                     expandedSP: SP_MAP.Abstract,
                     abstractColumns: payloadColumns,
                     expandedColumns: payloadColumns,
-                    createdBy 
+                    createdBy
                 });
 
                 toast.success("Template Saved Successfully ✅");

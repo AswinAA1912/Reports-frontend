@@ -24,6 +24,7 @@ import ReportSettings from "../settings/ReportSettings";
 import ReportList from "../settings/ReportList";
 import StockValueReport from "../reports/Stock/stockValueReport";
 import StockValueRateMasterReport from "../reports/Stock/StockValueRateMaster";
+import RateMasterAdminReport from "../reports/Stock/RateMasterAdmin";
 import StaffBasedReport from "../reports/StaffBased/staffBasedReport";
 import LOSStaffBasedReport from "../reports/StaffBased/LOSstaffBasedReport";
 import ExpensesReport from "../reports/Expenses/ExpensesReport";
@@ -343,6 +344,19 @@ const AppRouting: React.FC<AppRoutingProps> = ({
                 fullWidth
               >
                 <StockValueRateMasterReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/rateMasterAdmin"
+          element={
+            <RequireAuth>
+              <AppLayout
+                fullWidth
+              >
+                <RateMasterAdminReport />
               </AppLayout>
             </RequireAuth>
           }

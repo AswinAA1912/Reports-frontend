@@ -69,6 +69,67 @@ const DEFAULT_ROLE_COLUMNS: ColumnConfig[] = [
     { key: "Invoice_Count", label: "Count", enabled: false, order: 7, metric: "count" },
 ];
 
+const discoverRoleColumns = (data: any[], currentCols: ColumnConfig[]): ColumnConfig[] => {
+    if (!data || data.length === 0) return currentCols;
+
+    const excludedKeys = new Set([
+        "Group_Name",
+        "Overall_GroupName",
+        "Voucher_Type",
+        "Voucher_Ref_Id",
+        "Total_Tonnage",
+        "Invoice_Count",
+    ]);
+
+    const discoveredKeys = new Set<string>();
+
+    data.forEach((row) => {
+        Object.keys(row).forEach((key) => {
+            if (excludedKeys.has(key)) return;
+            if (key.endsWith("_Count")) return;
+            discoveredKeys.add(key);
+        });
+    });
+
+    // Merge discovered role columns with existing configuration to preserve order, enabled state, and metric
+    const newCols = [...currentCols];
+
+    discoveredKeys.forEach((key) => {
+        const exists = newCols.some((c) => c.key.toUpperCase() === key.toUpperCase());
+        if (!exists) {
+            newCols.push({
+                key: key,
+                label: key,
+                enabled: false,
+                order: newCols.length,
+                metric: "qty",
+            });
+        }
+    });
+
+    // Make sure Total_Tonnage and Invoice_Count are always present at the end
+    const standardKeys = ["Total_Tonnage", "Invoice_Count"];
+    const filteredCols = newCols.filter((c) => !standardKeys.includes(c.key));
+
+    // Re-append standard columns to the end if not present
+    standardKeys.forEach((key) => {
+        let col = newCols.find((c) => c.key === key);
+        if (!col) {
+            col = {
+                key: key,
+                label: key === "Total_Tonnage" ? "Total Tonnage" : "Count",
+                enabled: true,
+                order: filteredCols.length,
+                metric: key === "Total_Tonnage" ? "qty" : "count",
+            };
+        }
+        filteredCols.push(col);
+    });
+
+    // Normalize order index
+    return filteredCols.map((c, index) => ({ ...c, order: index }));
+};
+
 const getColumnLabel = (col: ColumnConfig) => {
     if (col.key === "Total_Tonnage" || col.key === "Invoice_Count") {
         return col.label;
@@ -147,17 +208,54 @@ const SortableColumnRow: React.FC<SortableColumnRowProps> = ({ column, onToggle,
 
 // Helper to determine the value to render in a staff cell
 const getStaffCellValue = (sc: any, colKey: string, metric: "qty" | "count") => {
-    const isMatchedRole = sc.Cost_Category && colKey && sc.Cost_Category.toUpperCase() === colKey.toUpperCase();
-    if (isMatchedRole) {
-        return metric === "qty" ? (sc.Total_Qty || 0) : (sc.Invoice_Count || 0);
-    }
     if (colKey === "Total_Tonnage") {
         return metric === "qty" ? (sc.Total_Qty || 0) : (sc.Invoice_Count || 0);
     }
     if (colKey === "Invoice_Count") {
         return metric === "qty" ? 0 : (sc.Invoice_Count || 0);
     }
+    if (sc.roleValues && colKey) {
+        const catVal = sc.roleValues[colKey.toUpperCase()];
+        if (catVal) {
+            return metric === "qty" ? (catVal.qty || 0) : (catVal.count || 0);
+        }
+    }
     return 0;
+};
+
+// Helper to group raw employee data to prevent duplicates
+const groupEmployeesList = (rawEmployees: any[]) => {
+    const groupedEmployees: any[] = [];
+    const employeeMap: Record<string, any> = {};
+
+    rawEmployees.forEach((row: any) => {
+        const empKey = row.Emp_Id ? String(row.Emp_Id) : 'unassigned';
+        if (!employeeMap[empKey]) {
+            employeeMap[empKey] = {
+                Emp_Id: row.Emp_Id,
+                Cost_Center_Id: row.Cost_Center_Id,
+                Cost_Center_Name: row.Cost_Center_Name || 'Unassigned',
+                Total_Qty: 0,
+                Invoice_Count: 0,
+                roleValues: {}
+            };
+            groupedEmployees.push(employeeMap[empKey]);
+        }
+
+        const emp = employeeMap[empKey];
+        const category = row.Cost_Category;
+        if (category) {
+            if (!emp.roleValues[category]) {
+                emp.roleValues[category] = { qty: 0, count: 0 };
+            }
+            emp.roleValues[category].qty += Number(row.Total_Qty) || 0;
+            emp.roleValues[category].count += Number(row.Invoice_Count) || 0;
+        }
+        emp.Total_Qty += Number(row.Total_Qty) || 0;
+        emp.Invoice_Count += Number(row.Invoice_Count) || 0;
+    });
+
+    return groupedEmployees;
 };
 
 // Helper to determine the value to render in an invoice cell
@@ -327,7 +425,7 @@ const OverallStaffReport: React.FC = () => {
                         if (res.data.success) {
                             setStaffData(prev => ({
                                 ...prev,
-                                [vKey]: res.data.data
+                                [vKey]: groupEmployeesList(res.data.data || [])
                             }));
                         }
                     } catch (err) {
@@ -410,7 +508,9 @@ const OverallStaffReport: React.FC = () => {
                 Todate: toDate
             });
             if (res.data.success) {
-                setReportData(res.data.data);
+                const data = res.data.data || [];
+                setReportData(data);
+                setRoleColumns(prev => discoverRoleColumns(data, prev));
             } else {
                 setReportData([]);
             }
@@ -853,7 +953,7 @@ const OverallStaffReport: React.FC = () => {
                     if (res.data.success) {
                         setStaffData(prev => ({
                             ...prev,
-                            [key]: res.data.data
+                            [key]: groupEmployeesList(res.data.data || [])
                         }));
                     }
                 } catch (err) {

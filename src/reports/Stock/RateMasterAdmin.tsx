@@ -165,7 +165,7 @@ const DEFAULT_KEYS = [
 
 const ALL_COLUMNS_METADATA: Omit<ColumnConfig, "order" | "enabled">[] = [
     { key: "Product_Name", label: "Product Name", isNumeric: false },
-    { key: "Rate", label: "Rate", isNumeric: true },
+    { key: "Rate", label: "List Rate", isNumeric: true },
     { key: "Min_Rate", label: "Min Rate", isNumeric: true },
     { key: "Max_Rate", label: "Max Rate", isNumeric: true },
     { key: "COGS", label: "COGS", isNumeric: true },

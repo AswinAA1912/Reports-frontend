@@ -407,7 +407,7 @@ const StockValueRateMasterReport: React.FC = () => {
                                             </TableCell>
                                             <TableCell sx={{ color: "#fff" }} align="right">
                                                 <SortableHeaderLabel
-                                                    label="CL Rate"
+                                                    label="COGS Rate"
                                                     columnKey="CL_Rate"
                                                     sortConfig={numSortConfig}
                                                     onSort={handleNumSort}

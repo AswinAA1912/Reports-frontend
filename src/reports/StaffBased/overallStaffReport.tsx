@@ -84,6 +84,9 @@ const discoverRoleColumns = (data: any[], currentCols: ColumnConfig[]): ColumnCo
     const discoveredKeys = new Set<string>();
 
     data.forEach((row) => {
+        if (row.Cost_Category) {
+            discoveredKeys.add(row.Cost_Category.trim());
+        }
         Object.keys(row).forEach((key) => {
             if (excludedKeys.has(key)) return;
             if (key.endsWith("_Count")) return;
@@ -118,7 +121,7 @@ const discoverRoleColumns = (data: any[], currentCols: ColumnConfig[]): ColumnCo
             col = {
                 key: key,
                 label: key === "Total_Tonnage" ? "Total Tonnage" : "Count",
-                enabled: true,
+                enabled: false,
                 order: filteredCols.length,
                 metric: key === "Total_Tonnage" ? "qty" : "count",
             };
@@ -215,8 +218,9 @@ const getStaffCellValue = (sc: any, colKey: string, metric: "qty" | "count") => 
         return metric === "qty" ? 0 : (sc.Invoice_Count || 0);
     }
     if (sc.roleValues && colKey) {
-        const catVal = sc.roleValues[colKey.toUpperCase()];
-        if (catVal) {
+        const matchedKey = Object.keys(sc.roleValues).find(k => k.toUpperCase() === colKey.toUpperCase());
+        if (matchedKey) {
+            const catVal = sc.roleValues[matchedKey];
             return metric === "qty" ? (catVal.qty || 0) : (catVal.count || 0);
         }
     }
@@ -288,6 +292,36 @@ const getInvoiceCellValue = (inv: any, colKey: string, metric: "qty" | "count") 
         }
     }
     return 0;
+};
+
+const getFilteredStaffByCategories = (staffList: any[], roleColumns: ColumnConfig[]) => {
+    const enabledCategoryKeys = roleColumns
+        .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count")
+        .map(c => c.key.toUpperCase());
+
+    if (enabledCategoryKeys.length === 0) {
+        return staffList;
+    }
+
+    return staffList.filter((sc: any) => {
+        if (!sc.roleValues) return false;
+        return Object.keys(sc.roleValues).some(catKey => {
+            if (enabledCategoryKeys.includes(catKey.toUpperCase())) {
+                const val = sc.roleValues[catKey];
+                return (val.qty > 0 || val.count > 0);
+            }
+            return false;
+        });
+    });
+};
+
+const getFilteredStaffList = (staffList: any[], selectedFilters: string[], roleCols: ColumnConfig[]) => {
+    const categoryFiltered = getFilteredStaffByCategories(staffList, roleCols);
+    return categoryFiltered.filter((sc: any) => {
+        if (selectedFilters.length === 0) return true;
+        const name = sc.Cost_Center_Name || "Unassigned";
+        return selectedFilters.includes(name);
+    });
 };
 
 // Group Mapping Config (User groups)
@@ -363,6 +397,7 @@ const OverallStaffReport: React.FC = () => {
     const [involvedStaff, setInvolvedStaff] = useState<any[]>([]);
     const [selectedStaffFilters, setSelectedStaffFilters] = useState<string[]>([]);
     const [staffFilterAnchor, setStaffFilterAnchor] = useState<null | HTMLElement>(null);
+    const [staffSearchQuery, setStaffSearchQuery] = useState("");
 
     const fetchInvolvedStaff = async () => {
         try {
@@ -371,9 +406,10 @@ const OverallStaffReport: React.FC = () => {
                 Todate: toDate
             });
             if (res.data.success) {
+                const rawEmployees = res.data.data || [];
                 const uniqueStaff: any[] = [];
                 const seen = new Set();
-                (res.data.data || []).forEach((s: any) => {
+                rawEmployees.forEach((s: any) => {
                     const name = s.Cost_Center_Name || "Unassigned";
                     if (!seen.has(name)) {
                         seen.add(name);
@@ -381,6 +417,7 @@ const OverallStaffReport: React.FC = () => {
                     }
                 });
                 setInvolvedStaff(uniqueStaff);
+                setRoleColumns(prev => discoverRoleColumns(rawEmployees, prev));
             }
         } catch (err) {
             console.error("Error fetching involved staff list:", err);
@@ -423,10 +460,12 @@ const OverallStaffReport: React.FC = () => {
                             Voucher_Type: voucherName
                         });
                         if (res.data.success) {
+                            const rawEmployees = res.data.data || [];
                             setStaffData(prev => ({
                                 ...prev,
-                                [vKey]: groupEmployeesList(res.data.data || [])
+                                [vKey]: groupEmployeesList(rawEmployees)
                             }));
+                            setRoleColumns(prev => discoverRoleColumns(rawEmployees, prev));
                         }
                     } catch (err) {
                         console.error(`Error pre-loading staff for ${vKey}:`, err);
@@ -629,24 +668,33 @@ const OverallStaffReport: React.FC = () => {
             }
             const templateCols = res.data.data.columns || [];
 
-            // Map settings and sort by order
-            const updatedCols = roleColumns.map(col => {
-                const matched = templateCols.find((t: any) => t.key === col.key);
-                if (matched) {
-                    return {
-                        ...col,
-                        enabled: matched.enabled ?? matched.Enabled ?? false,
-                        order: matched.order ?? matched.Order ?? col.order,
-                        metric: (matched.dataType === "qty" || matched.dataType === "count") ? matched.dataType : col.metric
-                    };
-                }
-                return {
-                    ...col,
-                    enabled: false
-                };
-            }).sort((a, b) => a.order - b.order);
+            // Convert template columns to ColumnConfig format
+            const parsedTemplateCols: ColumnConfig[] = templateCols.map((matched: any, idx: number) => ({
+                key: matched.key,
+                label: matched.label || matched.key,
+                enabled: matched.enabled ?? matched.Enabled ?? false,
+                order: matched.order ?? matched.Order ?? idx,
+                metric: (matched.dataType === "qty" || matched.dataType === "count") ? matched.dataType : "qty"
+            }));
 
-            setRoleColumns(updatedCols);
+            // Add any columns from roleColumns that are not in parsedTemplateCols
+            const updatedCols = [...parsedTemplateCols];
+            roleColumns.forEach(col => {
+                const exists = updatedCols.some(c => c.key.toUpperCase() === col.key.toUpperCase());
+                if (!exists) {
+                    updatedCols.push({
+                        ...col,
+                        enabled: false,
+                        order: updatedCols.length
+                    });
+                }
+            });
+
+            // Re-normalize orders and sort
+            updatedCols.sort((a, b) => a.order - b.order);
+            const normalizedCols = updatedCols.map((c, index) => ({ ...c, order: index }));
+
+            setRoleColumns(normalizedCols);
             toast.success("Template Loaded Successfully ✅");
         } catch (err) {
             console.error(err);
@@ -659,7 +707,7 @@ const OverallStaffReport: React.FC = () => {
         setSelectedTemplateId(null);
         setIsEditTemplate(false);
         setReportName("");
-        setRoleColumns(DEFAULT_ROLE_COLUMNS);
+        setRoleColumns(discoverRoleColumns(involvedStaff, DEFAULT_ROLE_COLUMNS));
         setExpandedVouchers([]);
         setExpandedStaff([]);
         setStaffData({});
@@ -786,11 +834,7 @@ const OverallStaffReport: React.FC = () => {
             const voucherTypesData = matchedRows.map(r => {
                 const vKey = `${group.parentCategory}_${group.name}_${r.Voucher_Type}`;
                 const staffList = staffData[vKey] || [];
-                const filteredStaffList = staffList.filter((sc: any) => {
-                    if (selectedStaffFilters.length === 0) return true;
-                    const name = sc.Cost_Center_Name || "Unassigned";
-                    return selectedStaffFilters.includes(name);
-                });
+                const filteredStaffList = getFilteredStaffList(staffList, selectedStaffFilters, roleColumns);
 
                 const roleSums: Record<string, number> = {};
                 let totalTonnage = 0;
@@ -815,11 +859,11 @@ const OverallStaffReport: React.FC = () => {
                         } else if (roleCol.key === "Invoice_Count") {
                             roleSums[roleCol.key] = Number(r.Invoice_Count) || 0;
                         } else {
-                            if (roleCol.metric === "count") {
-                                roleSums[roleCol.key] = Number(r[`${roleCol.key}_Count`]) || 0;
-                            } else {
-                                roleSums[roleCol.key] = Number(r[roleCol.key]) || 0;
-                            }
+                            let sumVal = 0;
+                            filteredStaffList.forEach(sc => {
+                                sumVal += getStaffCellValue(sc, roleCol.key, roleCol.metric || "qty");
+                            });
+                            roleSums[roleCol.key] = sumVal;
                         }
                     });
                     totalTonnage = r.Total_Tonnage || 0;
@@ -864,11 +908,7 @@ const OverallStaffReport: React.FC = () => {
                 const voucherTypesData = unassignedRows.map(r => {
                     const vKey = `${cat}_UNASSIGNED_${r.Voucher_Type}`;
                     const staffList = staffData[vKey] || [];
-                    const filteredStaffList = staffList.filter((sc: any) => {
-                        if (selectedStaffFilters.length === 0) return true;
-                        const name = sc.Cost_Center_Name || "Unassigned";
-                        return selectedStaffFilters.includes(name);
-                    });
+                    const filteredStaffList = getFilteredStaffList(staffList, selectedStaffFilters, roleColumns);
 
                     const roleSums: Record<string, number> = {};
                     let totalTonnage = 0;
@@ -893,11 +933,11 @@ const OverallStaffReport: React.FC = () => {
                             } else if (roleCol.key === "Invoice_Count") {
                                 roleSums[roleCol.key] = Number(r.Invoice_Count) || 0;
                             } else {
-                                if (roleCol.metric === "count") {
-                                    roleSums[roleCol.key] = Number(r[`${roleCol.key}_Count`]) || 0;
-                                } else {
-                                    roleSums[roleCol.key] = Number(r[roleCol.key]) || 0;
-                                }
+                                let sumVal = 0;
+                                filteredStaffList.forEach(sc => {
+                                    sumVal += getStaffCellValue(sc, roleCol.key, roleCol.metric || "qty");
+                                });
+                                roleSums[roleCol.key] = sumVal;
                             }
                         });
                         totalTonnage = r.Total_Tonnage || 0;
@@ -933,6 +973,29 @@ const OverallStaffReport: React.FC = () => {
 
         return categories;
     }, [groups, reportData, roleColumns, staffData, selectedStaffFilters]);
+
+    const gridStaffNames = useMemo(() => {
+        const names = new Set<string>();
+        tableCategories.forEach(cat => {
+            cat.groups.forEach(g => {
+                g.voucherTypes.forEach((vt: any) => {
+                    const filteredStaff = getFilteredStaffList(vt.staff || [], [], roleColumns);
+                    filteredStaff.forEach((sc: any) => {
+                        if (sc.Cost_Center_Name) {
+                            names.add(sc.Cost_Center_Name);
+                        }
+                    });
+                });
+            });
+        });
+        return Array.from(names).sort();
+    }, [tableCategories, roleColumns]);
+
+    const filteredGridStaffNames = useMemo(() => {
+        return gridStaffNames.filter(name =>
+            name.toLowerCase().includes(staffSearchQuery.toLowerCase())
+        );
+    }, [gridStaffNames, staffSearchQuery]);
 
     // Toggles expanded voucher state & fetches group employees dynamically
     const handleToggleExpandVoucher = async (parentCategory: string, groupName: string, voucherName: string) => {
@@ -1001,30 +1064,6 @@ const OverallStaffReport: React.FC = () => {
             dynamicCountTotal
         };
     }, [tableCategories, roleColumns]);
-
-    const getRowTotalValues = (rowType: 'vt' | 'staff' | 'invoice', rowData: any) => {
-        let qtyTotal = 0;
-        let countTotal = 0;
-
-        roleColumns.filter(c => c.enabled).forEach(col => {
-            const metric = col.metric || "qty";
-            if (rowType === 'vt') {
-                const val = rowData.roleSums[col.key] || 0;
-                if (metric === "qty") qtyTotal += val;
-                else countTotal += val;
-            } else if (rowType === 'staff') {
-                const val = getStaffCellValue(rowData, col.key, metric);
-                if (metric === "qty") qtyTotal += val;
-                else countTotal += val;
-            } else if (rowType === 'invoice') {
-                const val = getInvoiceCellValue(rowData, col.key, metric);
-                if (metric === "qty") qtyTotal += val;
-                else countTotal += val;
-            }
-        });
-
-        return { qtyTotal, countTotal };
-    };
 
     // Toggle expand staff invoices inline & fetches invoices dynamically
     const handleToggleExpandStaff = async (parentCategory: string, groupName: string, voucherName: string, empId: number, _staffName: string) => {
@@ -1131,22 +1170,16 @@ const OverallStaffReport: React.FC = () => {
                 group.voucherTypes.forEach((vt: any) => {
                     const vKey = `${category.name}_${group.groupName}_${vt.name}`;
                     const isExpanded = expandedVouchers.includes(vKey);
-                    const filteredStaff = (vt.staff || []).filter((sc: any) => {
-                        if (selectedStaffFilters.length === 0) return true;
-                        const name = sc.Cost_Center_Name || "Unassigned";
-                        return selectedStaffFilters.includes(name);
-                    });
+                    const filteredStaff = getFilteredStaffList(vt.staff || [], selectedStaffFilters, roleColumns);
                     const hasStaff = filteredStaff.length > 0;
 
                     // 1. Voucher Type (Main Row)
-                    const { qtyTotal: vtQty, countTotal: vtCount } = getRowTotalValues('vt', vt);
                     const vtRow: any = {};
                     vtRow["Category"] = category.name;
                     vtRow["Groups"] = group.groupName;
                     vtRow["Group Kgs"] = group.groupKgs;
                     vtRow["Voucher Type"] = vt.name;
                     vtRow["Voucher Kgs"] = vt.baseKgs;
-                    vtRow["Total Kgs / Total Count"] = `${vtQty.toLocaleString()} / ${vtCount.toLocaleString()}`;
                     vtRow["Staff Name / Inv No"] = "-";
                     enabledRoles.forEach(col => {
                         const val = vt.roleSums[col.key] || 0;
@@ -1159,17 +1192,14 @@ const OverallStaffReport: React.FC = () => {
                         filteredStaff.forEach((sc: any) => {
                             const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
                             const isStaffExpanded = expandedStaff.includes(staffKey);
-                            const invoicesList = invoiceData[staffKey] || [];
+                            const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns);
                             const hasInvoices = invoicesList.length > 0;
-
-                            const { qtyTotal: scQty, countTotal: scCount } = getRowTotalValues('staff', sc);
                             const staffRow: any = {};
                             staffRow["Category"] = "";
                             staffRow["Groups"] = "";
                             staffRow["Group Kgs"] = "";
                             staffRow["Voucher Type"] = "";
                             staffRow["Voucher Kgs"] = "";
-                            staffRow["Total Kgs / Total Count"] = `${scQty.toLocaleString()} / ${scCount.toLocaleString()}`;
                             staffRow["Staff Name / Inv No"] = sc.Cost_Center_Name || "Unassigned";
                             enabledRoles.forEach(col => {
                                 const val = getStaffCellValue(sc, col.key, col.metric || "qty");
@@ -1180,14 +1210,12 @@ const OverallStaffReport: React.FC = () => {
                             // 3. Invoice Rows (if staff is expanded)
                             if (isStaffExpanded && hasInvoices) {
                                 invoicesList.forEach((inv: any) => {
-                                    const { qtyTotal: invQty, countTotal: invCount } = getRowTotalValues('invoice', inv);
                                     const invRow: any = {};
                                     invRow["Category"] = "";
                                     invRow["Groups"] = "";
                                     invRow["Group Kgs"] = "";
                                     invRow["Voucher Type"] = "";
                                     invRow["Voucher Kgs"] = "";
-                                    invRow["Total Kgs / Total Count"] = `${invQty.toLocaleString()} / ${invCount.toLocaleString()}`;
                                     invRow["Staff Name / Inv No"] = inv.Inv_No;
                                     enabledRoles.forEach(col => {
                                         const val = getInvoiceCellValue(inv, col.key, col.metric || "qty");
@@ -1209,7 +1237,6 @@ const OverallStaffReport: React.FC = () => {
         grandRow["Group Kgs"] = grandTotals.totalKgs;
         grandRow["Voucher Type"] = "";
         grandRow["Voucher Kgs"] = "";
-        grandRow["Total Kgs / Total Count"] = `${grandTotals.dynamicQtyTotal.toLocaleString()} / ${grandTotals.dynamicCountTotal.toLocaleString()}`;
         grandRow["Staff Name / Inv No"] = "";
         enabledRoles.forEach(col => {
             grandRow[getColumnLabel(col)] = grandTotals.roleTotals[col.key] || 0;
@@ -1230,7 +1257,6 @@ const OverallStaffReport: React.FC = () => {
             "Group Kgs",
             "Voucher Type",
             "Voucher Kgs",
-            "Total Kgs / Total Count",
             "Staff Name / Inv No"
         ];
 
@@ -1246,22 +1272,16 @@ const OverallStaffReport: React.FC = () => {
                 group.voucherTypes.forEach((vt: any) => {
                     const vKey = `${category.name}_${group.groupName}_${vt.name}`;
                     const isExpanded = expandedVouchers.includes(vKey);
-                    const filteredStaff = (vt.staff || []).filter((sc: any) => {
-                        if (selectedStaffFilters.length === 0) return true;
-                        const name = sc.Cost_Center_Name || "Unassigned";
-                        return selectedStaffFilters.includes(name);
-                    });
+                    const filteredStaff = getFilteredStaffList(vt.staff || [], selectedStaffFilters, roleColumns);
                     const hasStaff = filteredStaff.length > 0;
 
                     // 1. Voucher Type (Main Row)
-                    const { qtyTotal: vtQty, countTotal: vtCount } = getRowTotalValues('vt', vt);
                     const vtRowData = [
                         category.name,
                         group.groupName,
                         group.groupKgs.toLocaleString(),
                         vt.name,
                         vt.baseKgs.toLocaleString(),
-                        `${vtQty.toLocaleString()} / ${vtCount.toLocaleString()}`,
                         "-"
                     ];
                     enabledRoles.forEach(col => {
@@ -1275,17 +1295,15 @@ const OverallStaffReport: React.FC = () => {
                         filteredStaff.forEach((sc: any) => {
                             const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
                             const isStaffExpanded = expandedStaff.includes(staffKey);
-                            const invoicesList = invoiceData[staffKey] || [];
+                            const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns);
                             const hasInvoices = invoicesList.length > 0;
 
-                            const { qtyTotal: scQty, countTotal: scCount } = getRowTotalValues('staff', sc);
                             const staffRowData = [
                                 "",
                                 "",
                                 "",
                                 "",
                                 "",
-                                `${scQty.toLocaleString()} / ${scCount.toLocaleString()}`,
                                 sc.Cost_Center_Name || "Unassigned"
                             ];
                             enabledRoles.forEach(col => {
@@ -1297,14 +1315,12 @@ const OverallStaffReport: React.FC = () => {
                             // 3. Invoice Rows (if staff is expanded)
                             if (isStaffExpanded && hasInvoices) {
                                 invoicesList.forEach((inv: any) => {
-                                    const { qtyTotal: invQty, countTotal: invCount } = getRowTotalValues('invoice', inv);
                                     const invRowData = [
                                         "",
                                         "",
                                         "",
                                         "",
                                         "",
-                                        `${invQty.toLocaleString()} / ${invCount.toLocaleString()}`,
                                         inv.Inv_No
                                     ];
                                     enabledRoles.forEach(col => {
@@ -1327,7 +1343,6 @@ const OverallStaffReport: React.FC = () => {
             grandTotals.totalKgs.toLocaleString(),
             "",
             "",
-            `${grandTotals.dynamicQtyTotal.toLocaleString()} / ${grandTotals.dynamicCountTotal.toLocaleString()}`,
             ""
         ];
         enabledRoles.forEach(col => {
@@ -1445,9 +1460,6 @@ const OverallStaffReport: React.FC = () => {
                                     <TableCell sx={headerCellSx} align="center">
                                         Kgs
                                     </TableCell>
-                                    <TableCell sx={headerCellSx} align="center">
-                                        Total Kgs / Total Count
-                                    </TableCell>
                                     <TableCell
                                         sx={{
                                             ...headerCellSx,
@@ -1475,9 +1487,6 @@ const OverallStaffReport: React.FC = () => {
                                     <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
                                         {grandTotals.totalKgs.toLocaleString()}
                                     </TableCell>
-                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
-                                        {grandTotals.dynamicQtyTotal.toLocaleString()} / {grandTotals.dynamicCountTotal.toLocaleString()}
-                                    </TableCell>
                                     <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #93c5fd" }} />
                                     {roleColumns.filter(c => c.enabled).sort((a, b) => a.order - b.order).map(col => (
                                         <TableCell key={col.key} sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
@@ -1496,17 +1505,12 @@ const OverallStaffReport: React.FC = () => {
                                                 const vKey = `${category.name}_${group.groupName}_${vt.name}`;
                                                 if (expandedVouchers.includes(vKey)) {
                                                     const staffList = staffData[vKey] || [];
-                                                    const filteredStaffList = staffList.filter((sc: any) => {
-                                                        if (selectedStaffFilters.length === 0) return true;
-
-                                                        const name = sc.Cost_Center_Name || "Unassigned";
-                                                        return selectedStaffFilters.includes(name);
-                                                    });
+                                                    const filteredStaffList = getFilteredStaffList(staffList, selectedStaffFilters, roleColumns);
                                                     categorySpan += filteredStaffList.length;
                                                     filteredStaffList.forEach((sc: any) => {
                                                         const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
                                                         if (expandedStaff.includes(staffKey)) {
-                                                            const invoicesList = invoiceData[staffKey] || [];
+                                                            const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns);
                                                             categorySpan += invoicesList.length;
                                                         }
                                                     });
@@ -1523,17 +1527,12 @@ const OverallStaffReport: React.FC = () => {
                                                 const vKey = `${category.name}_${group.groupName}_${vt.name}`;
                                                 if (expandedVouchers.includes(vKey)) {
                                                     const staffList = staffData[vKey] || [];
-                                                    const filteredStaffList = staffList.filter((sc: any) => {
-                                                        if (selectedStaffFilters.length === 0) return true;
-
-                                                        const name = sc.Cost_Center_Name || "Unassigned";
-                                                        return selectedStaffFilters.includes(name);
-                                                    });
+                                                    const filteredStaffList = getFilteredStaffList(staffList, selectedStaffFilters, roleColumns);
                                                     groupSpan += filteredStaffList.length;
                                                     filteredStaffList.forEach((sc: any) => {
                                                         const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
                                                         if (expandedStaff.includes(staffKey)) {
-                                                            const invoicesList = invoiceData[staffKey] || [];
+                                                            const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns);
                                                             groupSpan += invoicesList.length;
                                                         }
                                                     });
@@ -1545,12 +1544,7 @@ const OverallStaffReport: React.FC = () => {
                                             return group.voucherTypes.map((vt: any) => {
                                                 const vKey = `${category.name}_${group.groupName}_${vt.name}`;
                                                 const isExpanded = expandedVouchers.includes(vKey);
-                                                const filteredStaff = (vt.staff || []).filter((sc: any) => {
-                                                    if (selectedStaffFilters.length === 0) return true;
-
-                                                    const name = sc.Cost_Center_Name || "Unassigned";
-                                                    return selectedStaffFilters.includes(name);
-                                                });
+                                                const filteredStaff = getFilteredStaffList(vt.staff || [], selectedStaffFilters, roleColumns);
                                                 const hasStaff = filteredStaff.length > 0;
 
                                                 const mainRow = (
@@ -1634,13 +1628,6 @@ const OverallStaffReport: React.FC = () => {
                                                             {vt.baseKgs.toLocaleString()}
                                                         </TableCell>
 
-                                                        <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
-                                                            {(() => {
-                                                                const { qtyTotal, countTotal } = getRowTotalValues('vt', vt);
-                                                                return `${qtyTotal.toLocaleString()} / ${countTotal.toLocaleString()}`;
-                                                            })()}
-                                                        </TableCell>
-
                                                         <TableCell sx={{ fontStyle: "italic", color: "text.secondary", borderRight: "1px solid #cbd5e1", py: 1 }} align="center">
                                                             -
                                                         </TableCell>
@@ -1663,20 +1650,13 @@ const OverallStaffReport: React.FC = () => {
                                                     filteredStaff.map((sc: any) => {
                                                         const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
                                                         const isStaffExpanded = expandedStaff.includes(staffKey);
-                                                        const invoicesList = invoiceData[staffKey] || [];
+                                                        const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns);
                                                         const hasInvoices = invoicesList.length > 0;
 
                                                         const staffRow = (
                                                             <TableRow key={sc.Cost_Center_Id || sc.Cost_Center_Name} sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
                                                                 <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} />
                                                                 <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} align="center" />
-
-                                                                <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
-                                                                    {(() => {
-                                                                        const { qtyTotal, countTotal } = getRowTotalValues('staff', sc);
-                                                                        return `${qtyTotal.toLocaleString()} / ${countTotal.toLocaleString()}`;
-                                                                    })()}
-                                                                </TableCell>
 
                                                                 <TableCell
                                                                     sx={{
@@ -1718,13 +1698,6 @@ const OverallStaffReport: React.FC = () => {
                                                                 <TableRow key={`${staffKey}_${inv.Voucher_Ref_Id}_${idx}`} sx={{ bgcolor: "#ffffff", "&:hover": { bgcolor: "#f8fafc" } }}>
                                                                     <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} />
                                                                     <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} align="center" />
-
-                                                                    <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
-                                                                        {(() => {
-                                                                            const { qtyTotal, countTotal } = getRowTotalValues('invoice', inv);
-                                                                            return `${qtyTotal.toLocaleString()} / ${countTotal.toLocaleString()}`;
-                                                                        })()}
-                                                                    </TableCell>
 
                                                                     <TableCell
                                                                         sx={{
@@ -1780,8 +1753,8 @@ const OverallStaffReport: React.FC = () => {
                                     })
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={7 + roleColumns.filter(c => c.enabled).length} align="center" sx={{ py: 6 }}>
-                                            No records found. Please create or update groups.
+                                        <TableCell colSpan={6 + roleColumns.filter(c => c.enabled).length} align="center" sx={{ py: 6 }}>
+                                            No records found.
                                         </TableCell>
                                     </TableRow>
                                 )}
@@ -1795,7 +1768,10 @@ const OverallStaffReport: React.FC = () => {
             <Popover
                 open={Boolean(staffFilterAnchor)}
                 anchorEl={staffFilterAnchor}
-                onClose={() => setStaffFilterAnchor(null)}
+                onClose={() => {
+                    setStaffFilterAnchor(null);
+                    setStaffSearchQuery("");
+                }}
                 anchorOrigin={{
                     vertical: "bottom",
                     horizontal: "left",
@@ -1806,11 +1782,18 @@ const OverallStaffReport: React.FC = () => {
                 }}
             >
                 <Box p={2} width={250} display="flex" flexDirection="column" gap={1}>
+                    <TextField
+                        size="small"
+                        placeholder="Search staff..."
+                        value={staffSearchQuery}
+                        onChange={(e) => setStaffSearchQuery(e.target.value)}
+                        fullWidth
+                    />
 
                     <Box sx={{ maxHeight: 250, overflowY: "auto", my: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
-                        {involvedStaff.length === 0 ? (
+                        {filteredGridStaffNames.length === 0 ? (
                             <Typography variant="caption" color="text.secondary" p={1}>
-                                No staff active on this day
+                                No staff found
                             </Typography>
                         ) : (
                             <>
@@ -1825,8 +1808,7 @@ const OverallStaffReport: React.FC = () => {
                                     label="All"
                                     sx={{ margin: 0, "& .MuiFormControlLabel-label": { fontSize: "0.8rem", fontWeight: 700 } }}
                                 />
-                                {involvedStaff.map(s => {
-                                    const name = s.Cost_Center_Name || "Unassigned";
+                                {filteredGridStaffNames.map(name => {
                                     const isChecked = selectedStaffFilters.includes(name);
                                     return (
                                         <FormControlLabel

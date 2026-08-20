@@ -1435,13 +1435,10 @@ const OverallStaffReport: React.FC = () => {
             <AppLayout fullWidth>
                 <Box px={2} pb={1} pt={1}>
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                        <Typography variant="subtitle1" fontWeight="bold" color="#1e3a8a" sx={{ letterSpacing: 0.5 }}>
-                            OVERALL STAFF REPORT {isEditTemplate && ` - ${reportName}`}
-                        </Typography>
                         {loading && <CircularProgress size={20} color="primary" />}
                     </Box>
 
-                    <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 110px)" }}>
+                    <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 90px)" }}>
                         <Table size="medium" stickyHeader>
                             <TableHead>
                                 <TableRow sx={{ bgcolor: "#1E3A8A" }}>

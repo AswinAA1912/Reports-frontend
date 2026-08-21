@@ -338,11 +338,11 @@ const RateMasterAdminReport: React.FC = () => {
     const handleQuickSave = async () => {
         try {
             const createdBy = Number(localStorage.getItem("userId") || 1);
-            const abstractPayload = columns.map((col, index) => ({
+            const abstractPayload = columns.map((col) => ({
                 key: col.key,
                 label: col.label,
                 enabled: col.enabled ? 1 : 0,
-                order: index,
+                order: col.order,
                 groupBy: grouping.includes(col.key) ? grouping.indexOf(col.key) + 1 : 0,
             }));
 

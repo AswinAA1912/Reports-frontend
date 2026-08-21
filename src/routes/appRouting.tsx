@@ -45,6 +45,7 @@ import SalesDeliveryReport from "../reports/Sales/salesDeliveryReport";
 import RetailerLocations from "./RetailerLocations";
 import RecievablePayableReport from "../reports/Expenses/recievablePayableReport";
 import OverallStaffReport from "../reports/StaffBased/overallStaffReport";
+import SalesStockGodown from "../reports/Stock/SalesStockGodown";
 
 interface AppRoutingProps {
   setActiveCategory: (category: string) => void;
@@ -484,6 +485,17 @@ const AppRouting: React.FC<AppRoutingProps> = ({
             <RequireAuth>
               <AppLayout fullWidth>
                 <OverallStaffReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/salesStockGodown"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <SalesStockGodown />
               </AppLayout>
             </RequireAuth>
           }

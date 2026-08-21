@@ -1444,7 +1444,7 @@ const StaffBasedGroupingReport: React.FC = () => {
 
         if (!sortConfig.key) return numFilteredAndSortedRows;
 
-        return [...filteredRows].sort((a, b) => {
+        return [...numFilteredAndSortedRows].sort((a, b) => {
             const aVal = a[sortConfig.key!];
             const bVal = b[sortConfig.key!];
 

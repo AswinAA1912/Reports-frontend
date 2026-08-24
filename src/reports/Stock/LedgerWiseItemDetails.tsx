@@ -1277,7 +1277,6 @@ const LedgerItemWiseDetails: React.FC = () => {
                 </DialogActions>
             </Dialog>
 
-            /* ================= TEMPLATE ================= */
             <Dialog
                 open={saveDialogOpen}
                 onClose={() => setSaveDialogOpen(false)}

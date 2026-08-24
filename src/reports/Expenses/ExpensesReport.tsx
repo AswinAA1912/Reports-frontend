@@ -41,6 +41,22 @@ const formatINR = (v: number) =>
         currency: "INR",
     }).format(v);
 
+const renderFormattedAmount = (v: number, textStyles?: any) => {
+    const formatted = formatINR(v);
+    const lastDotIndex = formatted.lastIndexOf(".");
+    if (lastDotIndex === -1) {
+        return <span style={textStyles}>{formatted}</span>;
+    }
+    const whole = formatted.substring(0, lastDotIndex);
+    const fraction = formatted.substring(lastDotIndex);
+    return (
+        <span style={textStyles}>
+            {whole}
+            <span style={{ fontSize: "0.82em", opacity: 0.85 }}>{fraction}</span>
+        </span>
+    );
+};
+
 /* ================= MAPPING ================= */
 
 const mapExpenseData = (
@@ -758,6 +774,38 @@ const ExpensesReport = () => {
                     {data && section && (
                         <Box mb={2}>
 
+                            {/* 🔷 LIST HEADER */}
+                            <Box
+                                display="flex"
+                                justifyContent="space-between"
+                                alignItems="center"
+                                sx={{
+                                    position: "sticky",
+                                    top: 0,
+                                    zIndex: 10,
+                                    bgcolor: "primary.main",
+                                    color: "primary.contrastText",
+                                    p: 1.5,
+                                    mb: 1.5,
+                                    borderRadius: 1,
+                                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                                }}
+                            >
+                                <Typography fontWeight={700} sx={{ ml: 4 }}>
+                                    Particulars
+                                </Typography>
+
+                                <Box
+                                    display="grid"
+                                    gridTemplateColumns="160px 160px 220px"
+                                    alignItems="center"
+                                >
+                                    <Typography fontWeight={700} sx={{ textAlign: "right", pr: 3 }}>Debit</Typography>
+                                    <Typography fontWeight={700} sx={{ textAlign: "right", pr: 3 }}>Credit</Typography>
+                                    <Typography fontWeight={700} sx={{ textAlign: "right", pr: 3 }}>Balance</Typography>
+                                </Box>
+                            </Box>
+
                             {/* 🔷 HEADER */}
                             <Box
                                 display="flex"
@@ -792,12 +840,12 @@ const ExpensesReport = () => {
                                     gridTemplateColumns="160px 160px 220px"
                                     alignItems="center"
                                 >
-                                    <Typography fontWeight={700}>
-                                        DR: {formatINR(summary?.dr ?? 0)}
+                                    <Typography fontWeight={700} sx={{ textAlign: "right", pr: 3 }}>
+                                        {renderFormattedAmount(summary?.dr ?? 0)}
                                     </Typography>
 
-                                    <Typography fontWeight={700}>
-                                        CR: {formatINR(summary?.cr ?? 0)}
+                                    <Typography fontWeight={700} sx={{ textAlign: "right", pr: 3 }}>
+                                        {renderFormattedAmount(summary?.cr ?? 0)}
                                     </Typography>
 
                                     <Typography
@@ -808,8 +856,9 @@ const ExpensesReport = () => {
                                                 ? "success.main"
                                                 : "error.main"
                                         }
+                                        sx={{ textAlign: "right", pr: 3 }}
                                     >
-                                        BAL: {formatINR(Math.abs(summary?.balance ?? 0))}{" "}
+                                        {renderFormattedAmount(Math.abs(summary?.balance ?? 0))}{" "}
                                         {(summary?.balance ?? 0) >= 0 ? "DR" : "CR"}
                                     </Typography>
                                 </Box>
@@ -847,16 +896,16 @@ const ExpensesReport = () => {
                                                 alignItems="center"
                                             >
 
-                                                <Typography fontWeight={600}>
-                                                    DR: {formatINR(group.dr)}
+                                                <Typography fontWeight={600} sx={{ textAlign: "right", pr: 3 }}>
+                                                    {renderFormattedAmount(group.dr)}
                                                 </Typography>
 
-                                                <Typography fontWeight={600}>
-                                                    CR: {formatINR(group.cr)}
+                                                <Typography fontWeight={600} sx={{ textAlign: "right", pr: 3 }}>
+                                                    {renderFormattedAmount(group.cr)}
                                                 </Typography>
 
-                                                <Typography fontWeight={700} color={group.balance >= 0 ? "green" : "red"}>
-                                                    BAL: {formatINR(Math.abs(group.balance))} {group.balance >= 0 ? "DR" : "CR"}
+                                                <Typography fontWeight={700} color={group.balance >= 0 ? "green" : "red"} sx={{ textAlign: "right", pr: 3 }}>
+                                                    {renderFormattedAmount(Math.abs(group.balance))} {group.balance >= 0 ? "DR" : "CR"}
                                                 </Typography>
 
                                             </Box>
@@ -897,16 +946,16 @@ const ExpensesReport = () => {
                                                             gridTemplateColumns="160px 160px 220px"
                                                             alignItems="center"
                                                         >
-                                                            <Typography>
-                                                                DR: {formatINR(sub.dr)}
+                                                            <Typography sx={{ textAlign: "right", pr: 3 }}>
+                                                                {renderFormattedAmount(sub.dr)}
                                                             </Typography>
 
-                                                            <Typography>
-                                                                CR: {formatINR(sub.cr)}
+                                                            <Typography sx={{ textAlign: "right", pr: 3 }}>
+                                                                {renderFormattedAmount(sub.cr)}
                                                             </Typography>
 
-                                                            <Typography fontWeight={600} color={sub.balance >= 0 ? "green" : "red"}>
-                                                                BAL: {formatINR(Math.abs(sub.balance))} {sub.balance >= 0 ? "DR" : "CR"}
+                                                            <Typography fontWeight={600} color={sub.balance >= 0 ? "green" : "red"} sx={{ textAlign: "right", pr: 3 }}>
+                                                                {renderFormattedAmount(Math.abs(sub.balance))} {sub.balance >= 0 ? "DR" : "CR"}
                                                             </Typography>
                                                         </Box>
                                                     </Box>
@@ -1058,12 +1107,12 @@ const ExpensesReport = () => {
                                                                                 >
                                                                                     {col.key === "debit_amount"
                                                                                         ? row.entryType === "DR"
-                                                                                            ? `${formatINR(row.amount)} DR`
+                                                                                            ? <>{renderFormattedAmount(row.amount)} DR</>
                                                                                             : ""
 
                                                                                         : col.key === "credit_amount"
                                                                                             ? row.entryType === "CR"
-                                                                                                ? `${formatINR(row.amount)} CR`
+                                                                                                ? <>{renderFormattedAmount(row.amount)} CR</>
                                                                                                 : ""
 
                                                                                             : col.key === "payment_date"

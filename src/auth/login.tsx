@@ -9,7 +9,10 @@ import {
   List,
   ListItemButton,
   ListItemText,
+  InputAdornment,
+  IconButton,
 } from "@mui/material";
+import { Visibility, VisibilityOff } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
 import { useAuth, Company } from "../auth/authContext";
 import { toast } from "react-toastify";
@@ -26,6 +29,7 @@ const Login: React.FC = () => {
   const [step, setStep] = useState<Step>("USERNAME");
   const [companies, setCompanies] = useState<CompanyResponse[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const [form, setForm] = useState<CompanyResponse>({
     Company_Name: "",
@@ -81,7 +85,7 @@ const Login: React.FC = () => {
 
       // 1️⃣ Global login (HOST API)
       const loginResponse = await globalLogin({
-        Global_User_ID: form.Global_User_ID,
+        Global_User_ID: String(form.Global_User_ID || (form as any).Global_User_Id || ""),
         Password: encryptedPassword,
       });
 
@@ -165,16 +169,31 @@ const Login: React.FC = () => {
 
         {/* STEP 1: USERNAME */}
         {step === "USERNAME" && (
-          <TextField
-            label="Username"
-            fullWidth
-            autoFocus
-            value={form.username}
-            onChange={(e) =>
-              setForm({ ...form, username: e.target.value })
-            }
-            onKeyDown={(e) => e.key === "Enter" && verifyUsername()}
-          />
+          <>
+            <TextField
+              label="Username"
+              fullWidth
+              autoFocus
+              value={form.username}
+              onChange={(e) =>
+                setForm({ ...form, username: e.target.value })
+              }
+              onKeyDown={(e) => e.key === "Enter" && verifyUsername()}
+              sx={{ mb: 3 }}
+            />
+            <Button
+              fullWidth
+              variant="contained"
+              disabled={!form.username.trim()}
+              onClick={verifyUsername}
+              sx={{
+                backgroundColor: "#0D47A1",
+                "&:hover": { backgroundColor: "#0B3C91" },
+              }}
+            >
+              Next
+            </Button>
+          </>
         )}
 
         {/* STEP 2: COMPANY */}
@@ -206,7 +225,7 @@ const Login: React.FC = () => {
           <>
             <TextField
               label="Password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               fullWidth
               inputRef={passwordRef}
               value={form.password}
@@ -214,6 +233,20 @@ const Login: React.FC = () => {
                 setForm({ ...form, password: e.target.value })
               }
               onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      aria-label="toggle password visibility"
+                      onClick={() => setShowPassword(!showPassword)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      edge="end"
+                    >
+                      {showPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
               sx={{ mb: 3 }}
             />
             <Button

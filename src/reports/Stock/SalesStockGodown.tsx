@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
     Box,
     Table,
@@ -11,8 +11,33 @@ import {
     Typography,
     Card,
     CardContent,
-    Grid
+    Grid,
+    IconButton,
+    Tooltip,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    Button,
+    TextField,
+    MenuItem,
+    FormControl,
+    InputLabel,
+    Select,
+    Checkbox,
+    ListItemText,
+    OutlinedInput,
+    InputAdornment,
+    CircularProgress
 } from "@mui/material";
+import GroupAddIcon from "@mui/icons-material/GroupAdd";
+import SearchIcon from "@mui/icons-material/Search";
+import { toast } from "react-toastify";
+import axios from "axios";
+import { getBaseURL } from "../../config/portalBaseURL";
+import { useAuth } from "../../auth/authContext";
+import { SalesDeliveryReportService, GodownItem } from "../../services/salesDeliveryReport.service";
+import { StockAbstractReportService } from "../../services/dayStockAbstract.service";
 import dayjs from "dayjs";
 import AppLayout from "../../Layout/appLayout";
 import PageHeader from "../../Layout/PageHeader";
@@ -20,98 +45,293 @@ import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import { exportToPDF } from "../../utils/exportToPDF";
 import { exportToExcel } from "../../utils/exportToExcel";
 
-/* ================= DUMMY DATA GENERATOR ================= */
-interface ReportData {
-    purchase: number;
-    acGodownPurchase: number;
-    otherGodownPurchase: number;
-    wtChkPending: number;
-    cleaningPending: number;
-    wtChkToday: number;
-    cleaningToday: number;
-    attyToday: number;
-    sales: number;
-    acGodownSales: number;
-    otherGodownSales: number;
-}
-
-const generateReportData = (dateStr: string): ReportData => {
-    // Exact values from the shared image for 19-08-2026
-    if (dateStr === "2026-08-19") {
-        return {
-            purchase: 56.34,
-            acGodownPurchase: 16.26,
-            otherGodownPurchase: 0.27,
-            wtChkPending: 97.73,
-            cleaningPending: 44.55,
-            wtChkToday: 16.72,
-            cleaningToday: 7.81,
-            attyToday: 48.66,
-            sales: 34.1,
-            acGodownSales: 0.0,
-            otherGodownSales: 20.51,
-        };
-    }
-
-    // Seeded pseudo-random generation to remain consistent per selected date
-    let seed = 0;
-    for (let i = 0; i < dateStr.length; i++) {
-        seed += dateStr.charCodeAt(i);
-    }
-
-    const random = (min: number, max: number, offset: number) => {
-        const r = Math.sin(seed + offset) * 10000;
-        const val = (r - Math.floor(r)) * (max - min) + min;
-        return Math.round(val * 100) / 100;
-    };
-
-    const purchase = random(30, 80, 1);
-    const acGodownPurchase = random(10, 30, 2);
-    const otherGodownPurchase = random(0.1, 5, 3);
-    const wtChkPending = random(50, 120, 4);
-    const cleaningPending = random(20, 60, 5);
-    const wtChkToday = random(10, 30, 6);
-    const cleaningToday = random(3, 15, 7);
-    const attyToday = random(20, 60, 8);
-    const sales = random(20, 50, 9);
-    const acGodownSales = random(0, 10, 10) > 7 ? random(1, 10, 11) : 0.0;
-    const otherGodownSales = random(10, 30, 12);
-
-    return {
-        purchase,
-        acGodownPurchase,
-        otherGodownPurchase,
-        wtChkPending,
-        cleaningPending,
-        wtChkToday,
-        cleaningToday,
-        attyToday,
-        sales,
-        acGodownSales,
-        otherGodownSales,
-    };
-};
-
 /* ================= COMPONENT ================= */
 const SalesStockGodown: React.FC = () => {
     const parentReportName = "Sales Stock Godown Tonnage Report";
-    const [selectedDate, setSelectedDate] = useState("2026-08-19");
+    const [fromDate, setFromDate] = useState(dayjs().format("YYYY-MM-DD"));
+    const [toDate, setToDate] = useState(dayjs().format("YYYY-MM-DD"));
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const { user } = useAuth();
 
-    const data = useMemo(() => generateReportData(selectedDate), [selectedDate]);
+    // Group Creation & Settings States
+    const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+    const [groupType, setGroupType] = useState<string>("");
+    const [subGroupType, setSubGroupType] = useState<string>("");
+    const [selectedGodownIds, setSelectedGodownIds] = useState<string[]>([]);
+    const [godowns, setGodowns] = useState<GodownItem[]>([]);
+    const [loadingGodowns, setLoadingGodowns] = useState(false);
+    const [godownSearch, setGodownSearch] = useState<string>("");
+
+    const [groupSettings, setGroupSettings] = useState<any[]>([]);
+
+    // API Data state
+    const [reportApiData, setReportApiData] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    const handleCloseDialog = () => {
+        setGroupType("");
+        setSubGroupType("");
+        setSelectedGodownIds([]);
+        setGodownSearch("");
+        setGroupDialogOpen(false);
+    };
+
+    const isGroupExists = useMemo(() => {
+        return groupSettings.some(
+            (g) => g.SalesStockGroup === groupType && g.SaleStock === subGroupType
+        );
+    }, [groupType, subGroupType, groupSettings]);
+
+    const dateLabel = useMemo(() => {
+        if (fromDate === toDate) {
+            return dayjs(fromDate).format("DD-MM-YYYY");
+        }
+        return `${dayjs(fromDate).format("DD-MM-YYYY")} to ${dayjs(toDate).format("DD-MM-YYYY")}`;
+    }, [fromDate, toDate]);
+
+    const fetchGroupSettings = async () => {
+        try {
+            const res = await axios.get<{ success: boolean; data: any[] }>(
+                `${getBaseURL()}api/reports/settings/salesstockgodown`
+            );
+            if (res.data && res.data.success) {
+                setGroupSettings(res.data.data || []);
+            }
+        } catch (err) {
+            console.error("Failed to fetch group settings", err);
+        }
+    };
+
+    const fetchReportData = async () => {
+        if (!fromDate || !toDate) return;
+        const fromD = new Date(fromDate);
+        const toD = new Date(toDate);
+        if (isNaN(fromD.getTime()) || isNaN(toD.getTime())) return;
+
+        try {
+            setLoading(true);
+            const d = new Date(fromDate);
+            d.setDate(d.getDate() - 1);
+            const predateStr = d.toISOString().split("T")[0];
+
+            const data = await StockAbstractReportService.getGodownSummaryInstock({
+                Predate: predateStr,
+                Fromdate: fromDate,
+                Todate: toDate
+            });
+
+            setReportApiData(data || []);
+        } catch (err) {
+            console.error("Failed to fetch report data", err);
+            toast.error("Failed to fetch report data");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchGroupSettings();
+        fetchReportData();
+    }, []);
+
+    // Prepopulate dialog selection if group already exists
+    useEffect(() => {
+        if (groupType && subGroupType) {
+            const mapped = groupSettings
+                .filter((g) => g.SalesStockGroup === groupType && g.SaleStock === subGroupType)
+                .map((g) => String(g.Godown_Id));
+            setSelectedGodownIds(mapped);
+        } else {
+            setSelectedGodownIds([]);
+        }
+    }, [groupType, subGroupType, groupSettings]);
+
+    useEffect(() => {
+        if (groupDialogOpen) {
+            setGodownSearch("");
+            const fetchGodownsData = async () => {
+                try {
+                    setLoadingGodowns(true);
+                    const res = await SalesDeliveryReportService.getGodowns();
+                    if (res.data && res.data.success) {
+                        setGodowns(res.data.data || []);
+                    }
+                } catch (err) {
+                    console.error("Failed to fetch godowns", err);
+                    toast.error("Failed to load godowns");
+                } finally {
+                    setLoadingGodowns(false);
+                }
+            };
+            fetchGodownsData();
+        }
+    }, [groupDialogOpen]);
+
+    const filteredGodowns = useMemo(() => {
+        if (!godownSearch.trim()) return godowns;
+        return godowns.filter((g) =>
+            g.Godown_Name.toLowerCase().includes(godownSearch.toLowerCase())
+        );
+    }, [godowns, godownSearch]);
+
+    const handleGroupTypeChange = (e: any) => {
+        setGroupType(e.target.value);
+        setSubGroupType("");
+    };
+
+    const subGroupOptions = useMemo(() => {
+        if (groupType === "Inwards") {
+            return ["Purchase", "AC Godowns", "Other Godowns"];
+        }
+        if (groupType === "Internal") {
+            return ["Process In", "Process Out"];
+        }
+        if (groupType === "Outwards") {
+            return ["Sales", "AC Godowns", "Other Godowns"];
+        }
+        return [];
+    }, [groupType]);
+
+    const handleSaveGroup = async () => {
+        if (!groupType) {
+            toast.error("Please select a Group Type");
+            return;
+        }
+        if (!subGroupType) {
+            toast.error("Please select a Sub Group Type");
+            return;
+        }
+        if (selectedGodownIds.length === 0) {
+            toast.error("Please select at least one Godown");
+            return;
+        }
+
+        try {
+            const payload = {
+                salesStockGroup: groupType,
+                saleStock: subGroupType,
+                godownIds: selectedGodownIds.map(Number),
+                createdBy: user?.id || null
+            };
+
+            let res;
+            if (isGroupExists) {
+                res = await axios.put(`${getBaseURL()}api/reports/settings/salesstockgodown`, payload);
+            } else {
+                res = await axios.post(`${getBaseURL()}api/reports/settings/salesstockgodown`, payload);
+            }
+
+            if (res.data && res.data.success) {
+                toast.success(res.data.message || "Group settings saved successfully");
+                await fetchGroupSettings();
+                await fetchReportData();
+                handleCloseDialog();
+            } else {
+                toast.error(res.data.message || "Failed to save group settings");
+            }
+        } catch (err: any) {
+            console.error("Save group error", err);
+            toast.error(err.response?.data?.message || "Failed to save group settings");
+        }
+    };
+
+    // Normalization helper for matching group names
+    const normalize = (val: string) => (val || "").toLowerCase().replace(/['\s_-]/g, "");
+
+    // 1. Inwards values calculation
+    const inwardsValues = useMemo(() => {
+        let purchase = 0;
+        let acGodownPurchase = 0;
+        let otherGodownPurchase = 0;
+
+        reportApiData.forEach((item) => {
+            const godownId = Number(item.godown_id);
+            const inQty = Number(item.IN_Qty || 0);
+
+            const mapping = groupSettings.find(
+                (g) => g.SalesStockGroup === "Inwards" && Number(g.Godown_Id) === godownId
+            );
+
+            if (mapping) {
+                const subType = normalize(mapping.SaleStock);
+                if (subType === "purchase") {
+                    purchase += inQty;
+                } else if (subType === "acgodowns" || subType === "acgodown") {
+                    acGodownPurchase += inQty;
+                } else if (subType === "othergodowns" || subType === "othergodown") {
+                    otherGodownPurchase += inQty;
+                }
+            }
+        });
+
+        return {
+            purchase: Math.round(purchase * 100) / 100,
+            acGodownPurchase: Math.round(acGodownPurchase * 100) / 100,
+            otherGodownPurchase: Math.round(otherGodownPurchase * 100) / 100
+        };
+    }, [reportApiData, groupSettings]);
+
+    // 2. Outwards values calculation
+    const outwardsValues = useMemo(() => {
+        let sales = 0;
+        let acGodownSales = 0;
+        let otherGodownSales = 0;
+
+        reportApiData.forEach((item) => {
+            const godownId = Number(item.godown_id);
+            const outQty = Number(item.Out_Qty || 0);
+
+            const mapping = groupSettings.find(
+                (g) => g.SalesStockGroup === "Outwards" && Number(g.Godown_Id) === godownId
+            );
+
+            if (mapping) {
+                const subType = normalize(mapping.SaleStock);
+                if (subType === "sales") {
+                    sales += outQty;
+                } else if (subType === "acgodowns" || subType === "acgodown") {
+                    acGodownSales += outQty;
+                } else if (subType === "othergodowns" || subType === "othergodown") {
+                    otherGodownSales += outQty;
+                }
+            }
+        });
+
+        return {
+            sales: Math.round(sales * 100) / 100,
+            acGodownSales: Math.round(acGodownSales * 100) / 100,
+            otherGodownSales: Math.round(otherGodownSales * 100) / 100
+        };
+    }, [reportApiData, groupSettings]);
+
+    // 3. Internal values calculation: "Process In" & "Process Out" using all godowns
+    const internalValues = useMemo(() => {
+        let processIn = 0;
+        let processOut = 0;
+
+        reportApiData.forEach((item) => {
+            processIn += Number(item.SOU_In_Qty || 0);
+            processOut += Number(item.SOU_Out_Qty || 0);
+        });
+
+        return {
+            processIn: Math.round(processIn * 100) / 100,
+            processOut: Math.round(processOut * 100) / 100
+        };
+    }, [reportApiData]);
 
     // Subsection totals
     const inwardsTotal = useMemo(() => {
-        return Math.round((data.purchase + data.acGodownPurchase + data.otherGodownPurchase) * 100) / 100;
-    }, [data]);
+        return Math.round((inwardsValues.purchase + inwardsValues.acGodownPurchase + inwardsValues.otherGodownPurchase) * 100) / 100;
+    }, [inwardsValues]);
 
     const todayInternalTotal = useMemo(() => {
-        return Math.round((data.wtChkToday + data.cleaningToday + data.attyToday) * 100) / 100;
-    }, [data]);
+        return Math.round((internalValues.processIn + internalValues.processOut) * 100) / 100;
+    }, [internalValues]);
 
     const outwardsTotal = useMemo(() => {
-        return Math.round((data.sales + data.acGodownSales + data.otherGodownSales) * 100) / 100;
-    }, [data]);
+        return Math.round((outwardsValues.sales + outwardsValues.acGodownSales + outwardsValues.otherGodownSales) * 100) / 100;
+    }, [outwardsValues]);
 
     const overallTotal = useMemo(() => {
         return Math.round((inwardsTotal + todayInternalTotal + outwardsTotal) * 100) / 100;
@@ -122,28 +342,25 @@ const SalesStockGodown: React.FC = () => {
     const exportHeaders = ["Section", "Particulars", "Tonnage"];
 
     const getExportRows = () => [
-        ["TOTAL TONNAGE", `All Sections (as of ${dayjs(selectedDate).format("DD-MM-YYYY")})`, overallTotal],
-        ["IN WARDS", "PURCHASE", data.purchase],
-        ["IN WARDS", "AC GODOWN'S", data.acGodownPurchase],
-        ["IN WARDS TOTAL", "OTHER GODOWN'S (Total: " + inwardsTotal + ")", data.otherGodownPurchase],
-        ["INTERNAL PENDING", "WT CHK PENDING", data.wtChkPending],
-        ["INTERNAL PENDING", "CLEANING PENDING", data.cleaningPending],
-        ["INTERNAL TODAY", "WT CHK TODAY", data.wtChkToday],
-        ["INTERNAL TODAY", "CLEANING TODAY", data.cleaningToday],
-        ["INTERNAL TODAY TOTAL", "ATTY TODAY (Total: " + todayInternalTotal + ")", data.attyToday],
-        ["OUT WARDS", "SALES", data.sales],
-        ["OUT WARDS", "AC GODOWN'S", data.acGodownSales || "-"],
-        ["OUT WARDS TOTAL", "OTHER GODOWN'S (Total: " + outwardsTotal + ")", data.otherGodownSales]
+        ["TOTAL TONNAGE", `All Sections (as of ${dateLabel})`, overallTotal],
+        ["IN WARDS", "PURCHASE", inwardsValues.purchase],
+        ["IN WARDS", "AC GODOWN'S", inwardsValues.acGodownPurchase],
+        ["IN WARDS TOTAL", "OTHER GODOWN'S (Total: " + inwardsTotal + ")", inwardsValues.otherGodownPurchase],
+        ["INTERNAL", "PROCESS IN", internalValues.processIn],
+        ["INTERNAL TOTAL", "PROCESS OUT (Total: " + todayInternalTotal + ")", internalValues.processOut],
+        ["OUT WARDS", "SALES", outwardsValues.sales],
+        ["OUT WARDS", "AC GODOWN'S", outwardsValues.acGodownSales || "-"],
+        ["OUT WARDS TOTAL", "OTHER GODOWN'S (Total: " + outwardsTotal + ")", outwardsValues.otherGodownSales]
     ];
 
     const handleExportPDF = () => {
         const rows = getExportRows().map(row => [row[0], row[1], String(row[2])]);
-        exportToPDF(`Sales_Stock_Godown_${selectedDate}`, exportHeaders, rows);
+        exportToPDF(`Sales_Stock_Godown_${fromDate}_${toDate}`, exportHeaders, rows);
     };
 
     const handleExportExcel = () => {
         const rows = getExportRows().map(row => [row[0], row[1], row[2]]);
-        exportToExcel(`Sales_Stock_Godown_${selectedDate}`, exportHeaders, rows);
+        exportToExcel(`Sales_Stock_Godown_${fromDate}_${toDate}`, exportHeaders, rows);
     };
 
     /* ================= STYLING TOKENS (BLUISH THEME) ================= */
@@ -159,20 +376,175 @@ const SalesStockGodown: React.FC = () => {
 
     return (
         <>
+            {loading && (
+                <Box
+                    sx={{
+                        position: "fixed",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: "100%",
+                        background: "rgba(255,255,255,0.6)",
+                        zIndex: 9999,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center"
+                    }}
+                >
+                    <CircularProgress />
+                </Box>
+            )}
             <PageHeader
                 parentReportName={parentReportName}
                 onExportPDF={handleExportPDF}
                 onExportExcel={handleExportExcel}
+                settingsSlot={
+                    <Tooltip title="Group Creation Settings">
+                        <IconButton
+                            size="small"
+                            onClick={() => setGroupDialogOpen(true)}
+                            sx={{
+                                height: 24,
+                                width: 24,
+                                backgroundColor: "#fff",
+                                borderRadius: 0.5,
+                            }}
+                        >
+                            <GroupAddIcon fontSize="small" />
+                        </IconButton>
+                    </Tooltip>
+                }
             />
+
+            {/* GROUP CREATION DIALOG */}
+            <Dialog
+                open={groupDialogOpen}
+                onClose={handleCloseDialog}
+                fullWidth
+                maxWidth="xs"
+            >
+                <DialogTitle sx={{ color: colors.primaryAccent, fontWeight: "bold" }}>
+                    Group Creation
+                </DialogTitle>
+                <DialogContent>
+                    <Box display="flex" flexDirection="column" gap={2} sx={{ mt: 1 }}>
+                        {/* 1st Input: Group Type */}
+                        <TextField
+                            select
+                            label="Group Type"
+                            fullWidth
+                            value={groupType}
+                            onChange={handleGroupTypeChange}
+                        >
+                            <MenuItem value="Inwards">Inwards</MenuItem>
+                            <MenuItem value="Internal">Internal</MenuItem>
+                            <MenuItem value="Outwards">Outwards</MenuItem>
+                        </TextField>
+
+                        {/* 2nd Input: Sub Group Type */}
+                        <TextField
+                            select
+                            label="Sub Group Type"
+                            fullWidth
+                            disabled={!groupType}
+                            value={subGroupType}
+                            onChange={(e) => setSubGroupType(e.target.value)}
+                        >
+                            {subGroupOptions.map((opt) => (
+                                <MenuItem key={opt} value={opt}>
+                                    {opt}
+                                </MenuItem>
+                            ))}
+                        </TextField>
+
+                        {/* 3rd Input: Godowns Multiselect */}
+                        <FormControl fullWidth disabled={!subGroupType}>
+                            <InputLabel id="godown-multiselect-label">Select Godowns</InputLabel>
+                            <Select
+                                labelId="godown-multiselect-label"
+                                multiple
+                                value={selectedGodownIds}
+                                onChange={(e) => {
+                                    const value = e.target.value;
+                                    setSelectedGodownIds(typeof value === "string" ? value.split(",") : value);
+                                }}
+                                input={<OutlinedInput label="Select Godowns" />}
+                                renderValue={(selected) =>
+                                    selected
+                                        .map((id) => godowns.find((g) => g.Godown_Id === id)?.Godown_Name || id)
+                                        .join(", ")
+                                }
+                                MenuProps={{
+                                    autoFocus: false,
+                                    PaperProps: {
+                                        style: {
+                                            maxHeight: 300,
+                                        }
+                                    }
+                                }}
+                            >
+                                {/* Search box inside dropdown */}
+                                <Box
+                                    px={2}
+                                    py={1}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => e.stopPropagation()}
+                                >
+                                    <TextField
+                                        size="small"
+                                        fullWidth
+                                        placeholder="Search Godown..."
+                                        value={godownSearch}
+                                        onChange={(e) => setGodownSearch(e.target.value)}
+                                        InputProps={{
+                                            startAdornment: (
+                                                <InputAdornment position="start">
+                                                    <SearchIcon fontSize="small" />
+                                                </InputAdornment>
+                                            ),
+                                        }}
+                                    />
+                                </Box>
+                                {loadingGodowns ? (
+                                    <MenuItem disabled>Loading godowns...</MenuItem>
+                                ) : filteredGodowns.length === 0 ? (
+                                    <MenuItem disabled>No godowns found</MenuItem>
+                                ) : (
+                                    filteredGodowns.map((godown) => (
+                                        <MenuItem key={godown.Godown_Id} value={godown.Godown_Id}>
+                                            <Checkbox checked={selectedGodownIds.indexOf(godown.Godown_Id) > -1} />
+                                            <ListItemText primary={godown.Godown_Name} />
+                                        </MenuItem>
+                                    ))
+                                )}
+                            </Select>
+                        </FormControl>
+                    </Box>
+                </DialogContent>
+                <DialogActions>
+                    <Button color="error" onClick={handleCloseDialog}>
+                        Cancel
+                    </Button>
+                    <Button
+                        variant="contained"
+                        sx={{ bgcolor: colors.primaryAccent, "&:hover": { bgcolor: colors.lightAccent } }}
+                        onClick={handleSaveGroup}
+                    >
+                        {isGroupExists ? "Update Group" : "Create Group"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
 
             {/* FLOATING FILTER DRAWER */}
             <ReportFilterDrawer
                 open={drawerOpen}
                 onToggle={() => setDrawerOpen((p) => !p)}
                 onClose={() => setDrawerOpen(false)}
-                fromDate={selectedDate}
-                onFromDateChange={setSelectedDate}
-                onApply={() => { }}
+                fromDate={fromDate}
+                onFromDateChange={setFromDate}
+                toDate={toDate}
+                onToDateChange={setToDate}
+                onApply={fetchReportData}
             />
 
             <AppLayout fullWidth>
@@ -285,7 +657,7 @@ const SalesStockGodown: React.FC = () => {
                                             zIndex: 5
                                         }}
                                     >
-                                        {dayjs(selectedDate).format("DD-MM-YYYY")}
+                                        {dateLabel}
                                     </TableCell>
                                     <TableCell
                                         sx={{
@@ -321,23 +693,23 @@ const SalesStockGodown: React.FC = () => {
                                         PURCHASE
                                     </TableCell>
                                     <TableCell>
-                                        {data.purchase}
+                                        {inwardsValues.purchase}
                                     </TableCell>
                                 </TableRow>
 
                                 <TableRow>
                                     <TableCell>AC GODOWN'S</TableCell>
-                                    <TableCell>{data.acGodownPurchase}</TableCell>
+                                    <TableCell>{inwardsValues.acGodownPurchase}</TableCell>
                                 </TableRow>
 
                                 <TableRow>
                                     <TableCell sx={{ borderBottom: `2px solid ${colors.primaryAccent}` }}>OTHER GODOWN'S</TableCell>
-                                    <TableCell sx={{ borderBottom: `2px solid ${colors.primaryAccent}` }}>{data.otherGodownPurchase}</TableCell>
+                                    <TableCell sx={{ borderBottom: `2px solid ${colors.primaryAccent}` }}>{inwardsValues.otherGodownPurchase}</TableCell>
                                 </TableRow>
 
-                                {/* Row 5-9: Internal Section */}
+                                {/* Row 5-6: Internal Section (Only Process In and Process Out) */}
                                 <TableRow>
-                                    <TableCell rowSpan={5} sx={{ bgcolor: "#f8fafc", verticalAlign: "middle", borderBottom: `2px solid ${colors.primaryAccent}` }}>
+                                    <TableCell rowSpan={2} sx={{ bgcolor: "#f8fafc", verticalAlign: "middle", borderBottom: `2px solid ${colors.primaryAccent}` }}>
                                         <Box display="flex" flexDirection="column" gap={0.5} alignItems="center">
                                             <Typography variant="body2" fontWeight={700} color="text.secondary">
                                                 INTERNAL
@@ -348,38 +720,19 @@ const SalesStockGodown: React.FC = () => {
                                         </Box>
                                     </TableCell>
                                     <TableCell>
-                                        WT CHK PENDING
+                                        PROCESS IN
                                     </TableCell>
                                     <TableCell>
-                                        {data.wtChkPending}
+                                        {internalValues.processIn}
                                     </TableCell>
                                 </TableRow>
 
                                 <TableRow>
-                                    <TableCell>
-                                        CLEANING PENDING
-                                    </TableCell>
-                                    <TableCell>
-                                        {data.cleaningPending}
-                                    </TableCell>
+                                    <TableCell sx={{ borderBottom: `2px solid ${colors.primaryAccent}` }}>PROCESS OUT</TableCell>
+                                    <TableCell sx={{ borderBottom: `2px solid ${colors.primaryAccent}` }}>{internalValues.processOut}</TableCell>
                                 </TableRow>
 
-                                <TableRow>
-                                    <TableCell>WT CHK TODAY</TableCell>
-                                    <TableCell>{data.wtChkToday}</TableCell>
-                                </TableRow>
-
-                                <TableRow>
-                                    <TableCell>CLEANING TODAY</TableCell>
-                                    <TableCell>{data.cleaningToday}</TableCell>
-                                </TableRow>
-
-                                <TableRow>
-                                    <TableCell sx={{ borderBottom: `2px solid ${colors.primaryAccent}` }}>ATTY TODAY</TableCell>
-                                    <TableCell sx={{ borderBottom: `2px solid ${colors.primaryAccent}` }}>{data.attyToday}</TableCell>
-                                </TableRow>
-
-                                {/* Row 10-12: Outwards Section */}
+                                {/* Row 7-9: Outwards Section */}
                                 <TableRow>
                                     <TableCell rowSpan={3} sx={{ bgcolor: "#f8fafc", verticalAlign: "middle", borderBottom: `2px solid ${colors.primaryAccent}` }}>
                                         <Box display="flex" flexDirection="column" gap={0.5} alignItems="center">
@@ -395,18 +748,18 @@ const SalesStockGodown: React.FC = () => {
                                         SALES
                                     </TableCell>
                                     <TableCell>
-                                        {data.sales}
+                                        {outwardsValues.sales}
                                     </TableCell>
                                 </TableRow>
 
                                 <TableRow>
                                     <TableCell>AC GODOWN'S</TableCell>
-                                    <TableCell>{data.acGodownSales || "-"}</TableCell>
+                                    <TableCell>{outwardsValues.acGodownSales || "-"}</TableCell>
                                 </TableRow>
 
                                 <TableRow>
                                     <TableCell sx={{ borderBottom: `2px solid ${colors.primaryAccent}` }}>OTHER GODOWN'S</TableCell>
-                                    <TableCell sx={{ borderBottom: `2px solid ${colors.primaryAccent}` }}>{data.otherGodownSales}</TableCell>
+                                    <TableCell sx={{ borderBottom: `2px solid ${colors.primaryAccent}` }}>{outwardsValues.otherGodownSales}</TableCell>
                                 </TableRow>
                             </TableBody>
                         </Table>

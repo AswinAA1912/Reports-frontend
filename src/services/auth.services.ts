@@ -39,7 +39,8 @@ export interface CompanyResponse {
   Local_Id: number;
   Global_Id: number;
   Web_Api: string;
-  Global_User_ID: string;
+  Global_User_ID?: string;
+  Global_User_Id?: string;
   username: string;
   password: string;
 }

@@ -222,8 +222,8 @@ const getStaffCellValue = (
     roleColumns?: ColumnConfig[]
 ) => {
     if (colKey === "Total_Tonnage") {
-        return metric === "qty" 
-            ? (qtyType === "Act_Qty" ? (sc.Total_Act_Qty || 0) : (sc.Total_Qty || 0)) 
+        return metric === "qty"
+            ? (qtyType === "Act_Qty" ? (sc.Total_Act_Qty || 0) : (sc.Total_Qty || 0))
             : (sc.Invoice_Count || 0);
     }
     if (colKey === "Invoice_Count") {
@@ -257,8 +257,8 @@ const getStaffCellValue = (
         const matchedKey = Object.keys(sc.roleValues).find(k => k.toUpperCase() === colKey.toUpperCase());
         if (matchedKey) {
             const catVal = sc.roleValues[matchedKey];
-            return metric === "qty" 
-                ? (qtyType === "Act_Qty" ? (catVal.actQty || 0) : (catVal.qty || 0)) 
+            return metric === "qty"
+                ? (qtyType === "Act_Qty" ? (catVal.actQty || 0) : (catVal.qty || 0))
                 : (catVal.count || 0);
         }
     }
@@ -315,8 +315,8 @@ const getInvoiceCellValue = (
         let total = 0;
         if (inv.roleValues) {
             Object.values(inv.roleValues).forEach((val: any) => {
-                total += metric === "qty" 
-                    ? (qtyType === "Act_Qty" ? (val.actQty || 0) : (val.qty || 0)) 
+                total += metric === "qty"
+                    ? (qtyType === "Act_Qty" ? (val.actQty || 0) : (val.qty || 0))
                     : (val.count || 0);
             });
         }
@@ -361,8 +361,8 @@ const getInvoiceCellValue = (
         const matchedKey = Object.keys(inv.roleValues).find(k => k.toUpperCase() === colKey.toUpperCase());
         if (matchedKey) {
             const val = inv.roleValues[matchedKey];
-            return metric === "qty" 
-                ? (qtyType === "Act_Qty" ? (val.actQty || 0) : (val.qty || 0)) 
+            return metric === "qty"
+                ? (qtyType === "Act_Qty" ? (val.actQty || 0) : (val.qty || 0))
                 : (val.count || 0);
         }
     }
@@ -455,6 +455,7 @@ const OverallStaffReport: React.FC = () => {
 
     // Column Config State
     const [roleColumns, setRoleColumns] = useState<ColumnConfig[]>(DEFAULT_ROLE_COLUMNS);
+    const [preloading, setPreloading] = useState(false);
 
     const handleChangeMetric = (key: string, metric: "qty" | "count") => {
         setRoleColumns(p => p.map(col => col.key === key ? { ...col, metric } : col));
@@ -495,6 +496,7 @@ const OverallStaffReport: React.FC = () => {
     const [staffSearchQuery, setStaffSearchQuery] = useState("");
 
     const fetchInvolvedStaff = async () => {
+        setPreloading(true);
         try {
             const res = await employeeReportGroupService.getGroupEmployees({
                 Fromdate: fromDate,
@@ -516,6 +518,8 @@ const OverallStaffReport: React.FC = () => {
             }
         } catch (err) {
             console.error("Error fetching involved staff list:", err);
+        } finally {
+            setPreloading(false);
         }
     };
 
@@ -567,7 +571,11 @@ const OverallStaffReport: React.FC = () => {
                     }
                 }
             });
-            await Promise.all(promises);
+            try {
+                await Promise.all(promises);
+            } finally {
+                setPreloading(false);
+            }
         };
 
         loadAllStaffData();
@@ -748,8 +756,15 @@ const OverallStaffReport: React.FC = () => {
         }
     };
 
+    const safeLocaleString = (val: any) => {
+        if (val === undefined || val === null) return "0";
+        if (typeof val === "number") return val.toLocaleString();
+        return String(val);
+    };
+
     // Load template logic
     const handleLoadTemplate = async (templateId: number) => {
+        setPreloading(true);
         try {
             setSelectedTemplateId(templateId);
             setIsEditTemplate(true);
@@ -758,19 +773,35 @@ const OverallStaffReport: React.FC = () => {
             setStaffData({});
             setInvoiceData({});
             const res = await SettingsService.getReportEditData({ reportId: templateId, typeId: 1 });
-            if (res.data.success && res.data.data.reportInfo) {
-                setReportName(res.data.data.reportInfo.Report_Name || "");
+            
+            const data = res?.data?.data || {};
+            if (res.data.success && data.reportInfo) {
+                setReportName(data.reportInfo.Report_Name || "");
             }
-            const templateCols = res.data.data.columns || [];
+
+            const templateCols = Array.isArray(data.abstractColumns)
+                ? data.abstractColumns
+                : Array.isArray(data.columns)
+                    ? data.columns
+                    : [];
 
             // Convert template columns to ColumnConfig format
-            const parsedTemplateCols: ColumnConfig[] = templateCols.map((matched: any, idx: number) => ({
-                key: matched.key,
-                label: matched.label || matched.key,
-                enabled: matched.enabled ?? matched.Enabled ?? false,
-                order: matched.order ?? matched.Order ?? idx,
-                metric: (matched.dataType === "qty" || matched.dataType === "count") ? matched.dataType : "qty"
-            }));
+            const parsedTemplateCols: ColumnConfig[] = templateCols.map((matched: any, idx: number) => {
+                const key = matched.key || matched.Key || matched.Column_Name || matched.ColumnName || "";
+                const label = matched.label || matched.Label || matched.Alias_Name || key;
+                const enabled = matched.enabled ?? matched.Enabled ?? false;
+                const order = matched.order ?? matched.Order ?? idx;
+                const dataType = matched.dataType || matched.DataType || "qty";
+                const metric = (dataType === "qty" || dataType === "count") ? dataType : "qty";
+
+                return {
+                    key,
+                    label,
+                    enabled,
+                    order,
+                    metric
+                };
+            });
 
             // Add any columns from roleColumns that are not in parsedTemplateCols
             const updatedCols = [...parsedTemplateCols];
@@ -794,6 +825,8 @@ const OverallStaffReport: React.FC = () => {
         } catch (err) {
             console.error(err);
             toast.error("Failed to load template ❌");
+        } finally {
+            setPreloading(false);
         }
     };
 
@@ -960,8 +993,8 @@ const OverallStaffReport: React.FC = () => {
                 roleSums["Total_Qty"] = enabledQtySum;
                 roleSums["Total_Count"] = enabledCountSum;
 
-                roleSums["Total_Tonnage"] = qtyType === "Act_Qty" 
-                    ? (r.Total_Act_Tonnage ?? r.Act_Total_Tonnage ?? r.Total_Act_Qty ?? r.Total_Tonnage ?? 0) 
+                roleSums["Total_Tonnage"] = qtyType === "Act_Qty"
+                    ? (r.Total_Act_Tonnage ?? r.Act_Total_Tonnage ?? r.Total_Act_Qty ?? r.Total_Tonnage ?? 0)
                     : (r.Total_Tonnage || 0);
                 roleSums["Invoice_Count"] = r.Invoice_Count || 0;
 
@@ -1037,8 +1070,8 @@ const OverallStaffReport: React.FC = () => {
                     roleSums["Total_Qty"] = enabledQtySum;
                     roleSums["Total_Count"] = enabledCountSum;
 
-                    roleSums["Total_Tonnage"] = qtyType === "Act_Qty" 
-                        ? (r.Total_Act_Tonnage ?? r.Act_Total_Tonnage ?? r.Total_Act_Qty ?? r.Total_Tonnage ?? 0) 
+                    roleSums["Total_Tonnage"] = qtyType === "Act_Qty"
+                        ? (r.Total_Act_Tonnage ?? r.Act_Total_Tonnage ?? r.Total_Act_Qty ?? r.Total_Tonnage ?? 0)
                         : (r.Total_Tonnage || 0);
                     roleSums["Invoice_Count"] = r.Invoice_Count || 0;
 
@@ -1416,7 +1449,7 @@ const OverallStaffReport: React.FC = () => {
                     ];
                     enabledRoles.forEach(col => {
                         const val = vt.roleSums[col.key] || 0;
-                        vtRowData.push(val.toLocaleString());
+                        vtRowData.push(safeLocaleString(val));
                     });
                     rows.push(vtRowData);
 
@@ -1440,7 +1473,7 @@ const OverallStaffReport: React.FC = () => {
                             ];
                             enabledRoles.forEach(col => {
                                 const val = getStaffCellValue(sc, col.key, col.metric || "qty", qtyType, roleColumns);
-                                staffRowData.push(val.toLocaleString());
+                                staffRowData.push(safeLocaleString(val));
                             });
                             rows.push(staffRowData);
 
@@ -1459,7 +1492,7 @@ const OverallStaffReport: React.FC = () => {
                                     ];
                                     enabledRoles.forEach(col => {
                                         const val = getInvoiceCellValue(inv, col.key, col.metric || "qty", qtyType, roleColumns);
-                                        invRowData.push(val.toLocaleString());
+                                        invRowData.push(safeLocaleString(val));
                                     });
                                     rows.push(invRowData);
                                 });
@@ -1483,7 +1516,7 @@ const OverallStaffReport: React.FC = () => {
         ];
         enabledRoles.forEach(col => {
             const val = grandTotals.roleTotals[col.key] || 0;
-            grandRowData.push(val.toLocaleString());
+            grandRowData.push(safeLocaleString(val));
         });
         rows.push(grandRowData);
 
@@ -1913,7 +1946,7 @@ const OverallStaffReport: React.FC = () => {
                                                                                 }}
                                                                                 align="center"
                                                                             >
-                                                                                {val.toLocaleString()}
+                                                                                {val !== undefined && val !== null ? val.toLocaleString() : "0"}
                                                                             </TableCell>
                                                                         );
                                                                     })}
@@ -2037,30 +2070,39 @@ const OverallStaffReport: React.FC = () => {
                         Drag columns to reorder / Toggle visibility
                     </Typography>
 
-                    <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={handleDragEnd}
-                    >
-                        <SortableContext
-                            items={roleColumns.filter(c => c.key !== "Total_Qty" && c.key !== "Total_Count").map(c => c.key)}
-                            strategy={verticalListSortingStrategy}
+                    {preloading ? (
+                        <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" py={4} gap={1.5}>
+                            <CircularProgress size={30} />
+                            <Typography variant="caption" color="text.secondary">
+                                Loading Column Config...
+                            </Typography>
+                        </Box>
+                    ) : (
+                        <DndContext
+                            sensors={sensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={handleDragEnd}
                         >
-                            <Box display="flex" flexDirection="column" gap={0.5}>
-                                {[...roleColumns]
-                                    .filter(c => c.key !== "Total_Qty" && c.key !== "Total_Count")
-                                    .sort((a, b) => a.order - b.order)
-                                    .map((col) => (
-                                        <SortableColumnRow
-                                            key={col.key}
-                                            column={col}
-                                            onToggle={handleToggleColumn}
-                                            onChangeMetric={handleChangeMetric}
-                                        />
-                                    ))}
-                            </Box>
-                        </SortableContext>
-                    </DndContext>
+                            <SortableContext
+                                items={roleColumns.filter(c => c.key !== "Total_Qty" && c.key !== "Total_Count").map(c => c.key)}
+                                strategy={verticalListSortingStrategy}
+                            >
+                                <Box display="flex" flexDirection="column" gap={0.5}>
+                                    {[...roleColumns]
+                                        .filter(c => c.key !== "Total_Qty" && c.key !== "Total_Count")
+                                        .sort((a, b) => a.order - b.order)
+                                        .map((col) => (
+                                            <SortableColumnRow
+                                                key={col.key}
+                                                column={col}
+                                                onToggle={handleToggleColumn}
+                                                onChangeMetric={handleChangeMetric}
+                                            />
+                                        ))}
+                                </Box>
+                            </SortableContext>
+                        </DndContext>
+                    )}
                 </DialogContent>
             </Dialog>
 

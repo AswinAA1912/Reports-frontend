@@ -1625,11 +1625,15 @@ const OverallStaffReport: React.FC = () => {
 
             <AppLayout fullWidth>
                 <Box px={2} pb={1} pt={1}>
-                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                        {loading && <CircularProgress size={20} color="primary" />}
-                    </Box>
-
-                    <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 90px)" }}>
+                    {(loading || preloading) ? (
+                        <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="60vh" gap={2}>
+                            <CircularProgress size={40} />
+                            <Typography variant="body1" color="text.secondary" fontWeight={500}>
+                                Loading report data and template settings...
+                            </Typography>
+                        </Box>
+                    ) : (
+                        <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 90px)" }}>
                         <Table size="medium" stickyHeader>
                             <TableHead>
                                 <TableRow sx={{ bgcolor: "#1E3A8A" }}>
@@ -1981,7 +1985,8 @@ const OverallStaffReport: React.FC = () => {
                                 )}
                             </TableBody>
                         </Table>
-                    </TableContainer>
+                        </TableContainer>
+                    )}
                 </Box>
             </AppLayout>
 

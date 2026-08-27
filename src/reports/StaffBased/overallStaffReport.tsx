@@ -254,6 +254,12 @@ const getStaffCellValue = (
         return 0;
     }
     if (sc.roleValues && colKey) {
+        const directVal = sc.roleValues[colKey];
+        if (directVal !== undefined) {
+            return metric === "qty"
+                ? (qtyType === "Act_Qty" ? (directVal.actQty || 0) : (directVal.qty || 0))
+                : (directVal.count || 0);
+        }
         const matchedKey = Object.keys(sc.roleValues).find(k => k.toUpperCase() === colKey.toUpperCase());
         if (matchedKey) {
             const catVal = sc.roleValues[matchedKey];
@@ -358,6 +364,12 @@ const getInvoiceCellValue = (
 
     // Look up role-specific value from aggregated roleValues
     if (inv.roleValues) {
+        const directVal = inv.roleValues[colKey];
+        if (directVal !== undefined) {
+            return metric === "qty"
+                ? (qtyType === "Act_Qty" ? (directVal.actQty || 0) : (directVal.qty || 0))
+                : (directVal.count || 0);
+        }
         const matchedKey = Object.keys(inv.roleValues).find(k => k.toUpperCase() === colKey.toUpperCase());
         if (matchedKey) {
             const val = inv.roleValues[matchedKey];
@@ -457,6 +469,13 @@ const OverallStaffReport: React.FC = () => {
     const [roleColumns, setRoleColumns] = useState<ColumnConfig[]>(DEFAULT_ROLE_COLUMNS);
     const [preloading, setPreloading] = useState(false);
 
+    // Template states (Mocking backend templates support)
+    const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+    const [reportName, setReportName] = useState("");
+    const [parentReportName, setParentReportName] = useState("Overall Staff Report");
+    const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+    const [isEditTemplate, setIsEditTemplate] = useState(false);
+
     const handleChangeMetric = (key: string, metric: "qty" | "count") => {
         setRoleColumns(p => p.map(col => col.key === key ? { ...col, metric } : col));
     };
@@ -534,6 +553,7 @@ const OverallStaffReport: React.FC = () => {
     useEffect(() => {
         const loadAllStaffData = async () => {
             if (reportData.length === 0) return;
+            setPreloading(true);
 
             const normalizeCategory = (cat: string) => {
                 if (!cat) return "";
@@ -541,6 +561,10 @@ const OverallStaffReport: React.FC = () => {
                 if (c === "PROCESS") return "ADJUSTMENTS";
                 return c;
             };
+
+            const newStaffData: Record<string, any[]> = {};
+            const accumulatedEmployees: any[] = [];
+            let hasNewData = false;
 
             const promises = reportData.map(async (row) => {
                 const parentCategory = normalizeCategory(row.Overall_GroupName);
@@ -560,11 +584,9 @@ const OverallStaffReport: React.FC = () => {
                         });
                         if (res.data.success) {
                             const rawEmployees = res.data.data || [];
-                            setStaffData(prev => ({
-                                ...prev,
-                                [vKey]: groupEmployeesList(rawEmployees)
-                            }));
-                            setRoleColumns(prev => discoverRoleColumns(rawEmployees, prev));
+                            newStaffData[vKey] = groupEmployeesList(rawEmployees);
+                            accumulatedEmployees.push(...rawEmployees);
+                            hasNewData = true;
                         }
                     } catch (err) {
                         console.error(`Error pre-loading staff for ${vKey}:`, err);
@@ -573,13 +595,22 @@ const OverallStaffReport: React.FC = () => {
             });
             try {
                 await Promise.all(promises);
+                if (hasNewData) {
+                    setStaffData(prev => ({
+                        ...prev,
+                        ...newStaffData
+                    }));
+                    if (accumulatedEmployees.length > 0) {
+                        setRoleColumns(prev => discoverRoleColumns(accumulatedEmployees, prev));
+                    }
+                }
             } finally {
                 setPreloading(false);
             }
         };
 
         loadAllStaffData();
-    }, [reportData, fromDate, toDate]);
+    }, [reportData, fromDate, toDate, selectedTemplateId]);
 
     const handleToggleStaff = (name: string) => {
         setSelectedStaffFilters(prev => {
@@ -693,12 +724,7 @@ const OverallStaffReport: React.FC = () => {
     // Column Settings Dialog Anchor (Popover/Menu)
     const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
 
-    // Template states (Mocking backend templates support)
-    const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-    const [reportName, setReportName] = useState("");
-    const [parentReportName, setParentReportName] = useState("Overall Staff Report");
-    const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
-    const [isEditTemplate, setIsEditTemplate] = useState(false);
+
 
     // Save Template Handler
     const handleQuickSave = async () => {
@@ -968,14 +994,12 @@ const OverallStaffReport: React.FC = () => {
                 let totalTonnage = 0;
                 let totalCount = 0;
 
-                roleColumns.forEach(roleCol => {
-                    if (roleCol.key !== "Total_Tonnage" && roleCol.key !== "Invoice_Count" && roleCol.key !== "Total_Qty" && roleCol.key !== "Total_Count") {
-                        let sumVal = 0;
-                        filteredStaffList.forEach(sc => {
-                            sumVal += getStaffCellValue(sc, roleCol.key, roleCol.metric || "qty", qtyType, roleColumns);
-                        });
-                        roleSums[roleCol.key] = sumVal;
-                    }
+                roleColumns.filter(roleCol => roleCol.enabled && roleCol.key !== "Total_Tonnage" && roleCol.key !== "Invoice_Count" && roleCol.key !== "Total_Qty" && roleCol.key !== "Total_Count").forEach(roleCol => {
+                    let sumVal = 0;
+                    filteredStaffList.forEach(sc => {
+                        sumVal += getStaffCellValue(sc, roleCol.key, roleCol.metric || "qty", qtyType, roleColumns);
+                    });
+                    roleSums[roleCol.key] = sumVal;
                 });
 
                 let enabledQtySum = 0;
@@ -1045,14 +1069,12 @@ const OverallStaffReport: React.FC = () => {
                     let totalTonnage = 0;
                     let totalCount = 0;
 
-                    roleColumns.forEach(roleCol => {
-                        if (roleCol.key !== "Total_Tonnage" && roleCol.key !== "Invoice_Count" && roleCol.key !== "Total_Qty" && roleCol.key !== "Total_Count") {
-                            let sumVal = 0;
-                            filteredStaffList.forEach(sc => {
-                                sumVal += getStaffCellValue(sc, roleCol.key, roleCol.metric || "qty", qtyType, roleColumns);
-                            });
-                            roleSums[roleCol.key] = sumVal;
-                        }
+                    roleColumns.filter(roleCol => roleCol.enabled && roleCol.key !== "Total_Tonnage" && roleCol.key !== "Invoice_Count" && roleCol.key !== "Total_Qty" && roleCol.key !== "Total_Count").forEach(roleCol => {
+                        let sumVal = 0;
+                        filteredStaffList.forEach(sc => {
+                            sumVal += getStaffCellValue(sc, roleCol.key, roleCol.metric || "qty", qtyType, roleColumns);
+                        });
+                        roleSums[roleCol.key] = sumVal;
                     });
 
                     let enabledQtySum = 0;

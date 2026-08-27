@@ -277,7 +277,8 @@ const groupEmployeesList = (rawEmployees: any[]) => {
     const employeeMap: Record<string, any> = {};
 
     rawEmployees.forEach((row: any) => {
-        const empKey = row.Emp_Id ? String(row.Emp_Id) : 'unassigned';
+        // Group by Cost_Center_Name to prevent duplicate rows for the same person under different IDs (e.g. User ID vs Employee ID)
+        const empKey = row.Cost_Center_Name ? String(row.Cost_Center_Name).trim().toUpperCase() : 'unassigned';
         if (!employeeMap[empKey]) {
             employeeMap[empKey] = {
                 Emp_Id: row.Emp_Id,
@@ -292,6 +293,18 @@ const groupEmployeesList = (rawEmployees: any[]) => {
         }
 
         const emp = employeeMap[empKey];
+
+        // Prefer a valid non-zero/non-null employee ID and Cost_Center_Id over a system ID (like "0")
+        if (
+            (!emp.Emp_Id || emp.Emp_Id === "0" || String(emp.Cost_Center_Id) === "0") &&
+            row.Emp_Id &&
+            row.Emp_Id !== "0" &&
+            String(row.Cost_Center_Id) !== "0"
+        ) {
+            emp.Emp_Id = row.Emp_Id;
+            emp.Cost_Center_Id = row.Cost_Center_Id;
+        }
+
         const category = row.Cost_Category;
         if (category) {
             if (!emp.roleValues[category]) {
@@ -1257,13 +1270,13 @@ const OverallStaffReport: React.FC = () => {
                         Emp_Id_Is_Unassigned: empId ? 0 : 1
                     });
                     if (res.data.success) {
-                        // Group raw invoices by Voucher_Ref_Id
+                        // Group raw invoices by Inv_No (or fallback to Voucher_Ref_Id if Inv_No is missing) to prevent duplicate invoice groupings
                         const rawInvoices = res.data.data || [];
                         const groupedInvoices: any[] = [];
                         const groupMap: Record<string, any> = {};
 
                         rawInvoices.forEach((row: any) => {
-                            const refId = String(row.Voucher_Ref_Id);
+                            const refId = row.Inv_No ? String(row.Inv_No).trim().toUpperCase() : String(row.Voucher_Ref_Id);
                             if (!groupMap[refId]) {
                                 groupMap[refId] = {
                                     Voucher_Ref_Id: row.Voucher_Ref_Id,
@@ -1935,7 +1948,7 @@ const OverallStaffReport: React.FC = () => {
 
                                                         const invoiceRows = isStaffExpanded && hasInvoices ? (
                                                             invoicesList.map((inv: any, idx: number) => (
-                                                                <TableRow key={`${staffKey}_${inv.Voucher_Ref_Id}_${idx}`} sx={{ bgcolor: "#ffffff", "&:hover": { bgcolor: "#f8fafc" } }}>
+                                                                <TableRow key={`${staffKey}_${inv.Inv_No}_${idx}`} sx={{ bgcolor: "#ffffff", "&:hover": { bgcolor: "#f8fafc" } }}>
                                                                     <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} />
                                                                     <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} align="center" />
 

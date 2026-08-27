@@ -287,12 +287,17 @@ const groupEmployeesList = (rawEmployees: any[]) => {
                 Total_Qty: 0,
                 Total_Act_Qty: 0,
                 Invoice_Count: 0,
-                roleValues: {}
+                roleValues: {},
+                allEmpIds: []
             };
             groupedEmployees.push(employeeMap[empKey]);
         }
 
         const emp = employeeMap[empKey];
+
+        if (row.Emp_Id && !emp.allEmpIds.includes(row.Emp_Id)) {
+            emp.allEmpIds.push(row.Emp_Id);
+        }
 
         // Prefer a valid non-zero/non-null employee ID and Cost_Center_Id over a system ID (like "0")
         if (
@@ -1251,7 +1256,14 @@ const OverallStaffReport: React.FC = () => {
     }, [tableCategories, roleColumns]);
 
     // Toggle expand staff invoices inline & fetches invoices dynamically
-    const handleToggleExpandStaff = async (parentCategory: string, groupName: string, voucherName: string, empId: number, _staffName: string) => {
+    const handleToggleExpandStaff = async (
+        parentCategory: string,
+        groupName: string,
+        voucherName: string,
+        empId: number,
+        _staffName: string,
+        allEmpIds?: any[]
+    ) => {
         const vKey = `${parentCategory}_${groupName}_${voucherName}`;
         const staffKey = `${vKey}_${empId || 'unassigned'}`;
         const isExpanded = expandedStaff.includes(staffKey);
@@ -1260,55 +1272,64 @@ const OverallStaffReport: React.FC = () => {
             setExpandedStaff(prev => [...prev, staffKey]);
             if (!invoiceData[staffKey]) {
                 try {
-                    const res = await employeeReportGroupService.getEmployeeInvoices({
-                        Fromdate: fromDate,
-                        Todate: toDate,
-                        Overall_GroupName: parentCategory === "ADJUSTMENTS" ? "PROCESS" : parentCategory,
-                        Group_Name: groupName,
-                        Voucher_Type: voucherName,
-                        Emp_Id: empId || undefined,
-                        Emp_Id_Is_Unassigned: empId ? 0 : 1
+                    const empIds = allEmpIds && allEmpIds.length > 0 ? allEmpIds : [empId];
+                    const promises = empIds.map(id =>
+                        employeeReportGroupService.getEmployeeInvoices({
+                            Fromdate: fromDate,
+                            Todate: toDate,
+                            Overall_GroupName: parentCategory === "ADJUSTMENTS" ? "PROCESS" : parentCategory,
+                            Group_Name: groupName,
+                            Voucher_Type: voucherName,
+                            Emp_Id: id || undefined,
+                            Emp_Id_Is_Unassigned: id ? 0 : 1
+                        })
+                    );
+
+                    const responses = await Promise.all(promises);
+                    const rawInvoices: any[] = [];
+                    responses.forEach(res => {
+                        if (res.data.success && res.data.data) {
+                            rawInvoices.push(...res.data.data);
+                        }
                     });
-                    if (res.data.success) {
-                        // Group raw invoices by Inv_No (or fallback to Voucher_Ref_Id if Inv_No is missing) to prevent duplicate invoice groupings
-                        const rawInvoices = res.data.data || [];
-                        const groupedInvoices: any[] = [];
-                        const groupMap: Record<string, any> = {};
 
-                        rawInvoices.forEach((row: any) => {
-                            const refId = row.Inv_No ? String(row.Inv_No).trim().toUpperCase() : String(row.Voucher_Ref_Id);
-                            if (!groupMap[refId]) {
-                                groupMap[refId] = {
-                                    Voucher_Ref_Id: row.Voucher_Ref_Id,
-                                    Inv_No: row.Inv_No,
-                                    Voucher_Type: row.Voucher_Type,
-                                    Group_Name: row.Group_Name,
-                                    Overall_GroupName: row.Overall_GroupName,
-                                    Voucher_Date: row.Voucher_Date,
-                                    Cost_Center_Id: row.Cost_Center_Id,
-                                    Cost_Center_Name: row.Cost_Center_Name,
-                                    roleValues: {}
-                                };
-                                groupedInvoices.push(groupMap[refId]);
+                    // Group raw invoices by Inv_No (or fallback to Voucher_Ref_Id if Inv_No is missing) to prevent duplicate invoice groupings
+                    const groupedInvoices: any[] = [];
+                    const groupMap: Record<string, any> = {};
+
+                    rawInvoices.forEach((row: any) => {
+                        const refId = row.Inv_No ? String(row.Inv_No).trim().toUpperCase() : String(row.Voucher_Ref_Id);
+                        if (!groupMap[refId]) {
+                            groupMap[refId] = {
+                                Voucher_Ref_Id: row.Voucher_Ref_Id,
+                                Inv_No: row.Inv_No,
+                                Voucher_Type: row.Voucher_Type,
+                                Group_Name: row.Group_Name,
+                                Overall_GroupName: row.Overall_GroupName,
+                                Voucher_Date: row.Voucher_Date,
+                                Cost_Center_Id: row.Cost_Center_Id,
+                                Cost_Center_Name: row.Cost_Center_Name,
+                                roleValues: {}
+                            };
+                            groupedInvoices.push(groupMap[refId]);
+                        }
+
+                        const inv = groupMap[refId];
+                        const category = row.Cost_Category;
+                        if (category) {
+                            if (!inv.roleValues[category]) {
+                                inv.roleValues[category] = { qty: 0, actQty: 0, count: 0 };
                             }
+                            inv.roleValues[category].qty += Number(row.Bill_Qty) || 0;
+                            inv.roleValues[category].actQty += Number(row.Bill_Act_Qty ?? row.Act_Qty ?? row.Bill_Qty ?? 0) || 0;
+                            inv.roleValues[category].count = 1;
+                        }
+                    });
 
-                            const inv = groupMap[refId];
-                            const category = row.Cost_Category;
-                            if (category) {
-                                if (!inv.roleValues[category]) {
-                                    inv.roleValues[category] = { qty: 0, actQty: 0, count: 0 };
-                                }
-                                inv.roleValues[category].qty += Number(row.Bill_Qty) || 0;
-                                inv.roleValues[category].actQty += Number(row.Bill_Act_Qty ?? row.Act_Qty ?? row.Bill_Qty ?? 0) || 0;
-                                inv.roleValues[category].count = 1;
-                            }
-                        });
-
-                        setInvoiceData(prev => ({
-                            ...prev,
-                            [staffKey]: groupedInvoices
-                        }));
-                    }
+                    setInvoiceData(prev => ({
+                        ...prev,
+                        [staffKey]: groupedInvoices
+                    }));
                 } catch (err) {
                     console.error("Error loading employee invoices:", err);
                     toast.error("Failed to load invoices list");
@@ -1922,7 +1943,7 @@ const OverallStaffReport: React.FC = () => {
                                                                         pl: 4,
                                                                         "&:hover": { textDecoration: "underline" }
                                                                     }}
-                                                                    onClick={() => handleToggleExpandStaff(category.name, group.groupName, vt.name, sc.Emp_Id, sc.Cost_Center_Name)}
+                                                                    onClick={() => handleToggleExpandStaff(category.name, group.groupName, vt.name, sc.Emp_Id, sc.Cost_Center_Name, sc.allEmpIds)}
                                                                 >
                                                                     <Box display="flex" alignItems="center" gap={0.5}>
                                                                         {isStaffExpanded ? (

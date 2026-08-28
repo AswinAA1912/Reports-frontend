@@ -480,6 +480,8 @@ const StaffBasedGroupingReport: React.FC = () => {
     const [useActualQty, setUseActualQty] =
         useState(false);
 
+    console.log("RENDER:", { toggleMode, expandedPendingGrouping, abstractPendingGrouping, pendingGrouping });
+
     /* ================= LOAD EFFECT ================= */
 
     useEffect(() => {
@@ -2122,14 +2124,13 @@ const StaffBasedGroupingReport: React.FC = () => {
     /* ================= USE EFFECT (GROUP AUTO INIT) ================= */
 
     useEffect(() => {
+        console.log("AUTO-INIT EFFECT TRIGGERED:", { columnsLength: columns.length, toggleMode });
         if (!columns.length) return;
 
         // Existing template grouping
-        const templateGroups = columns
+        let templateGroups = columns
             .filter(
-                (col) =>
-                    col.key !== "Staff_Name" &&
-                    Number(col.groupBy || 0) > 0
+                (col) => Number(col.groupBy || 0) > 0
             )
             .sort(
                 (a, b) =>
@@ -2138,21 +2139,18 @@ const StaffBasedGroupingReport: React.FC = () => {
             )
             .map((col) => col.key);
 
-        // 🔥 Staff_Name always first level group
-        const autoGroupCols = [
-            "Staff_Name",
-            ...templateGroups.filter(
-                (x) => x !== "Staff_Name"
-            ),
-        ];
+        // If no template grouping exists, default to Staff_Name as first level
+        if (templateGroups.length === 0 && columns.some(c => c.key === "Staff_Name")) {
+            templateGroups = ["Staff_Name"];
+        }
 
         if (toggleMode === "Expanded") {
-            setExpandedGrouping(autoGroupCols);
-            setExpandedPendingGrouping(autoGroupCols);
+            setExpandedGrouping(templateGroups);
+            setExpandedPendingGrouping(templateGroups);
             setExpandedExpandedKeys([]);
         } else {
-            setAbstractGrouping(autoGroupCols);
-            setAbstractPendingGrouping(autoGroupCols);
+            setAbstractGrouping(templateGroups);
+            setAbstractPendingGrouping(templateGroups);
             setAbstractExpandedKeys([]);
         }
     }, [columns, toggleMode]);
@@ -2915,46 +2913,27 @@ const StaffBasedGroupingReport: React.FC = () => {
                             fullWidth
                             margin="dense"
                             label={`Level ${level + 1}`}
-                            value={
-                                level === 0
-                                    ? "Staff_Name"
-                                    : pendingGrouping[level] || ""
-                            }
+                            value={pendingGrouping[level] || ""}
                             onChange={e => {
-                                // Prevent editing level 1
-                                if (level === 0) return;
-
+                                console.log("SELECT ONCHANGE:", { level, value: e.target.value, currentPendingGrouping: pendingGrouping });
                                 const copy = [...pendingGrouping];
                                 copy[level] = e.target.value;
                                 setPendingGrouping(copy);
                             }}
-                            disabled={level === 0}
                         >
-                            {level === 0 ? (
-                                <MenuItem value="Staff_Name">
-                                    Staff Name (Always Grouped)
-                                </MenuItem>
-                            ) : (
-                                <>
-                                    <MenuItem value="">
-                                        No Grouping (Level {level + 1})
-                                    </MenuItem>
+                            <MenuItem value="">
+                                No Grouping (Level {level + 1})
+                            </MenuItem>
 
-                                    {enabledColumns
-                                        .filter(
-                                            col => col.key !== "Staff_Name"
-                                        )
-                                        .map(col => (
-                                            <MenuItem
-                                                key={col.key}
-                                                value={col.key}
-                                                disabled={pendingGrouping.includes(col.key)}
-                                            >
-                                                {col.label}
-                                            </MenuItem>
-                                        ))}
-                                </>
-                            )}
+                            {enabledColumns.map(col => (
+                                <MenuItem
+                                    key={col.key}
+                                    value={col.key}
+                                    disabled={pendingGrouping.includes(col.key) && pendingGrouping[level] !== col.key}
+                                >
+                                    {col.label}
+                                </MenuItem>
+                            ))}
                         </TextField>
                     ))}
                 </DialogContent>
@@ -2968,12 +2947,19 @@ const StaffBasedGroupingReport: React.FC = () => {
                         variant="contained"
                         color="info"
                         onClick={() => {
-                            setGrouping([
-                                "Staff_Name",
-                                ...pendingGrouping.filter(
-                                    x => x && x !== "Staff_Name"
-                                ),
-                            ]);
+                            const nextGrouping = pendingGrouping.filter(Boolean);
+                            setGrouping(nextGrouping);
+
+                            // Sync columns groupBy values with the applied grouping
+                            setColumns((prevCols) =>
+                                prevCols.map((col) => {
+                                    const groupIdx = nextGrouping.indexOf(col.key);
+                                    return {
+                                        ...col,
+                                        groupBy: groupIdx !== -1 ? groupIdx + 1 : 0,
+                                    };
+                                })
+                            );
 
                             setExpandedKeys([]);
                             setGroupDialogOpen(false);

@@ -58,7 +58,7 @@ export interface ColumnConfig {
     label: string;
     enabled: boolean;
     order: number;
-    metric?: "qty" | "count";
+    metric?: "qty" | "count" | "item_count";
 }
 
 // Configurable role columns matching backend stored procedure columns exactly
@@ -141,14 +141,14 @@ const getColumnLabel = (col: ColumnConfig) => {
     if (col.key === "Total_Tonnage" || col.key === "Invoice_Count") {
         return col.label;
     }
-    const metricLabel = col.metric === "count" ? "Count" : "Qty";
+    const metricLabel = col.metric === "item_count" ? "Item Count" : (col.metric === "count" ? "Inv Count" : "Qty");
     return `${col.label} (${metricLabel})`;
 };
 
 interface SortableColumnRowProps {
     column: ColumnConfig;
     onToggle: (key: string) => void;
-    onChangeMetric: (key: string, metric: "qty" | "count") => void;
+    onChangeMetric: (key: string, metric: "qty" | "count" | "item_count") => void;
 }
 
 const SortableColumnRow: React.FC<SortableColumnRowProps> = ({ column, onToggle, onChangeMetric }) => {
@@ -201,12 +201,13 @@ const SortableColumnRow: React.FC<SortableColumnRowProps> = ({ column, onToggle,
             {column.key !== "Total_Tonnage" && column.key !== "Invoice_Count" && (
                 <Select
                     value={column.metric || "qty"}
-                    onChange={(e) => onChangeMetric(column.key, e.target.value as "qty" | "count")}
+                    onChange={(e) => onChangeMetric(column.key, e.target.value as "qty" | "count" | "item_count")}
                     size="small"
                     sx={{ minWidth: 80, height: 28, fontSize: "0.75rem" }}
                 >
                     <MenuItem value="qty" sx={{ fontSize: "0.75rem" }}>Qty</MenuItem>
-                    <MenuItem value="count" sx={{ fontSize: "0.75rem" }}>Count</MenuItem>
+                    <MenuItem value="count" sx={{ fontSize: "0.75rem" }}>Inv Count</MenuItem>
+                    <MenuItem value="item_count" sx={{ fontSize: "0.75rem" }}>Item Count</MenuItem>
                 </Select>
             )}
         </Box>
@@ -217,23 +218,29 @@ const SortableColumnRow: React.FC<SortableColumnRowProps> = ({ column, onToggle,
 const getStaffCellValue = (
     sc: any,
     colKey: string,
-    metric: "qty" | "count",
+    metric: "qty" | "count" | "item_count",
     qtyType: "Qty" | "Act_Qty" = "Qty",
     roleColumns?: ColumnConfig[]
 ) => {
     if (colKey === "Total_Tonnage") {
-        return metric === "qty"
-            ? (qtyType === "Act_Qty" ? (sc.Total_Act_Qty || 0) : (sc.Total_Qty || 0))
-            : (sc.Invoice_Count || 0);
+        if (metric === "qty") {
+            return qtyType === "Act_Qty" ? (sc.Total_Act_Qty || 0) : (sc.Total_Qty || 0);
+        } else if (metric === "count") {
+            return sc.Invoice_Count || 0;
+        } else if (metric === "item_count") {
+            return sc.Item_Count || 0;
+        }
     }
-    if (colKey === "Invoice_Count") {
-        return metric === "qty" ? 0 : (sc.Invoice_Count || 0);
+    if (colKey === "Invoice_Count" || colKey === "Total_Count") {
+        if (metric === "qty") return 0;
+        if (metric === "count") return sc.Invoice_Count || 0;
+        if (metric === "item_count") return sc.Item_Count || 0;
     }
     if (colKey === "Total_Qty") {
         if (roleColumns) {
             let total = 0;
             roleColumns
-                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.metric !== "count")
+                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "qty")
                 .forEach(c => {
                     total += getStaffCellValue(sc, c.key, "qty", qtyType);
                 });
@@ -241,13 +248,13 @@ const getStaffCellValue = (
         }
         return 0;
     }
-    if (colKey === "Total_Count") {
+    if (colKey === "Total_Item_Count") {
         if (roleColumns) {
             let total = 0;
             roleColumns
-                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.metric === "count")
+                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "item_count")
                 .forEach(c => {
-                    total += getStaffCellValue(sc, c.key, "count", qtyType);
+                    total += getStaffCellValue(sc, c.key, "item_count", qtyType);
                 });
             return total;
         }
@@ -256,16 +263,24 @@ const getStaffCellValue = (
     if (sc.roleValues && colKey) {
         const directVal = sc.roleValues[colKey];
         if (directVal !== undefined) {
-            return metric === "qty"
-                ? (qtyType === "Act_Qty" ? (directVal.actQty || 0) : (directVal.qty || 0))
-                : (directVal.count || 0);
+            if (metric === "qty") {
+                return qtyType === "Act_Qty" ? (directVal.actQty || 0) : (directVal.qty || 0);
+            } else if (metric === "count") {
+                return directVal.count || 0;
+            } else if (metric === "item_count") {
+                return directVal.itemCount || 0;
+            }
         }
         const matchedKey = Object.keys(sc.roleValues).find(k => k.toUpperCase() === colKey.toUpperCase());
         if (matchedKey) {
             const catVal = sc.roleValues[matchedKey];
-            return metric === "qty"
-                ? (qtyType === "Act_Qty" ? (catVal.actQty || 0) : (catVal.qty || 0))
-                : (catVal.count || 0);
+            if (metric === "qty") {
+                return qtyType === "Act_Qty" ? (catVal.actQty || 0) : (catVal.qty || 0);
+            } else if (metric === "count") {
+                return catVal.count || 0;
+            } else if (metric === "item_count") {
+                return catVal.itemCount || 0;
+            }
         }
     }
     return 0;
@@ -287,6 +302,7 @@ const groupEmployeesList = (rawEmployees: any[]) => {
                 Total_Qty: 0,
                 Total_Act_Qty: 0,
                 Invoice_Count: 0,
+                Item_Count: 0,
                 roleValues: {},
                 allEmpIds: []
             };
@@ -313,15 +329,17 @@ const groupEmployeesList = (rawEmployees: any[]) => {
         const category = row.Cost_Category;
         if (category) {
             if (!emp.roleValues[category]) {
-                emp.roleValues[category] = { qty: 0, actQty: 0, count: 0 };
+                emp.roleValues[category] = { qty: 0, actQty: 0, count: 0, itemCount: 0 };
             }
             emp.roleValues[category].qty += Number(row.Total_Qty) || 0;
             emp.roleValues[category].actQty += Number(row.Total_Act_Qty ?? row.Act_Qty ?? row.Total_Qty ?? 0) || 0;
             emp.roleValues[category].count += Number(row.Invoice_Count) || 0;
+            emp.roleValues[category].itemCount += Number(row.Item_Count) || 0;
         }
         emp.Total_Qty += Number(row.Total_Qty) || 0;
         emp.Total_Act_Qty += Number(row.Total_Act_Qty ?? row.Act_Qty ?? row.Total_Qty ?? 0) || 0;
         emp.Invoice_Count += Number(row.Invoice_Count) || 0;
+        emp.Item_Count += Number(row.Item_Count) || 0;
     });
 
     return groupedEmployees;
@@ -331,7 +349,7 @@ const groupEmployeesList = (rawEmployees: any[]) => {
 const getInvoiceCellValue = (
     inv: any,
     colKey: string,
-    metric: "qty" | "count",
+    metric: "qty" | "count" | "item_count",
     qtyType: "Qty" | "Act_Qty" = "Qty",
     roleColumns?: ColumnConfig[]
 ) => {
@@ -341,7 +359,7 @@ const getInvoiceCellValue = (
             Object.values(inv.roleValues).forEach((val: any) => {
                 total += metric === "qty"
                     ? (qtyType === "Act_Qty" ? (val.actQty || 0) : (val.qty || 0))
-                    : (val.count || 0);
+                    : (metric === "count" ? (val.count || 0) : (val.itemCount || 0));
             });
         }
         return total;
@@ -350,7 +368,7 @@ const getInvoiceCellValue = (
         let total = 0;
         if (inv.roleValues) {
             Object.values(inv.roleValues).forEach((val: any) => {
-                total += metric === "qty" ? 0 : (val.count || 0);
+                total += metric === "qty" ? 0 : (metric === "count" ? (val.count || 0) : (val.itemCount || 0));
             });
         }
         return total;
@@ -359,7 +377,7 @@ const getInvoiceCellValue = (
         if (roleColumns) {
             let total = 0;
             roleColumns
-                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.metric !== "count")
+                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "qty")
                 .forEach(c => {
                     total += getInvoiceCellValue(inv, c.key, "qty", qtyType);
                 });
@@ -371,9 +389,21 @@ const getInvoiceCellValue = (
         if (roleColumns) {
             let total = 0;
             roleColumns
-                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.metric === "count")
+                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "count")
                 .forEach(c => {
                     total += getInvoiceCellValue(inv, c.key, "count", qtyType);
+                });
+            return total;
+        }
+        return 0;
+    }
+    if (colKey === "Total_Item_Count") {
+        if (roleColumns) {
+            let total = 0;
+            roleColumns
+                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "item_count")
+                .forEach(c => {
+                    total += getInvoiceCellValue(inv, c.key, "item_count", qtyType);
                 });
             return total;
         }
@@ -384,16 +414,24 @@ const getInvoiceCellValue = (
     if (inv.roleValues) {
         const directVal = inv.roleValues[colKey];
         if (directVal !== undefined) {
-            return metric === "qty"
-                ? (qtyType === "Act_Qty" ? (directVal.actQty || 0) : (directVal.qty || 0))
-                : (directVal.count || 0);
+            if (metric === "qty") {
+                return qtyType === "Act_Qty" ? (directVal.actQty || 0) : (directVal.qty || 0);
+            } else if (metric === "count") {
+                return directVal.count || 0;
+            } else if (metric === "item_count") {
+                return directVal.itemCount || 0;
+            }
         }
         const matchedKey = Object.keys(inv.roleValues).find(k => k.toUpperCase() === colKey.toUpperCase());
         if (matchedKey) {
             const val = inv.roleValues[matchedKey];
-            return metric === "qty"
-                ? (qtyType === "Act_Qty" ? (val.actQty || 0) : (val.qty || 0))
-                : (val.count || 0);
+            if (metric === "qty") {
+                return qtyType === "Act_Qty" ? (val.actQty || 0) : (val.qty || 0);
+            } else if (metric === "count") {
+                return val.count || 0;
+            } else if (metric === "item_count") {
+                return val.itemCount || 0;
+            }
         }
     }
     return 0;
@@ -401,7 +439,7 @@ const getInvoiceCellValue = (
 
 const getFilteredStaffByCategories = (staffList: any[], roleColumns: ColumnConfig[], qtyType: "Qty" | "Act_Qty" = "Qty") => {
     const enabledCategoryKeys = roleColumns
-        .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count")
+        .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count")
         .map(c => c.key.toUpperCase());
 
     if (enabledCategoryKeys.length === 0) {
@@ -494,7 +532,7 @@ const OverallStaffReport: React.FC = () => {
     const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
     const [isEditTemplate, setIsEditTemplate] = useState(false);
 
-    const handleChangeMetric = (key: string, metric: "qty" | "count") => {
+    const handleChangeMetric = (key: string, metric: "qty" | "count" | "item_count") => {
         setRoleColumns(p => p.map(col => col.key === key ? { ...col, metric } : col));
     };
 
@@ -836,7 +874,7 @@ const OverallStaffReport: React.FC = () => {
                 const enabled = matched.enabled ?? matched.Enabled ?? false;
                 const order = matched.order ?? matched.Order ?? idx;
                 const dataType = matched.dataType || matched.DataType || "qty";
-                const metric = (dataType === "qty" || dataType === "count") ? dataType : "qty";
+                const metric = (dataType === "qty" || dataType === "count" || dataType === "item_count") ? dataType : "qty";
 
                 return {
                     key,
@@ -1012,7 +1050,7 @@ const OverallStaffReport: React.FC = () => {
                 let totalTonnage = 0;
                 let totalCount = 0;
 
-                roleColumns.filter(roleCol => roleCol.enabled && roleCol.key !== "Total_Tonnage" && roleCol.key !== "Invoice_Count" && roleCol.key !== "Total_Qty" && roleCol.key !== "Total_Count").forEach(roleCol => {
+                roleColumns.filter(roleCol => roleCol.enabled && roleCol.key !== "Total_Tonnage" && roleCol.key !== "Invoice_Count" && roleCol.key !== "Total_Qty" && roleCol.key !== "Total_Count" && roleCol.key !== "Total_Item_Count").forEach(roleCol => {
                     let sumVal = 0;
                     filteredStaffList.forEach(sc => {
                         sumVal += getStaffCellValue(sc, roleCol.key, roleCol.metric || "qty", qtyType, roleColumns);
@@ -1022,10 +1060,13 @@ const OverallStaffReport: React.FC = () => {
 
                 let enabledQtySum = 0;
                 let enabledCountSum = 0;
+                let enabledItemCountSum = 0;
                 roleColumns.forEach(col => {
-                    if (col.enabled && col.key !== "Total_Tonnage" && col.key !== "Invoice_Count" && col.key !== "Total_Qty" && col.key !== "Total_Count") {
+                    if (col.enabled && col.key !== "Total_Tonnage" && col.key !== "Invoice_Count" && col.key !== "Total_Qty" && col.key !== "Total_Count" && col.key !== "Total_Item_Count") {
                         if (col.metric === "count") {
                             enabledCountSum += roleSums[col.key] || 0;
+                        } else if (col.metric === "item_count") {
+                            enabledItemCountSum += roleSums[col.key] || 0;
                         } else {
                             enabledQtySum += roleSums[col.key] || 0;
                         }
@@ -1034,11 +1075,13 @@ const OverallStaffReport: React.FC = () => {
 
                 roleSums["Total_Qty"] = enabledQtySum;
                 roleSums["Total_Count"] = enabledCountSum;
+                roleSums["Total_Item_Count"] = enabledItemCountSum;
 
                 roleSums["Total_Tonnage"] = qtyType === "Act_Qty"
                     ? (r.Total_Act_Tonnage ?? r.Act_Total_Tonnage ?? r.Total_Act_Qty ?? r.Total_Tonnage ?? 0)
                     : (r.Total_Tonnage || 0);
                 roleSums["Invoice_Count"] = r.Invoice_Count || 0;
+                roleSums["Item_Count"] = r.Item_Count || 0;
 
                 totalTonnage = roleSums["Total_Tonnage"];
                 totalCount = roleSums["Invoice_Count"];
@@ -1087,7 +1130,7 @@ const OverallStaffReport: React.FC = () => {
                     let totalTonnage = 0;
                     let totalCount = 0;
 
-                    roleColumns.filter(roleCol => roleCol.enabled && roleCol.key !== "Total_Tonnage" && roleCol.key !== "Invoice_Count" && roleCol.key !== "Total_Qty" && roleCol.key !== "Total_Count").forEach(roleCol => {
+                    roleColumns.filter(roleCol => roleCol.enabled && roleCol.key !== "Total_Tonnage" && roleCol.key !== "Invoice_Count" && roleCol.key !== "Total_Qty" && roleCol.key !== "Total_Count" && roleCol.key !== "Total_Item_Count").forEach(roleCol => {
                         let sumVal = 0;
                         filteredStaffList.forEach(sc => {
                             sumVal += getStaffCellValue(sc, roleCol.key, roleCol.metric || "qty", qtyType, roleColumns);
@@ -1097,10 +1140,13 @@ const OverallStaffReport: React.FC = () => {
 
                     let enabledQtySum = 0;
                     let enabledCountSum = 0;
+                    let enabledItemCountSum = 0;
                     roleColumns.forEach(col => {
-                        if (col.enabled && col.key !== "Total_Tonnage" && col.key !== "Invoice_Count" && col.key !== "Total_Qty" && col.key !== "Total_Count") {
+                        if (col.enabled && col.key !== "Total_Tonnage" && col.key !== "Invoice_Count" && col.key !== "Total_Qty" && col.key !== "Total_Count" && col.key !== "Total_Item_Count") {
                             if (col.metric === "count") {
                                 enabledCountSum += roleSums[col.key] || 0;
+                            } else if (col.metric === "item_count") {
+                                enabledItemCountSum += roleSums[col.key] || 0;
                             } else {
                                 enabledQtySum += roleSums[col.key] || 0;
                             }
@@ -1109,11 +1155,13 @@ const OverallStaffReport: React.FC = () => {
 
                     roleSums["Total_Qty"] = enabledQtySum;
                     roleSums["Total_Count"] = enabledCountSum;
+                    roleSums["Total_Item_Count"] = enabledItemCountSum;
 
                     roleSums["Total_Tonnage"] = qtyType === "Act_Qty"
                         ? (r.Total_Act_Tonnage ?? r.Act_Total_Tonnage ?? r.Total_Act_Qty ?? r.Total_Tonnage ?? 0)
                         : (r.Total_Tonnage || 0);
                     roleSums["Invoice_Count"] = r.Invoice_Count || 0;
+                    roleSums["Item_Count"] = r.Item_Count || 0;
 
                     totalTonnage = roleSums["Total_Tonnage"];
                     totalCount = roleSums["Invoice_Count"];
@@ -1220,13 +1268,16 @@ const OverallStaffReport: React.FC = () => {
             });
         });
 
-        // Calculate grand totals for Total_Qty and Total_Count based on enabled columns
+        // Calculate grand totals for Total_Qty, Total_Count, and Total_Item_Count based on enabled columns
         let enabledQtyGrandSum = 0;
         let enabledCountGrandSum = 0;
+        let enabledItemCountGrandSum = 0;
         roleColumns.forEach(c => {
-            if (c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count") {
+            if (c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count") {
                 if (c.metric === "count") {
                     enabledCountGrandSum += roleTotals[c.key] || 0;
+                } else if (c.metric === "item_count") {
+                    enabledItemCountGrandSum += roleTotals[c.key] || 0;
                 } else {
                     enabledQtyGrandSum += roleTotals[c.key] || 0;
                 }
@@ -1235,6 +1286,7 @@ const OverallStaffReport: React.FC = () => {
 
         roleTotals["Total_Qty"] = enabledQtyGrandSum;
         roleTotals["Total_Count"] = enabledCountGrandSum;
+        roleTotals["Total_Item_Count"] = enabledItemCountGrandSum;
 
         let dynamicQtyTotal = 0;
         let dynamicCountTotal = 0;
@@ -1318,11 +1370,12 @@ const OverallStaffReport: React.FC = () => {
                         const category = row.Cost_Category;
                         if (category) {
                             if (!inv.roleValues[category]) {
-                                inv.roleValues[category] = { qty: 0, actQty: 0, count: 0 };
+                                inv.roleValues[category] = { qty: 0, actQty: 0, count: 0, itemCount: 0 };
                             }
                             inv.roleValues[category].qty += Number(row.Bill_Qty) || 0;
                             inv.roleValues[category].actQty += Number(row.Bill_Act_Qty ?? row.Act_Qty ?? row.Bill_Qty ?? 0) || 0;
                             inv.roleValues[category].count = 1;
+                            inv.roleValues[category].itemCount += Number(row.Item_Count) || 0;
                         }
                     });
 
@@ -1369,7 +1422,7 @@ const OverallStaffReport: React.FC = () => {
     };
 
     const handleExportExcel = () => {
-        const enabledRoles = roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count").sort((a, b) => a.order - b.order);
+        const enabledRoles = roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order);
         const rows: any[] = [];
 
         tableCategories.forEach((category) => {
@@ -1388,7 +1441,8 @@ const OverallStaffReport: React.FC = () => {
                     vtRow["Voucher Type"] = vt.name;
                     vtRow["Voucher Kgs"] = vt.baseKgs;
                     vtRow["Total Qty"] = vt.roleSums["Total_Qty"] || 0;
-                    vtRow["Total Count"] = vt.roleSums["Total_Count"] || 0;
+                    vtRow["Total Inv Count"] = vt.roleSums["Total_Count"] || 0;
+                    vtRow["Total Item Count"] = vt.roleSums["Total_Item_Count"] || 0;
                     vtRow["Staff Name / Inv No"] = "-";
                     enabledRoles.forEach(col => {
                         const val = vt.roleSums[col.key] || 0;
@@ -1410,7 +1464,8 @@ const OverallStaffReport: React.FC = () => {
                             staffRow["Voucher Type"] = "";
                             staffRow["Voucher Kgs"] = "";
                             staffRow["Total Qty"] = getStaffCellValue(sc, "Total_Qty", "qty", qtyType, roleColumns);
-                            staffRow["Total Count"] = getStaffCellValue(sc, "Total_Count", "count", qtyType, roleColumns);
+                            staffRow["Total Inv Count"] = getStaffCellValue(sc, "Total_Count", "count", qtyType, roleColumns);
+                            staffRow["Total Item Count"] = getStaffCellValue(sc, "Total_Item_Count", "item_count", qtyType, roleColumns);
                             staffRow["Staff Name / Inv No"] = sc.Cost_Center_Name || "Unassigned";
                             enabledRoles.forEach(col => {
                                 const val = getStaffCellValue(sc, col.key, col.metric || "qty", qtyType, roleColumns);
@@ -1428,7 +1483,8 @@ const OverallStaffReport: React.FC = () => {
                                     invRow["Voucher Type"] = "";
                                     invRow["Voucher Kgs"] = "";
                                     invRow["Total Qty"] = getInvoiceCellValue(inv, "Total_Qty", "qty", qtyType, roleColumns);
-                                    invRow["Total Count"] = getInvoiceCellValue(inv, "Total_Count", "count", qtyType, roleColumns);
+                                    invRow["Total Inv Count"] = getInvoiceCellValue(inv, "Total_Count", "count", qtyType, roleColumns);
+                                    invRow["Total Item Count"] = getInvoiceCellValue(inv, "Total_Item_Count", "item_count", qtyType, roleColumns);
                                     invRow["Staff Name / Inv No"] = inv.Inv_No;
                                     enabledRoles.forEach(col => {
                                         const val = getInvoiceCellValue(inv, col.key, col.metric || "qty", qtyType, roleColumns);
@@ -1451,7 +1507,8 @@ const OverallStaffReport: React.FC = () => {
         grandRow["Voucher Type"] = "";
         grandRow["Voucher Kgs"] = "";
         grandRow["Total Qty"] = grandTotals.roleTotals["Total_Qty"] || 0;
-        grandRow["Total Count"] = grandTotals.roleTotals["Total_Count"] || 0;
+        grandRow["Total Inv Count"] = grandTotals.roleTotals["Total_Count"] || 0;
+        grandRow["Total Item Count"] = grandTotals.roleTotals["Total_Item_Count"] || 0;
         grandRow["Staff Name / Inv No"] = "";
         enabledRoles.forEach(col => {
             grandRow[getColumnLabel(col)] = grandTotals.roleTotals[col.key] || 0;
@@ -1473,11 +1530,12 @@ const OverallStaffReport: React.FC = () => {
             "Voucher Type",
             "Voucher Kgs",
             "Total Qty",
-            "Total Count",
+            "Total Inv Count",
+            "Total Item Count",
             "Staff Name / Inv No"
         ];
 
-        const enabledRoles = roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count").sort((a, b) => a.order - b.order);
+        const enabledRoles = roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order);
         enabledRoles.forEach(col => {
             cols.push(getColumnLabel(col));
         });
@@ -1501,6 +1559,7 @@ const OverallStaffReport: React.FC = () => {
                         vt.baseKgs.toLocaleString(),
                         (vt.roleSums["Total_Qty"] || 0).toLocaleString(),
                         (vt.roleSums["Total_Count"] || 0).toLocaleString(),
+                        (vt.roleSums["Total_Item_Count"] || 0).toLocaleString(),
                         "-"
                     ];
                     enabledRoles.forEach(col => {
@@ -1525,6 +1584,7 @@ const OverallStaffReport: React.FC = () => {
                                 "",
                                 getStaffCellValue(sc, "Total_Qty", "qty", qtyType, roleColumns).toLocaleString(),
                                 getStaffCellValue(sc, "Total_Count", "count", qtyType, roleColumns).toLocaleString(),
+                                getStaffCellValue(sc, "Total_Item_Count", "item_count", qtyType, roleColumns).toLocaleString(),
                                 sc.Cost_Center_Name || "Unassigned"
                             ];
                             enabledRoles.forEach(col => {
@@ -1544,6 +1604,7 @@ const OverallStaffReport: React.FC = () => {
                                         "",
                                         getInvoiceCellValue(inv, "Total_Qty", "qty", qtyType, roleColumns).toLocaleString(),
                                         getInvoiceCellValue(inv, "Total_Count", "count", qtyType, roleColumns).toLocaleString(),
+                                        getInvoiceCellValue(inv, "Total_Item_Count", "item_count", qtyType, roleColumns).toLocaleString(),
                                         inv.Inv_No
                                     ];
                                     enabledRoles.forEach(col => {
@@ -1568,6 +1629,7 @@ const OverallStaffReport: React.FC = () => {
             "",
             (grandTotals.roleTotals["Total_Qty"] || 0).toLocaleString(),
             (grandTotals.roleTotals["Total_Count"] || 0).toLocaleString(),
+            (grandTotals.roleTotals["Total_Item_Count"] || 0).toLocaleString(),
             ""
         ];
         enabledRoles.forEach(col => {
@@ -1712,7 +1774,10 @@ const OverallStaffReport: React.FC = () => {
                                         Total Qty
                                     </TableCell>
                                     <TableCell sx={headerCellSx} align="center">
-                                        Total Count
+                                        Total Inv Count
+                                    </TableCell>
+                                    <TableCell sx={headerCellSx} align="center">
+                                        Total Item Count
                                     </TableCell>
                                     <TableCell
                                         sx={{
@@ -1725,7 +1790,7 @@ const OverallStaffReport: React.FC = () => {
                                         STAFF NAME
                                     </TableCell>
 
-                                    {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count").sort((a, b) => a.order - b.order).map(col => (
+                                    {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => (
                                         <TableCell key={col.key} sx={headerCellSx} align="center">
                                             {getColumnLabel(col)}
                                         </TableCell>
@@ -1747,8 +1812,11 @@ const OverallStaffReport: React.FC = () => {
                                     <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
                                         {grandTotals.roleTotals["Total_Count"].toLocaleString()}
                                     </TableCell>
+                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
+                                        {(grandTotals.roleTotals["Total_Item_Count"] || 0).toLocaleString()}
+                                    </TableCell>
                                     <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #93c5fd" }} />
-                                    {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count").sort((a, b) => a.order - b.order).map(col => (
+                                    {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => (
                                         <TableCell key={col.key} sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
                                             {grandTotals.roleTotals[col.key].toLocaleString()}
                                         </TableCell>
@@ -1894,12 +1962,15 @@ const OverallStaffReport: React.FC = () => {
                                                         <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
                                                             {(vt.roleSums["Total_Count"] || 0).toLocaleString()}
                                                         </TableCell>
+                                                        <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
+                                                            {(vt.roleSums["Total_Item_Count"] || 0).toLocaleString()}
+                                                        </TableCell>
 
                                                         <TableCell sx={{ fontStyle: "italic", color: "text.secondary", borderRight: "1px solid #cbd5e1", py: 1 }} align="center">
                                                             -
                                                         </TableCell>
 
-                                                        {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count").sort((a, b) => a.order - b.order).map(col => {
+                                                        {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => {
                                                             const value = vt.roleSums[col.key] || 0;
                                                             return (
                                                                 <TableCell key={col.key} sx={{ fontWeight: 800, borderRight: "1px solid #cbd5e1", py: 1, bgcolor: "#f1f5f9" }} align="center">
@@ -1919,19 +1990,19 @@ const OverallStaffReport: React.FC = () => {
                                                         const isStaffExpanded = expandedStaff.includes(staffKey);
                                                         const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns, qtyType);
                                                         const hasInvoices = invoicesList.length > 0;
-
                                                         const staffRow = (
                                                             <TableRow key={sc.Cost_Center_Id || sc.Cost_Center_Name} sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
                                                                 <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} />
-                                                                <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} align="center" />
-
+                                                                <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} />
                                                                 <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
                                                                     {getStaffCellValue(sc, "Total_Qty", "qty", qtyType, roleColumns).toLocaleString()}
                                                                 </TableCell>
                                                                 <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
                                                                     {getStaffCellValue(sc, "Total_Count", "count", qtyType, roleColumns).toLocaleString()}
                                                                 </TableCell>
-
+                                                                <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
+                                                                    {getStaffCellValue(sc, "Total_Item_Count", "item_count", qtyType, roleColumns).toLocaleString()}
+                                                                </TableCell>
                                                                 <TableCell
                                                                     sx={{
                                                                         fontWeight: 650,
@@ -1954,9 +2025,8 @@ const OverallStaffReport: React.FC = () => {
                                                                         {sc.Cost_Center_Name}
                                                                     </Box>
                                                                 </TableCell>
-
-                                                                {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count").sort((a, b) => a.order - b.order).map(col => {
-                                                                    const metric: "qty" | "count" = col.metric || "qty";
+                                                                {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => {
+                                                                    const metric: "qty" | "count" | "item_count" = col.metric || "qty";
                                                                     const roleVal = getStaffCellValue(sc, col.key, metric, qtyType, roleColumns);
                                                                     return (
                                                                         <TableCell key={col.key} sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
@@ -1966,20 +2036,20 @@ const OverallStaffReport: React.FC = () => {
                                                                 })}
                                                             </TableRow>
                                                         );
-
                                                         const invoiceRows = isStaffExpanded && hasInvoices ? (
                                                             invoicesList.map((inv: any, idx: number) => (
                                                                 <TableRow key={`${staffKey}_${inv.Inv_No}_${idx}`} sx={{ bgcolor: "#ffffff", "&:hover": { bgcolor: "#f8fafc" } }}>
                                                                     <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} />
-                                                                    <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} align="center" />
-
+                                                                    <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} />
                                                                     <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
                                                                         {getInvoiceCellValue(inv, "Total_Qty", "qty", qtyType, roleColumns).toLocaleString()}
                                                                     </TableCell>
                                                                     <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
                                                                         {getInvoiceCellValue(inv, "Total_Count", "count", qtyType, roleColumns).toLocaleString()}
                                                                     </TableCell>
-
+                                                                    <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
+                                                                        {getInvoiceCellValue(inv, "Total_Item_Count", "item_count", qtyType, roleColumns).toLocaleString()}
+                                                                    </TableCell>
                                                                     <TableCell
                                                                         sx={{
                                                                             color: "#334155",
@@ -1991,9 +2061,8 @@ const OverallStaffReport: React.FC = () => {
                                                                     >
                                                                         {inv.Inv_No}
                                                                     </TableCell>
-
-                                                                    {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count").sort((a, b) => a.order - b.order).map(col => {
-                                                                        const metric: "qty" | "count" = col.metric || "qty";
+                                                                    {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => {
+                                                                        const metric: "qty" | "count" | "item_count" = col.metric || "qty";
                                                                         const val = getInvoiceCellValue(inv, col.key, metric, qtyType, roleColumns);
                                                                         return (
                                                                             <TableCell
@@ -2013,7 +2082,6 @@ const OverallStaffReport: React.FC = () => {
                                                                 </TableRow>
                                                             ))
                                                         ) : null;
-
                                                         return (
                                                             <React.Fragment key={sc.Emp_Id || sc.Cost_Center_Name}>
                                                                 {staffRow}
@@ -2034,7 +2102,7 @@ const OverallStaffReport: React.FC = () => {
                                     })
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={8 + roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count").length} align="center" sx={{ py: 6 }}>
+                                        <TableCell colSpan={9 + roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").length} align="center" sx={{ py: 6 }}>
                                             No records found.
                                         </TableCell>
                                     </TableRow>

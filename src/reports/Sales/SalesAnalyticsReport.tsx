@@ -49,6 +49,7 @@ import { CSS } from "@dnd-kit/utilities";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import { SalesReportLedgerService, SalesReportItemService, } from "../../services/SalesReport.service";
 import { SettingsService } from "../../services/reportSettings.services";
+import { lollosColumnsService } from "../../services/lollosColumns.service";
 
 const ABSTRACT_DEFAULT_KEYS = [
     "Y1",
@@ -137,7 +138,9 @@ const normalizeKey = (k: string) =>
 
 const buildColumnsFromApi = (
     rows: any[],
-    mode: "Abstract" | "Expanded"
+    mode: "Abstract" | "Expanded",
+    lolColumns: any[],
+    losColumns: any[]
 ): ColumnConfig[] => {
     if (!rows.length) return [];
 
@@ -146,18 +149,29 @@ const buildColumnsFromApi = (
             ? ABSTRACT_DEFAULT_KEYS
             : EXPANDED_DEFAULT_KEYS;
 
-    return Object.keys(rows[0]).map((key, index) => ({
-        key,
-        label: key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-        enabled: defaults.includes(key),
+    const mappingCols = mode === "Abstract" ? lolColumns : losColumns;
 
-        // ✅ FIX HERE
-        isNumeric:
-            NUMERIC_KEYS.some(n => normalizeKey(n) === normalizeKey(key)) ||
-            rows.some(r => !isNaN(Number(r[key]))),
+    return Object.keys(rows[0]).map((key, index) => {
+        const matched = mappingCols.find(
+            col => col.ColumnName?.toUpperCase() === key.toUpperCase()
+        );
+        const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
+            ? matched.Alias_Name.trim() 
+            : key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 
-        order: index,
-    }));
+        return {
+            key,
+            label,
+            enabled: defaults.includes(key),
+
+            // ✅ FIX HERE
+            isNumeric:
+                NUMERIC_KEYS.some(n => normalizeKey(n) === normalizeKey(key)) ||
+                rows.some(r => !isNaN(Number(r[key]))),
+
+            order: index,
+        };
+    });
 };
 
 /* ================= COMPONENT ================= */
@@ -165,6 +179,19 @@ const buildColumnsFromApi = (
 const SalesReport: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
     const { toggleMode, setToggleMode } = useToggleMode();
+
+    const [lolColumns, setLolColumns] = useState<any[]>([]);
+    const [losColumns, setLosColumns] = useState<any[]>([]);
+
+    useEffect(() => {
+        lollosColumnsService.getLolColumns()
+            .then(res => setLolColumns(res.data.data || []))
+            .catch(err => console.error("Error loading LOL columns:", err));
+
+        lollosColumnsService.getLosColumns()
+            .then(res => setLosColumns(res.data.data || []))
+            .catch(err => console.error("Error loading LOS columns:", err));
+    }, []);
 
     /* ===== DATA ===== */
     const [abstractRows, setAbstractRows] = useState<any[]>([]);
@@ -260,15 +287,15 @@ const SalesReport: React.FC = () => {
                     expandedSP: isExpanded ? SP_MAP.Expanded : prev.expandedSP,
                 }));
 
-                let cols = buildColumnsFromApi(apiRows, toggleMode);
+                let cols = buildColumnsFromApi(apiRows, toggleMode, lolColumns, losColumns);
 
                 // ✅ APPLY TEMPLATE IF EXISTS
                 if (toggleMode === "Expanded" && templateConfig?.expanded) {
-                    cols = applyTemplateToColumns(cols, templateConfig.expanded);
+                    cols = applyTemplateToColumns(cols, templateConfig.expanded, losColumns);
                 }
 
                 if (toggleMode === "Abstract" && templateConfig?.abstract) {
-                    cols = applyTemplateToColumns(cols, templateConfig.abstract);
+                    cols = applyTemplateToColumns(cols, templateConfig.abstract, lolColumns);
                 }
 
                 if (isExpanded) {
@@ -412,16 +439,26 @@ const SalesReport: React.FC = () => {
 
     const applyTemplateToColumns = (
         baseCols: ColumnConfig[],
-        templateCols: ColumnConfig[]
+        templateCols: ColumnConfig[],
+        mappingCols: any[]
     ): ColumnConfig[] => {
 
-        const templateBasedCols: ColumnConfig[] = templateCols.map((t) => ({
-            key: t.key,
-            label: t.label || t.key,
-            enabled: t.enabled,
-            order: t.order ?? 0,
-            groupBy: (t as any).groupBy || 0
-        }));
+        const templateBasedCols: ColumnConfig[] = templateCols.map((t) => {
+            const matched = mappingCols.find(
+                col => col.ColumnName?.toUpperCase() === t.key.toUpperCase()
+            );
+            const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
+                ? matched.Alias_Name.trim() 
+                : (t.label || t.key);
+
+            return {
+                key: t.key,
+                label,
+                enabled: t.enabled,
+                order: t.order ?? 0,
+                groupBy: (t as any).groupBy || 0
+            };
+        });
 
         const merged = templateBasedCols.map((col) => {
             const base = baseCols.find(
@@ -441,10 +478,19 @@ const SalesReport: React.FC = () => {
                         (t) => t.key.toLowerCase() === b.key.toLowerCase()
                     )
             )
-            .map((b) => ({
-                ...b,
-                enabled: false,
-            }));
+            .map((b) => {
+                const matched = mappingCols.find(
+                    col => col.ColumnName?.toUpperCase() === b.key.toUpperCase()
+                );
+                const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
+                    ? matched.Alias_Name.trim() 
+                    : b.label;
+                return {
+                    ...b,
+                    label,
+                    enabled: false,
+                };
+            });
 
         return [...merged, ...missingBase];
     };

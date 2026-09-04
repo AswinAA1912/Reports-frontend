@@ -24,6 +24,7 @@ import { SettingsService } from "../services/reportSettings.services";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth, Company } from "../auth/authContext";
 import { MenuService } from "../services/menus.service";
+import { UserRightsService } from "../services/userRights.service";
 import { handleExternalOrMenuNavigation } from "../utils/navigation";
 
 export type ToggleMode = "Abstract" | "Expanded";
@@ -38,6 +39,7 @@ export type Menus = {
 export interface Page {
   label: string;
   path: string;
+  id?: number;
 }
 
 interface PageHeaderProps {
@@ -90,7 +92,32 @@ const PageHeader: React.FC<PageHeaderProps> = ({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const [templates, setTemplates] = useState<any[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState("");
+  const [selectedTemplate, setSelectedTemplate] = useState<string | number>("");
+  const [userAllowedMenuIds, setUserAllowedMenuIds] = useState<number[]>([]);
+
+  const isDevOrAdmin = useMemo(() => {
+    return user ? (String(user.UserTypeId) === "0" || String(user.UserTypeId) === "1") : false;
+  }, [user]);
+
+  const selectedPath = useMemo(() => {
+    return routeMap[location.pathname] || location.pathname;
+  }, [routeMap, location.pathname]);
+
+  const currentPageLabel = useMemo(() => {
+    return (
+      parentReportName ||
+      pages.find((p) => p.path === selectedPath)?.label ||
+      location.pathname.replace("/", "").replace(/-/g, " ").toUpperCase()
+    );
+  }, [parentReportName, pages, selectedPath, location.pathname]);
+
+  const currentPage = useMemo(() => {
+    return pages.find((p) => p.label.toUpperCase() === currentPageLabel.toUpperCase() || p.path === selectedPath);
+  }, [pages, currentPageLabel, selectedPath]);
+
+  const hasBaseMenuAccess = useMemo(() => {
+    return isDevOrAdmin || !!(currentPage?.id && userAllowedMenuIds.includes(currentPage.id));
+  }, [isDevOrAdmin, currentPage, userAllowedMenuIds]);
 
 
   // Company name for display
@@ -98,7 +125,43 @@ const PageHeader: React.FC<PageHeaderProps> = ({
 
   useEffect(() => {
     const fetchMenus = async () => {
+      if (!user) return;
       try {
+
+        let allowedMenuIds: number[] = [];
+        const allowedParentReports = new Set<string>();
+        if (!isDevOrAdmin) {
+          try {
+            const rightsRes = await UserRightsService.getUserRights(user.id);
+            if (rightsRes.data?.success) {
+              const ids = (rightsRes.data.data || []).map((r: any) =>
+                Number(r.menu_id)
+              );
+              allowedMenuIds = ids;
+              setUserAllowedMenuIds(ids);
+
+              // Match template IDs to parent report labels so we allow the parent report page
+              try {
+                const templatesRes = await SettingsService.getReportList();
+                const templatesData = templatesRes.data?.data || {};
+                Object.entries(templatesData).forEach(([parentReport, items]: [string, any]) => {
+                  if (Array.isArray(items)) {
+                    items.forEach((reportObj: any) => {
+                      if (ids.includes(Number(reportObj.Report_Id))) {
+                        allowedParentReports.add(parentReport.toUpperCase());
+                      }
+                    });
+                  }
+                });
+              } catch (tempErr) {
+                console.error("Failed to load templates in PageHeader rights fetch:", tempErr);
+              }
+            }
+          } catch (rightsErr) {
+            console.error("Error loading user rights in PageHeader:", rightsErr);
+          }
+        }
+
         const res = await MenuService.getMenus();
         const menus = res.data.data;
 
@@ -113,9 +176,19 @@ const PageHeader: React.FC<PageHeaderProps> = ({
           ) {
             menu.SubMenu.forEach((sub: any) => {
               if (sub.is_active === 3) {
+                // Filter by rights if not Dev/Admin
+                if (
+                  !isDevOrAdmin &&
+                  !allowedMenuIds.includes(sub.id) &&
+                  !allowedParentReports.has(sub.name.toUpperCase())
+                ) {
+                  return;
+                }
+
                 parentPages.push({
                   label: sub.name,
                   path: sub.rUrl,
+                  id: sub.id,
                 });
 
                 if (sub.SubRoutes?.length) {
@@ -130,6 +203,19 @@ const PageHeader: React.FC<PageHeaderProps> = ({
           }
         });
 
+        // Append User Rights screen if Developer or Admin
+        if (isDevOrAdmin) {
+          const hasUserRightsMenu = parentPages.some(
+            (p) => p.path === "/userRights"
+          );
+          if (!hasUserRightsMenu) {
+            parentPages.push({
+              label: "USER RIGHTS",
+              path: "/userRights",
+            });
+          }
+        }
+
         setPages(parentPages);
         setRouteMap(subRouteMap);
       } catch (err) {
@@ -138,7 +224,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
     };
 
     fetchMenus();
-  }, []);
+  }, [user]);
 
   // Handle company menu
   const handleCompanyClick = (event: React.MouseEvent<HTMLElement>) => {
@@ -157,13 +243,6 @@ const PageHeader: React.FC<PageHeaderProps> = ({
     }
   };
 
-  const selectedPath = routeMap[location.pathname] || location.pathname;
-
-  const currentPageLabel =
-    parentReportName ||
-    pages.find((p) => p.path === selectedPath)?.label ||
-    location.pathname.replace("/", "").replace(/-/g, " ").toUpperCase();
-
   useEffect(() => {
     if (!currentPageLabel) return;
 
@@ -172,7 +251,31 @@ const PageHeader: React.FC<PageHeaderProps> = ({
         const res = await SettingsService.getReportsByParent(currentPageLabel);
 
         if (res.data.success) {
-          setTemplates(res.data.data || []);
+          const templatesList = res.data.data || [];
+
+          // For regular users (non-Dev/Admin), only include templates explicitly allowed in user rights
+          let filteredTemplates = templatesList;
+          if (!isDevOrAdmin) {
+            filteredTemplates = templatesList.filter((t: any) =>
+              userAllowedMenuIds.includes(Number(t.Report_Id))
+            );
+          }
+          setTemplates(filteredTemplates);
+
+          // If user only has template-level access (no Default View), auto-select their template
+          if (!isDevOrAdmin && !hasBaseMenuAccess) {
+            const assignedTemplate = filteredTemplates.find((t: any) =>
+              userAllowedMenuIds.includes(Number(t.Report_Id))
+            );
+            if (assignedTemplate) {
+              setSelectedTemplate(Number(assignedTemplate.Report_Id));
+              onReportChange?.(assignedTemplate);
+            }
+          } else {
+            // Default View enabled (or Dev/Admin) -> start on initial screen alone
+            setSelectedTemplate("");
+            onReportChange?.(null);
+          }
         }
       } catch (err) {
         console.error("Template load error", err);
@@ -180,7 +283,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
     };
 
     loadTemplates();
-  }, [currentPageLabel]);
+  }, [currentPageLabel, userAllowedMenuIds, isDevOrAdmin, hasBaseMenuAccess]);
 
   return (
     <>
@@ -290,22 +393,20 @@ const PageHeader: React.FC<PageHeaderProps> = ({
             {templates.length > 0 && (
               <Select
                 size="small"
-                value={selectedTemplate}
+                disabled={!hasBaseMenuAccess && templates.length <= 1}
+                value={selectedTemplate === "" ? "" : Number(selectedTemplate)}
                 onChange={(e) => {
-                  const reportId = e.target.value;
+                  const reportId = e.target.value === "" ? "" : Number(e.target.value);
                   setSelectedTemplate(reportId);
 
-                  if (!reportId) {
+                  if (reportId === "") {
                     onReportChange?.(null);
                     return;
                   }
                   const selected = templates.find(
-                    (t) => String(t.Report_Id) === String(reportId)
+                    (t) => Number(t.Report_Id) === Number(reportId)
                   );
 
-                  /**
-                   * Send selected template data to parent page
-                   */
                   if (selected) {
                     onReportChange?.(selected);
                   }
@@ -324,10 +425,14 @@ const PageHeader: React.FC<PageHeaderProps> = ({
                   },
                 }}
               >
-                <MenuItem value="">Select Template</MenuItem>
+                {hasBaseMenuAccess ? (
+                  <MenuItem value="">Select Template</MenuItem>
+                ) : (
+                  selectedTemplate === "" && <MenuItem value="" disabled>Loading template...</MenuItem>
+                )}
 
                 {templates.map((t) => (
-                  <MenuItem key={t.Report_Id} value={t.Report_Id}>
+                  <MenuItem key={t.Report_Id} value={Number(t.Report_Id)}>
                     {t.Report_Name}
                   </MenuItem>
                 ))}

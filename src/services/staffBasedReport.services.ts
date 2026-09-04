@@ -110,6 +110,32 @@ export const StaffBasedCountReportService = {
 export interface VoucherType {
   Value: number;
   label: string;
+  Vocher_Type_Id?: number;
+  Voucher_Type?: string;
+  Voucher_Code?: string;
+  Branch_Id?: number;
+  Type?: string;
+  Tally_Id?: string | null;
+  Alter_Id?: string | null;
+  Created_By?: any;
+  Created_Time?: string | null;
+  Alter_By?: any;
+  Alter_Time?: string | null;
+  tally_sync?: boolean;
+  deleteFlag?: number;
+  GodownId?: number | null;
+  crLimit?: number | null;
+  drLimit?: number | null;
+  tallyModule?: string | null;
+  Godown_Name?: string | null;
+  [key: string]: any;
+}
+
+export interface GodownMaster {
+  Godown_Id: string | number;
+  Godown_Name: string;
+  VoucherCount?: number;
+  [key: string]: any;
 }
 
 export interface EmployeeReportGroup {
@@ -140,9 +166,20 @@ export interface UpdateEmployeeReportGroupPayload {
 }
 
 export const employeeReportGroupService = {
-  getVoucherTypes: () =>
+  getVoucherTypes: (params?: { GodownId?: number | string }) =>
     axios.get<{ success: boolean; data: VoucherType[] }>(
-      `${getBaseURL()}api/masters/getVoucherTypes`
+      `${getBaseURL()}api/masters/getVoucherTypes`,
+      { params }
+    ),
+
+  getGodownsWithVoucherTypes: () =>
+    axios.get<{ success: boolean; data: GodownMaster[] }>(
+      `${getBaseURL()}api/masters/godownsWithVoucherTypes`
+    ),
+
+  getGodowns: () =>
+    axios.get<{ success: boolean; data: GodownMaster[] }>(
+      `${getBaseURL()}api/masters/godown`
     ),
 
   getEmployeeReportGroups: (params?: { overallGroupId?: number; groupName?: string }) =>

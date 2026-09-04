@@ -29,13 +29,17 @@ import {
     Popover,
     RadioGroup,
     Radio,
-    FormLabel
+    FormLabel,
+    Chip
 } from "@mui/material";
 import SettingsIcon from "@mui/icons-material/Settings";
 import GroupAddIcon from "@mui/icons-material/GroupAdd";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CloseIcon from "@mui/icons-material/Close";
+import FileDownloadIcon from "@mui/icons-material/FileDownload";
+import TableChartIcon from "@mui/icons-material/TableChart";
+import PersonIcon from "@mui/icons-material/Person";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -45,7 +49,7 @@ import AppLayout from "../../Layout/appLayout";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import { toast } from "react-toastify";
 import { SettingsService } from "../../services/reportSettings.services";
-import { employeeReportGroupService, VoucherType } from "../../services/staffBasedReport.services";
+import { employeeReportGroupService, VoucherType, GodownMaster } from "../../services/staffBasedReport.services";
 import { useAuth } from "../../auth/authContext";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
@@ -488,6 +492,11 @@ const OverallStaffReport: React.FC = () => {
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [loading, setLoading] = useState(false);
 
+    // Godown Master State & Selected Filter
+    const [godowns, setGodowns] = useState<GodownMaster[]>([]);
+    const [selectedGodownIds, setSelectedGodownIds] = useState<number[]>([]);
+    const [tempSelectedGodownIds, setTempSelectedGodownIds] = useState<number[]>([]);
+
     // Qty vs Act Qty Type State
     const [qtyType, setQtyType] = useState<"Qty" | "Act_Qty">("Qty");
 
@@ -509,8 +518,9 @@ const OverallStaffReport: React.FC = () => {
         if (drawerOpen) {
             setTempFromDate(fromDate);
             setTempToDate(toDate);
+            setTempSelectedGodownIds(selectedGodownIds);
         }
-    }, [drawerOpen, fromDate, toDate]);
+    }, [drawerOpen, fromDate, toDate, selectedGodownIds]);
 
 
 
@@ -527,6 +537,8 @@ const OverallStaffReport: React.FC = () => {
 
     // Template states (Mocking backend templates support)
     const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+    const [exportDialogOpen, setExportDialogOpen] = useState(false);
+    const [exportingStaffWise, setExportingStaffWise] = useState(false);
     const [reportName, setReportName] = useState("");
     const [parentReportName, setParentReportName] = useState("Overall Staff Report");
     const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
@@ -571,7 +583,6 @@ const OverallStaffReport: React.FC = () => {
     const [staffSearchQuery, setStaffSearchQuery] = useState("");
 
     const fetchInvolvedStaff = async () => {
-        setPreloading(true);
         try {
             const res = await employeeReportGroupService.getGroupEmployees({
                 Fromdate: fromDate,
@@ -590,26 +601,47 @@ const OverallStaffReport: React.FC = () => {
                 });
                 setInvolvedStaff(uniqueStaff);
                 setRoleColumns(prev => discoverRoleColumns(rawEmployees, prev));
+
+                // Group all employee rows by voucher to populate staffData for all vouchers initially
+                const normalizeCategory = (cat: string) => {
+                    if (!cat) return "";
+                    const c = cat.toUpperCase();
+                    if (c === "PROCESS") return "ADJUSTMENTS";
+                    return c;
+                };
+
+                const groupedByVoucher: Record<string, any[]> = {};
+                rawEmployees.forEach((row: any) => {
+                    const parentCategory = normalizeCategory(row.Overall_GroupName);
+                    const groupName = row.Group_Name || "UNASSIGNED";
+                    const voucherName = row.Voucher_Type;
+                    if (!voucherName) return;
+                    const vKey = `${parentCategory}_${groupName}_${voucherName}`;
+                    if (!groupedByVoucher[vKey]) {
+                        groupedByVoucher[vKey] = [];
+                    }
+                    groupedByVoucher[vKey].push(row);
+                });
+
+                const newStaffData: Record<string, any[]> = {};
+                Object.entries(groupedByVoucher).forEach(([vKey, list]) => {
+                    newStaffData[vKey] = groupEmployeesList(list);
+                });
+
+                setStaffData(prev => ({
+                    ...prev,
+                    ...newStaffData
+                }));
             }
         } catch (err) {
             console.error("Error fetching involved staff list:", err);
-        } finally {
-            setPreloading(false);
         }
     };
 
+    // Load staff data on-demand only when a staff filter is actively selected by the user
     useEffect(() => {
-        if (groups.length > 0) {
-            fetchInvolvedStaff();
-        }
-        setSelectedStaffFilters([]);
-    }, [fromDate, toDate, groups]);
-
-    // Pre-load all staff data in background on data/date change to support top-level filter recalculation
-    useEffect(() => {
-        const loadAllStaffData = async () => {
-            if (reportData.length === 0) return;
-            setPreloading(true);
+        const loadFilteredStaffData = async () => {
+            if (reportData.length === 0 || selectedStaffFilters.length === 0) return;
 
             const normalizeCategory = (cat: string) => {
                 if (!cat) return "";
@@ -619,54 +651,57 @@ const OverallStaffReport: React.FC = () => {
             };
 
             const newStaffData: Record<string, any[]> = {};
-            const accumulatedEmployees: any[] = [];
             let hasNewData = false;
 
-            const promises = reportData.map(async (row) => {
+            const missingRows = reportData.filter((row) => {
                 const parentCategory = normalizeCategory(row.Overall_GroupName);
                 const groupName = row.Group_Name || "UNASSIGNED";
                 const voucherName = row.Voucher_Type;
-                if (!voucherName) return;
-
+                if (!voucherName) return false;
                 const vKey = `${parentCategory}_${groupName}_${voucherName}`;
-                if (!staffData[vKey]) {
-                    try {
-                        const res = await employeeReportGroupService.getGroupEmployees({
-                            Fromdate: fromDate,
-                            Todate: toDate,
-                            Overall_GroupName: parentCategory === "ADJUSTMENTS" ? "PROCESS" : parentCategory,
-                            Group_Name: groupName,
-                            Voucher_Type: voucherName
-                        });
-                        if (res.data.success) {
-                            const rawEmployees = res.data.data || [];
-                            newStaffData[vKey] = groupEmployeesList(rawEmployees);
-                            accumulatedEmployees.push(...rawEmployees);
-                            hasNewData = true;
-                        }
-                    } catch (err) {
-                        console.error(`Error pre-loading staff for ${vKey}:`, err);
-                    }
-                }
+                return !staffData[vKey];
             });
-            try {
-                await Promise.all(promises);
-                if (hasNewData) {
-                    setStaffData(prev => ({
-                        ...prev,
-                        ...newStaffData
-                    }));
-                    if (accumulatedEmployees.length > 0) {
-                        setRoleColumns(prev => discoverRoleColumns(accumulatedEmployees, prev));
-                    }
-                }
-            } finally {
-                setPreloading(false);
+
+            // Process in batches of 4 to avoid connection pool exhaustion
+            const batchSize = 4;
+            for (let i = 0; i < missingRows.length; i += batchSize) {
+                const batch = missingRows.slice(i, i + batchSize);
+                await Promise.all(
+                    batch.map(async (row) => {
+                        const parentCategory = normalizeCategory(row.Overall_GroupName);
+                        const groupName = row.Group_Name || "UNASSIGNED";
+                        const voucherName = row.Voucher_Type;
+                        const vKey = `${parentCategory}_${groupName}_${voucherName}`;
+                        try {
+                            const res = await employeeReportGroupService.getGroupEmployees({
+                                Fromdate: fromDate,
+                                Todate: toDate,
+                                Overall_GroupName: parentCategory === "ADJUSTMENTS" ? "PROCESS" : parentCategory,
+                                Group_Name: groupName,
+                                Voucher_Type: voucherName
+                            });
+                            if (res.data?.success) {
+                                const rawEmployees = res.data.data || [];
+                                newStaffData[vKey] = groupEmployeesList(rawEmployees);
+                                hasNewData = true;
+                            }
+                        } catch (err) {
+                            console.error(`Error loading staff for ${vKey}:`, err);
+                        }
+                    })
+                );
+            }
+
+            if (hasNewData) {
+                setStaffData(prev => ({
+                    ...prev,
+                    ...newStaffData
+                }));
             }
         };
 
-        loadAllStaffData();
-    }, [reportData, fromDate, toDate, selectedTemplateId]);
+        loadFilteredStaffData();
+    }, [reportData, fromDate, toDate, selectedStaffFilters]);
 
     const handleToggleStaff = (name: string) => {
         setSelectedStaffFilters(prev => {
@@ -682,26 +717,35 @@ const OverallStaffReport: React.FC = () => {
         setSelectedStaffFilters([]);
     };
 
-    // Fetch voucher types and employee report groups from backend on mount
+    // Fetch voucher types, godowns, and groups concurrently in parallel on mount
     useEffect(() => {
         const fetchMetadata = async () => {
             try {
-                // 1. Fetch Voucher Types
-                const vtRes = await employeeReportGroupService.getVoucherTypes();
-                if (vtRes.data.success) {
-                    setVoucherTypes(vtRes.data.data);
+                const [vtRes, gRes, ergRes] = await Promise.allSettled([
+                    employeeReportGroupService.getVoucherTypes(),
+                    employeeReportGroupService.getGodownsWithVoucherTypes().catch(() => employeeReportGroupService.getGodowns()),
+                    employeeReportGroupService.getEmployeeReportGroups()
+                ]);
+
+                if (vtRes.status === "fulfilled" && vtRes.value?.data?.success) {
+                    setVoucherTypes(vtRes.value.data.data || []);
                 }
 
-                // 2. Fetch Employee Report Groups
-                const ergRes = await employeeReportGroupService.getEmployeeReportGroups();
-                if (ergRes.data.success && ergRes.data.data.length > 0) {
+                if (gRes.status === "fulfilled" && gRes.value?.data?.success) {
+                    const gData = gRes.value.data.data || [];
+                    const filteredG = gData.filter((g: any) => g.Godown_Name && g.Godown_Name.trim() !== "");
+                    setGodowns(filteredG);
+                }
+
+                if (ergRes.status === "fulfilled" && ergRes.value?.data?.success) {
+                    const rows = ergRes.value.data.data || [];
                     const groupsMap: Record<string, {
                         name: string;
                         parentCategory: "INWARDS" | "OUTWARDS" | "ADJUSTMENTS";
                         voucherTypes: string[];
                     }> = {};
 
-                    ergRes.data.data.forEach(row => {
+                    rows.forEach((row: any) => {
                         const name = row.Group_Name;
                         if (!groupsMap[name]) {
                             const catId = Number(row.Overall_GroupId);
@@ -736,7 +780,7 @@ const OverallStaffReport: React.FC = () => {
                 Fromdate: fromDate,
                 Todate: toDate
             });
-            if (res.data.success) {
+            if (res.data?.success) {
                 const data = res.data.data || [];
                 setReportData(data);
                 setRoleColumns(prev => discoverRoleColumns(data, prev));
@@ -751,11 +795,12 @@ const OverallStaffReport: React.FC = () => {
         }
     };
 
+    // Fetch Overall Staff Report Data and involved staff in parallel immediately on date changes
     useEffect(() => {
-        if (groups.length > 0) {
-            fetchReportData();
-        }
-    }, [fromDate, toDate, groups]);
+        fetchReportData();
+        fetchInvolvedStaff();
+        setSelectedStaffFilters([]);
+    }, [fromDate, toDate]);
 
     // Selected Expanded Voucher Types (First Expansion level)
     const [expandedVouchers, setExpandedVouchers] = useState<string[]>([]);
@@ -852,10 +897,9 @@ const OverallStaffReport: React.FC = () => {
             setIsEditTemplate(true);
             setExpandedVouchers([]);
             setExpandedStaff([]);
-            setStaffData({});
             setInvoiceData({});
             const res = await SettingsService.getReportEditData({ reportId: templateId, typeId: 1 });
-            
+
             const data = res?.data?.data || {};
             if (res.data.success && data.reportInfo) {
                 setReportName(data.reportInfo.Report_Name || "");
@@ -917,10 +961,11 @@ const OverallStaffReport: React.FC = () => {
         setSelectedTemplateId(null);
         setIsEditTemplate(false);
         setReportName("");
+        setSelectedGodownIds([]);
+        setTempSelectedGodownIds([]);
         setRoleColumns(discoverRoleColumns(involvedStaff, DEFAULT_ROLE_COLUMNS));
         setExpandedVouchers([]);
         setExpandedStaff([]);
-        setStaffData({});
         setInvoiceData({});
     };
 
@@ -1016,6 +1061,35 @@ const OverallStaffReport: React.FC = () => {
     // Available voucher types that can be selected in Group Creation
     const allVoucherNames = useMemo(() => voucherTypes.map(v => v.label), [voucherTypes]);
 
+    // Dropdown options for ReportFilterDrawer
+    const godownDropdownOptions = useMemo(() => {
+        const seen = new Set<number>();
+        const options: { label: string; value: number }[] = [];
+        godowns.forEach((g) => {
+            const id = Number(g.Godown_Id);
+            const name = g.Godown_Name ? String(g.Godown_Name).trim() : "";
+            if (name && !seen.has(id)) {
+                seen.add(id);
+                options.push({ label: name, value: id });
+            }
+        });
+        return options;
+    }, [godowns]);
+
+    // Set of voucher type names linked to the selected godown(s)
+    const linkedVoucherNames = useMemo(() => {
+        if (!selectedGodownIds || selectedGodownIds.length === 0) return null;
+        const godownIdSet = new Set(selectedGodownIds.map(Number));
+        const set = new Set<string>();
+        voucherTypes.forEach((vt) => {
+            if (vt.GodownId !== null && vt.GodownId !== undefined && godownIdSet.has(Number(vt.GodownId))) {
+                const name = (vt.label || vt.Voucher_Type || "").trim();
+                if (name) set.add(name.toUpperCase());
+            }
+        });
+        return set;
+    }, [selectedGodownIds, voucherTypes]);
+
     // Build hierarchical table data dynamically based on active grouping config and live reportData
     const tableCategories = useMemo(() => {
         const normalizeCategory = (cat: string) => {
@@ -1037,7 +1111,8 @@ const OverallStaffReport: React.FC = () => {
             const matchedRows = reportData.filter(row =>
                 row.Group_Name === group.name &&
                 normalizeCategory(row.Overall_GroupName) === group.parentCategory &&
-                row.Voucher_Type
+                row.Voucher_Type &&
+                (!linkedVoucherNames || linkedVoucherNames.has(String(row.Voucher_Type).trim().toUpperCase()))
             );
             if (matchedRows.length === 0) return;
 
@@ -1117,7 +1192,8 @@ const OverallStaffReport: React.FC = () => {
             const unassignedRows = reportData.filter(row =>
                 normalizeCategory(row.Overall_GroupName) === cat &&
                 row.Voucher_Type &&
-                (row.Group_Name === null || row.Group_Name === undefined || !definedGroupNames.includes(row.Group_Name))
+                (row.Group_Name === null || row.Group_Name === undefined || !definedGroupNames.includes(row.Group_Name)) &&
+                (!linkedVoucherNames || linkedVoucherNames.has(String(row.Voucher_Type).trim().toUpperCase()))
             );
 
             if (unassignedRows.length > 0) {
@@ -1194,7 +1270,7 @@ const OverallStaffReport: React.FC = () => {
         })).filter(cat => cat.groups.length > 0);
 
         return categories;
-    }, [groups, reportData, roleColumns, staffData, selectedStaffFilters, qtyType]);
+    }, [groups, reportData, roleColumns, staffData, selectedStaffFilters, qtyType, linkedVoucherNames]);
 
     const gridStaffNames = useMemo(() => {
         const names = new Set<string>();
@@ -1421,7 +1497,8 @@ const OverallStaffReport: React.FC = () => {
         zIndex: 2
     };
 
-    const handleExportExcel = () => {
+    // 1. Default Summary Excel Export
+    const handleDefaultExportExcel = () => {
         const enabledRoles = roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order);
         const rows: any[] = [];
 
@@ -1518,11 +1595,12 @@ const OverallStaffReport: React.FC = () => {
         const worksheet = XLSX.utils.json_to_sheet(rows);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "Overall Staff Report");
-        XLSX.writeFile(workbook, `Overall Staff Report_${dayjs().format("DDMMYYYY")}.xlsx`);
-        toast.success("Excel Exported ✅");
+        XLSX.writeFile(workbook, `Overall_Staff_Report_${dayjs().format("DDMMYYYY")}.xlsx`);
+        toast.success("Default Excel Exported ✅");
     };
 
-    const handleExportPDF = () => {
+    // 2. Default Summary PDF Export
+    const handleDefaultExportPDF = () => {
         const cols = [
             "Category",
             "Groups",
@@ -1648,16 +1726,332 @@ const OverallStaffReport: React.FC = () => {
             headStyles: { fillColor: [30, 58, 138] },
         });
 
-        doc.save(`Overall Staff Report_${dayjs().format("DDMMYYYY")}.pdf`);
+        doc.save(`Overall_Staff_Report_${dayjs().format("DDMMYYYY")}.pdf`);
         toast.success("PDF Exported ✅");
+    };
+
+    // 3. Detailed Staff-wise Excel Export with full invoice expansions (Optimized Fast Parallel Execution)
+    const handleStaffWiseExportExcel = async () => {
+        setExportingStaffWise(true);
+        setExportDialogOpen(false);
+        const toastId = toast.loading("Generating Staff-wise Excel Export...");
+
+        try {
+            const enabledRoles = roleColumns
+                .filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count")
+                .sort((a, b) => a.order - b.order);
+
+            // Determine target staff names
+            let targetStaffList: string[] = [];
+            if (selectedStaffFilters.length > 0) {
+                targetStaffList = [...selectedStaffFilters];
+            } else {
+                targetStaffList = [...gridStaffNames];
+                if (targetStaffList.length === 0) {
+                    targetStaffList = involvedStaff.map(s => s.Cost_Center_Name || "Unassigned");
+                }
+            }
+
+            if (targetStaffList.length === 0) {
+                toast.update(toastId, {
+                    render: "No staff records found to export",
+                    type: "warning",
+                    isLoading: false,
+                    autoClose: 3000
+                });
+                setExportingStaffWise(false);
+                return;
+            }
+
+            // Local cache to hold all dynamically loaded staff & invoices for export
+            const localStaffData = { ...staffData };
+            const localInvoiceData = { ...invoiceData };
+
+            // Step 1: Parallel fetch any missing voucher type group employees
+            const missingVoucherPromises: Promise<any>[] = [];
+            tableCategories.forEach(cat => {
+                cat.groups.forEach(group => {
+                    group.voucherTypes.forEach((vt: any) => {
+                        const vKey = `${cat.name}_${group.groupName}_${vt.name}`;
+                        if (!localStaffData[vKey]) {
+                            missingVoucherPromises.push(
+                                employeeReportGroupService.getGroupEmployees({
+                                    Fromdate: fromDate,
+                                    Todate: toDate,
+                                    Overall_GroupName: cat.name === "ADJUSTMENTS" ? "PROCESS" : cat.name,
+                                    Group_Name: group.groupName,
+                                    Voucher_Type: vt.name
+                                }).then(res => {
+                                    if (res.data?.success) {
+                                        localStaffData[vKey] = groupEmployeesList(res.data.data || []);
+                                    }
+                                }).catch(err => {
+                                    console.error(`Error fetching group employees for ${vKey}:`, err);
+                                })
+                            );
+                        }
+                    });
+                });
+            });
+
+            if (missingVoucherPromises.length > 0) {
+                await Promise.all(missingVoucherPromises);
+            }
+
+            // Step 2: Collect all invoice fetching jobs for only the target staff across active vouchers
+            interface InvoiceJob {
+                staffKey: string;
+                parentCategory: string;
+                groupName: string;
+                voucherName: string;
+                empIds: (number | undefined)[];
+            }
+            const invoiceJobs: InvoiceJob[] = [];
+
+            tableCategories.forEach(cat => {
+                cat.groups.forEach(group => {
+                    group.voucherTypes.forEach((vt: any) => {
+                        const vKey = `${cat.name}_${group.groupName}_${vt.name}`;
+                        const sList = localStaffData[vKey] || [];
+                        sList.forEach((sc: any) => {
+                            const scName = sc.Cost_Center_Name || "Unassigned";
+                            if (targetStaffList.some(tName => tName.toLowerCase() === scName.toLowerCase())) {
+                                const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
+                                if (!localInvoiceData[staffKey]) {
+                                    const empIds = sc.allEmpIds && sc.allEmpIds.length > 0 ? sc.allEmpIds : [sc.Emp_Id];
+                                    invoiceJobs.push({
+                                        staffKey,
+                                        parentCategory: cat.name,
+                                        groupName: group.groupName,
+                                        voucherName: vt.name,
+                                        empIds
+                                    });
+                                }
+                            }
+                        });
+                    });
+                });
+            });
+
+            // Execute invoice fetching concurrently in parallel chunks of 15
+            const chunkSize = 15;
+            for (let i = 0; i < invoiceJobs.length; i += chunkSize) {
+                const chunk = invoiceJobs.slice(i, i + chunkSize);
+                await Promise.all(chunk.map(async (job) => {
+                    try {
+                        const promises = job.empIds.map(id =>
+                            employeeReportGroupService.getEmployeeInvoices({
+                                Fromdate: fromDate,
+                                Todate: toDate,
+                                Overall_GroupName: job.parentCategory === "ADJUSTMENTS" ? "PROCESS" : job.parentCategory,
+                                Group_Name: job.groupName,
+                                Voucher_Type: job.voucherName,
+                                Emp_Id: id || undefined,
+                                Emp_Id_Is_Unassigned: id ? 0 : 1
+                            })
+                        );
+                        const responses = await Promise.all(promises);
+                        const rawInvoices: any[] = [];
+                        responses.forEach(res => {
+                            if (res.data?.success && res.data?.data) {
+                                rawInvoices.push(...res.data.data);
+                            }
+                        });
+
+                        const groupedInvoices: any[] = [];
+                        const groupMap: Record<string, any> = {};
+
+                        rawInvoices.forEach((row: any) => {
+                            const refId = row.Inv_No ? String(row.Inv_No).trim().toUpperCase() : String(row.Voucher_Ref_Id);
+                            if (!groupMap[refId]) {
+                                groupMap[refId] = {
+                                    Voucher_Ref_Id: row.Voucher_Ref_Id,
+                                    Inv_No: row.Inv_No,
+                                    Voucher_Type: row.Voucher_Type,
+                                    Group_Name: row.Group_Name,
+                                    Overall_GroupName: row.Overall_GroupName,
+                                    Voucher_Date: row.Voucher_Date,
+                                    Cost_Center_Id: row.Cost_Center_Id,
+                                    Cost_Center_Name: row.Cost_Center_Name,
+                                    roleValues: {}
+                                };
+                                groupedInvoices.push(groupMap[refId]);
+                            }
+
+                            const inv = groupMap[refId];
+                            const category = row.Cost_Category;
+                            if (category) {
+                                if (!inv.roleValues[category]) {
+                                    inv.roleValues[category] = { qty: 0, actQty: 0, count: 0, itemCount: 0 };
+                                }
+                                inv.roleValues[category].qty += Number(row.Bill_Qty) || 0;
+                                inv.roleValues[category].actQty += Number(row.Bill_Act_Qty ?? row.Act_Qty ?? row.Bill_Qty ?? 0) || 0;
+                                inv.roleValues[category].count = 1;
+                                inv.roleValues[category].itemCount += Number(row.Item_Count) || 0;
+                            }
+                        });
+                        localInvoiceData[job.staffKey] = groupedInvoices;
+                    } catch (err) {
+                        console.error(`Error loading invoices for ${job.staffKey}:`, err);
+                    }
+                }));
+            }
+
+            // Sync updated caches back to component state for fast interactive expansion
+            setStaffData(prev => ({ ...prev, ...localStaffData }));
+            setInvoiceData(prev => ({ ...prev, ...localInvoiceData }));
+
+            // Build Workbook
+            const workbook = XLSX.utils.book_new();
+            const usedSheetNames = new Set<string>();
+
+            targetStaffList.forEach((staffName, staffIdx) => {
+                const staffRows: any[] = [];
+                let staffTotalQty = 0;
+                let staffTotalInvCount = 0;
+                let staffTotalItemCount = 0;
+                const staffRoleTotals: Record<string, number> = {};
+                enabledRoles.forEach(col => { staffRoleTotals[col.key] = 0; });
+
+                tableCategories.forEach((category) => {
+                    category.groups.forEach((group) => {
+                        group.voucherTypes.forEach((vt: any) => {
+                            const vKey = `${category.name}_${group.groupName}_${vt.name}`;
+                            const sList = localStaffData[vKey] || [];
+                            const matchedStaffList = sList.filter((sc: any) => (sc.Cost_Center_Name || "Unassigned").toLowerCase() === staffName.toLowerCase());
+
+                            matchedStaffList.forEach((sc: any) => {
+                                const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
+                                const rawInvoices = localInvoiceData[staffKey] || [];
+                                const invoicesList = getFilteredStaffByCategories(rawInvoices, roleColumns, qtyType);
+
+                                const scQty = getStaffCellValue(sc, "Total_Qty", "qty", qtyType, roleColumns);
+                                const scCount = getStaffCellValue(sc, "Total_Count", "count", qtyType, roleColumns);
+                                const scItemCount = getStaffCellValue(sc, "Total_Item_Count", "item_count", qtyType, roleColumns);
+
+                                staffTotalQty += scQty;
+                                staffTotalInvCount += scCount;
+                                staffTotalItemCount += scItemCount;
+                                enabledRoles.forEach(col => {
+                                    staffRoleTotals[col.key] += getStaffCellValue(sc, col.key, col.metric || "qty", qtyType, roleColumns);
+                                });
+
+                                // Main Voucher Summary Row for this Staff
+                                const voucherSummaryRow: any = {
+                                    "Category": category.name,
+                                    "Groups": group.groupName,
+                                    "Voucher Type": vt.name,
+                                    "Staff Name / Invoice No": `${staffName} (Summary)`,
+                                    "Total Qty": scQty,
+                                    "Total Inv Count": scCount,
+                                    "Total Item Count": scItemCount,
+                                };
+                                enabledRoles.forEach(col => {
+                                    voucherSummaryRow[getColumnLabel(col)] = getStaffCellValue(sc, col.key, col.metric || "qty", qtyType, roleColumns);
+                                });
+                                staffRows.push(voucherSummaryRow);
+
+                                // Expanded Invoices Breakdown for this Staff
+                                if (invoicesList.length > 0) {
+                                    invoicesList.forEach((inv: any) => {
+                                        const invRow: any = {
+                                            "Category": "",
+                                            "Groups": "",
+                                            "Voucher Type": "",
+                                            "Staff Name / Invoice No": inv.Inv_No || "INV",
+                                            "Total Qty": getInvoiceCellValue(inv, "Total_Qty", "qty", qtyType, roleColumns),
+                                            "Total Inv Count": getInvoiceCellValue(inv, "Total_Count", "count", qtyType, roleColumns),
+                                            "Total Item Count": getInvoiceCellValue(inv, "Total_Item_Count", "item_count", qtyType, roleColumns),
+                                        };
+                                        enabledRoles.forEach(col => {
+                                            invRow[getColumnLabel(col)] = getInvoiceCellValue(inv, col.key, col.metric || "qty", qtyType, roleColumns);
+                                        });
+                                        staffRows.push(invRow);
+                                    });
+                                }
+                            });
+                        });
+                    });
+                });
+
+                if (staffRows.length > 0) {
+                    // Append Staff Total Row
+                    const totalRow: any = {
+                        "Category": "Total",
+                        "Groups": `${staffName} Total`,
+                        "Voucher Type": "",
+                        "Staff Name / Invoice No": "",
+                        "Total Qty": staffTotalQty,
+                        "Total Inv Count": staffTotalInvCount,
+                        "Total Item Count": staffTotalItemCount,
+                    };
+                    enabledRoles.forEach(col => {
+                        totalRow[getColumnLabel(col)] = staffRoleTotals[col.key] || 0;
+                    });
+                    staffRows.push(totalRow);
+
+                    const worksheet = XLSX.utils.json_to_sheet(staffRows);
+
+                    // Sanitize sheet name for Excel (<= 31 characters, no invalid symbols)
+                    let cleanSheetName = (staffName || "Staff").replace(/[\\/?*:[\]]/g, "_").trim().substring(0, 31);
+                    if (!cleanSheetName) cleanSheetName = `Staff_${staffIdx + 1}`;
+                    if (usedSheetNames.has(cleanSheetName)) {
+                        cleanSheetName = `${cleanSheetName.substring(0, 27)}_${staffIdx + 1}`;
+                    }
+                    usedSheetNames.add(cleanSheetName);
+
+                    XLSX.utils.book_append_sheet(workbook, worksheet, cleanSheetName);
+                }
+            });
+
+            if (workbook.SheetNames.length === 0) {
+                toast.update(toastId, {
+                    render: "No activity found for the selected staff",
+                    type: "warning",
+                    isLoading: false,
+                    autoClose: 3000
+                });
+                setExportingStaffWise(false);
+                return;
+            }
+
+            // Filename: if 1 staff is filtered, use staff's name; else use overall staff wise name
+            let exportFileName = "";
+            if (selectedStaffFilters.length === 1) {
+                const singleName = selectedStaffFilters[0].replace(/[\\/:*?"<>|]/g, "_").trim();
+                exportFileName = `${singleName}_${dayjs().format("DDMMYYYY")}.xlsx`;
+            } else if (selectedStaffFilters.length > 1) {
+                exportFileName = `Staff_Wise_Report_${dayjs().format("DDMMYYYY")}.xlsx`;
+            } else {
+                exportFileName = `Overall_Staff_Wise_Report_${dayjs().format("DDMMYYYY")}.xlsx`;
+            }
+
+            XLSX.writeFile(workbook, exportFileName);
+            toast.update(toastId, {
+                render: `Staff-wise Excel Exported (${exportFileName}) ✅`,
+                type: "success",
+                isLoading: false,
+                autoClose: 3000
+            });
+        } catch (err) {
+            console.error("Staff-wise export error:", err);
+            toast.update(toastId, {
+                render: "Failed to generate staff-wise export ❌",
+                type: "error",
+                isLoading: false,
+                autoClose: 3000
+            });
+        } finally {
+            setExportingStaffWise(false);
+        }
     };
 
     return (
         <>
             <PageHeader
                 parentReportName="Overall Staff Report"
-                onExportExcel={handleExportExcel}
-                onExportPDF={handleExportPDF}
+                onExportExcel={() => setExportDialogOpen(true)}
+                onExportPDF={() => setExportDialogOpen(true)}
                 onReportChange={(template) => {
                     if (!template || !template.Report_Id) {
                         handleClearTemplate();
@@ -1670,7 +2064,7 @@ const OverallStaffReport: React.FC = () => {
                     setSaveDialogOpen(true);
                 }}
                 settingsSlot={
-                    <Box display="flex" gap={1}>
+                    <Box display="flex" alignItems="center" gap={1}>
                         <Tooltip title="Group Creation">
                             <IconButton
                                 size="small"
@@ -1712,9 +2106,18 @@ const OverallStaffReport: React.FC = () => {
                 onFromDateChange={setTempFromDate}
                 toDate={tempToDate}
                 onToDateChange={setTempToDate}
+                dropdownLabel="Godown"
+                dropdownMultiple={true}
+                dropdownValue={tempSelectedGodownIds}
+                dropdownOptions={godownDropdownOptions}
+                onDropdownChange={(val) => {
+                    const ids = Array.isArray(val) ? val.map(Number) : [];
+                    setTempSelectedGodownIds(ids);
+                }}
                 onApply={() => {
                     setFromDate(tempFromDate);
                     setToDate(tempToDate);
+                    setSelectedGodownIds(tempSelectedGodownIds);
                     setDrawerOpen(false);
                 }}
             >
@@ -1743,7 +2146,59 @@ const OverallStaffReport: React.FC = () => {
 
             <AppLayout fullWidth>
                 <Box px={2} pb={1} pt={1}>
-                    {(loading || preloading) ? (
+                    {selectedGodownIds.length > 0 && (
+                        <Box display="flex" alignItems="center" flexWrap="wrap" gap={1} mb={1}>
+                            <Typography variant="body2" sx={{ fontWeight: 600, color: "#475569", fontSize: "0.75rem" }}>
+                                Filtered Godowns:
+                            </Typography>
+                            {selectedGodownIds.map((gid) => {
+                                const gName = godowns.find(g => Number(g.Godown_Id) === Number(gid))?.Godown_Name || gid;
+                                return (
+                                    <Chip
+                                        key={gid}
+                                        label={`${gName}`}
+                                        onDelete={() => {
+                                            setSelectedGodownIds(prev => prev.filter(id => id !== gid));
+                                            setTempSelectedGodownIds(prev => prev.filter(id => id !== gid));
+                                        }}
+                                        size="small"
+                                        color="primary"
+                                        sx={{
+                                            height: 24,
+                                            fontSize: "0.75rem",
+                                            fontWeight: 600,
+                                            bgcolor: "#e0e7ff",
+                                            color: "#1e3a8a",
+                                            "& .MuiChip-deleteIcon": {
+                                                color: "#1e3a8a",
+                                                "&:hover": { color: "#b91c1c" }
+                                            }
+                                        }}
+                                    />
+                                );
+                            })}
+                            <Button
+                                size="small"
+                                variant="text"
+                                onClick={() => {
+                                    setSelectedGodownIds([]);
+                                    setTempSelectedGodownIds([]);
+                                }}
+                                sx={{
+                                    fontSize: "0.75rem",
+                                    py: 0,
+                                    px: 0.8,
+                                    minHeight: 22,
+                                    textTransform: "none",
+                                    color: "error.main",
+                                    "&:hover": { bgcolor: "error.50" }
+                                }}
+                            >
+                                Clear all
+                            </Button>
+                        </Box>
+                    )}
+                    {loading ? (
                         <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="60vh" gap={2}>
                             <CircularProgress size={40} />
                             <Typography variant="body1" color="text.secondary" fontWeight={500}>
@@ -1752,363 +2207,363 @@ const OverallStaffReport: React.FC = () => {
                         </Box>
                     ) : (
                         <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 90px)" }}>
-                        <Table size="medium" stickyHeader>
-                            <TableHead>
-                                <TableRow sx={{ bgcolor: "#1E3A8A" }}>
-                                    <TableCell sx={headerCellSx} align="center">
-                                        Category
-                                    </TableCell>
-                                    <TableCell sx={headerCellSx} align="center">
-                                        Groups
-                                    </TableCell>
-                                    <TableCell sx={headerCellSx} align="center">
-                                        Kgs
-                                    </TableCell>
-                                    <TableCell sx={headerCellSx}>
-                                        Voucher Type
-                                    </TableCell>
-                                    <TableCell sx={headerCellSx} align="center">
-                                        Kgs
-                                    </TableCell>
-                                    <TableCell sx={headerCellSx} align="center">
-                                        Total Qty
-                                    </TableCell>
-                                    <TableCell sx={headerCellSx} align="center">
-                                        Total Inv Count
-                                    </TableCell>
-                                    <TableCell sx={headerCellSx} align="center">
-                                        Total Item Count
-                                    </TableCell>
-                                    <TableCell
-                                        sx={{
-                                            ...headerCellSx,
-                                            cursor: "pointer",
-                                            "&:hover": { bgcolor: "#1b3580" }
-                                        }}
-                                        onClick={(e) => setStaffFilterAnchor(e.currentTarget)}
-                                    >
-                                        STAFF NAME
-                                    </TableCell>
-
-                                    {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => (
-                                        <TableCell key={col.key} sx={headerCellSx} align="center">
-                                            {getColumnLabel(col)}
+                            <Table size="medium" stickyHeader>
+                                <TableHead>
+                                    <TableRow sx={{ bgcolor: "#1E3A8A" }}>
+                                        <TableCell sx={headerCellSx} align="center">
+                                            Category
                                         </TableCell>
-                                    ))}
-                                </TableRow>
-                                <TableRow sx={{ borderBottom: "2px solid #1e3a8a", bgcolor: "#bfdbfe" }}>
-                                    <TableCell colSpan={3} sx={totalCellSx} align="center">
-                                        Total
-                                    </TableCell>
-                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }}>
-                                        Grand Total
-                                    </TableCell>
-                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
-                                        {grandTotals.totalKgs.toLocaleString()}
-                                    </TableCell>
-                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
-                                        {grandTotals.roleTotals["Total_Qty"].toLocaleString()}
-                                    </TableCell>
-                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
-                                        {grandTotals.roleTotals["Total_Count"].toLocaleString()}
-                                    </TableCell>
-                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
-                                        {(grandTotals.roleTotals["Total_Item_Count"] || 0).toLocaleString()}
-                                    </TableCell>
-                                    <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #93c5fd" }} />
-                                    {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => (
-                                        <TableCell key={col.key} sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
-                                            {grandTotals.roleTotals[col.key].toLocaleString()}
+                                        <TableCell sx={headerCellSx} align="center">
+                                            Groups
                                         </TableCell>
-                                    ))}
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {tableCategories.length > 0 ? (
-                                    tableCategories.map((category) => {
-                                        let categorySpan = 0;
-                                        category.groups.forEach((group) => {
-                                            group.voucherTypes.forEach((vt: any) => {
-                                                categorySpan += 1;
-                                                const vKey = `${category.name}_${group.groupName}_${vt.name}`;
-                                                if (expandedVouchers.includes(vKey)) {
-                                                    const staffList = staffData[vKey] || [];
-                                                    const filteredStaffList = getFilteredStaffList(staffList, selectedStaffFilters, roleColumns, qtyType);
-                                                    categorySpan += filteredStaffList.length;
-                                                    filteredStaffList.forEach((sc: any) => {
-                                                        const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
-                                                        if (expandedStaff.includes(staffKey)) {
-                                                            const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns, qtyType);
-                                                            categorySpan += invoicesList.length;
-                                                        }
-                                                    });
-                                                }
-                                            });
-                                        });
+                                        <TableCell sx={headerCellSx} align="center">
+                                            Kgs
+                                        </TableCell>
+                                        <TableCell sx={headerCellSx}>
+                                            Voucher Type
+                                        </TableCell>
+                                        <TableCell sx={headerCellSx} align="center">
+                                            Kgs
+                                        </TableCell>
+                                        <TableCell sx={headerCellSx} align="center">
+                                            Total Qty
+                                        </TableCell>
+                                        <TableCell sx={headerCellSx} align="center">
+                                            Total Inv Count
+                                        </TableCell>
+                                        <TableCell sx={headerCellSx} align="center">
+                                            Total Item Count
+                                        </TableCell>
+                                        <TableCell
+                                            sx={{
+                                                ...headerCellSx,
+                                                cursor: "pointer",
+                                                "&:hover": { bgcolor: "#1b3580" }
+                                            }}
+                                            onClick={(e) => setStaffFilterAnchor(e.currentTarget)}
+                                        >
+                                            STAFF NAME
+                                        </TableCell>
 
-                                        let isFirstCategoryRow = true;
-
-                                        return category.groups.map((group) => {
-                                            let groupSpan = 0;
-                                            group.voucherTypes.forEach((vt: any) => {
-                                                groupSpan += 1;
-                                                const vKey = `${category.name}_${group.groupName}_${vt.name}`;
-                                                if (expandedVouchers.includes(vKey)) {
-                                                    const staffList = staffData[vKey] || [];
-                                                    const filteredStaffList = getFilteredStaffList(staffList, selectedStaffFilters, roleColumns, qtyType);
-                                                    groupSpan += filteredStaffList.length;
-                                                    filteredStaffList.forEach((sc: any) => {
-                                                        const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
-                                                        if (expandedStaff.includes(staffKey)) {
-                                                            const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns, qtyType);
-                                                            groupSpan += invoicesList.length;
-                                                        }
-                                                    });
-                                                }
+                                        {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => (
+                                            <TableCell key={col.key} sx={headerCellSx} align="center">
+                                                {getColumnLabel(col)}
+                                            </TableCell>
+                                        ))}
+                                    </TableRow>
+                                    <TableRow sx={{ borderBottom: "2px solid #1e3a8a", bgcolor: "#bfdbfe" }}>
+                                        <TableCell colSpan={3} sx={totalCellSx} align="center">
+                                            Total
+                                        </TableCell>
+                                        <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }}>
+                                            Grand Total
+                                        </TableCell>
+                                        <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
+                                            {grandTotals.totalKgs.toLocaleString()}
+                                        </TableCell>
+                                        <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
+                                            {grandTotals.roleTotals["Total_Qty"].toLocaleString()}
+                                        </TableCell>
+                                        <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
+                                            {grandTotals.roleTotals["Total_Count"].toLocaleString()}
+                                        </TableCell>
+                                        <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
+                                            {(grandTotals.roleTotals["Total_Item_Count"] || 0).toLocaleString()}
+                                        </TableCell>
+                                        <TableCell sx={{ ...totalCellSx, borderRight: "1px solid #93c5fd" }} />
+                                        {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => (
+                                            <TableCell key={col.key} sx={{ ...totalCellSx, borderRight: "1px solid #e2e8f0" }} align="center">
+                                                {grandTotals.roleTotals[col.key].toLocaleString()}
+                                            </TableCell>
+                                        ))}
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {tableCategories.length > 0 ? (
+                                        tableCategories.map((category) => {
+                                            let categorySpan = 0;
+                                            category.groups.forEach((group) => {
+                                                group.voucherTypes.forEach((vt: any) => {
+                                                    categorySpan += 1;
+                                                    const vKey = `${category.name}_${group.groupName}_${vt.name}`;
+                                                    if (expandedVouchers.includes(vKey)) {
+                                                        const staffList = staffData[vKey] || [];
+                                                        const filteredStaffList = getFilteredStaffList(staffList, selectedStaffFilters, roleColumns, qtyType);
+                                                        categorySpan += filteredStaffList.length;
+                                                        filteredStaffList.forEach((sc: any) => {
+                                                            const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
+                                                            if (expandedStaff.includes(staffKey)) {
+                                                                const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns, qtyType);
+                                                                categorySpan += invoicesList.length;
+                                                            }
+                                                        });
+                                                    }
+                                                });
                                             });
 
-                                            let isFirstGroupRow = true;
+                                            let isFirstCategoryRow = true;
 
-                                            return group.voucherTypes.map((vt: any) => {
-                                                const vKey = `${category.name}_${group.groupName}_${vt.name}`;
-                                                const isExpanded = expandedVouchers.includes(vKey);
-                                                const filteredStaff = getFilteredStaffList(vt.staff || [], selectedStaffFilters, roleColumns, qtyType);
-                                                const hasStaff = filteredStaff.length > 0;
+                                            return category.groups.map((group) => {
+                                                let groupSpan = 0;
+                                                group.voucherTypes.forEach((vt: any) => {
+                                                    groupSpan += 1;
+                                                    const vKey = `${category.name}_${group.groupName}_${vt.name}`;
+                                                    if (expandedVouchers.includes(vKey)) {
+                                                        const staffList = staffData[vKey] || [];
+                                                        const filteredStaffList = getFilteredStaffList(staffList, selectedStaffFilters, roleColumns, qtyType);
+                                                        groupSpan += filteredStaffList.length;
+                                                        filteredStaffList.forEach((sc: any) => {
+                                                            const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
+                                                            if (expandedStaff.includes(staffKey)) {
+                                                                const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns, qtyType);
+                                                                groupSpan += invoicesList.length;
+                                                            }
+                                                        });
+                                                    }
+                                                });
 
-                                                const mainRow = (
-                                                    <TableRow key={vt.name} sx={{ bgcolor: "#f8fafc", "&:hover": { bgcolor: "#f1f5f9" } }}>
-                                                        {isFirstCategoryRow && (
-                                                            <TableCell
-                                                                rowSpan={categorySpan}
-                                                                sx={{
-                                                                    fontWeight: 800,
-                                                                    bgcolor: "#e0f2fe",
-                                                                    color: "#0369a1",
-                                                                    borderRight: "2px solid #7dd3fc",
-                                                                    borderBottom: "2px solid #7dd3fc",
-                                                                    verticalAlign: "middle",
-                                                                    fontSize: "0.85rem"
-                                                                }}
-                                                                align="center"
-                                                            >
-                                                                <Typography variant="body2" fontWeight={800} mb={1}>
-                                                                    {category.name}
-                                                                </Typography>
-                                                                {category.categoryKgs.toLocaleString()}
-                                                            </TableCell>
-                                                        )}
+                                                let isFirstGroupRow = true;
 
-                                                        {isFirstGroupRow && (
-                                                            <TableCell
-                                                                rowSpan={groupSpan}
-                                                                sx={{
-                                                                    fontWeight: 750,
-                                                                    bgcolor: "#f0f9ff",
-                                                                    color: "#0c4a6e",
-                                                                    borderRight: "2px solid #bae6fd",
-                                                                    borderBottom: "2px solid #bae6fd",
-                                                                    verticalAlign: "middle",
-                                                                    fontSize: "0.85rem"
-                                                                }}
-                                                                align="center"
-                                                            >
-                                                                {group.groupName}
-                                                            </TableCell>
-                                                        )}
+                                                return group.voucherTypes.map((vt: any) => {
+                                                    const vKey = `${category.name}_${group.groupName}_${vt.name}`;
+                                                    const isExpanded = expandedVouchers.includes(vKey);
+                                                    const filteredStaff = getFilteredStaffList(vt.staff || [], selectedStaffFilters, roleColumns, qtyType);
+                                                    const hasStaff = filteredStaff.length > 0;
 
-                                                        {isFirstGroupRow && (
-                                                            <TableCell
-                                                                rowSpan={groupSpan}
-                                                                sx={{
-                                                                    fontWeight: 750,
-                                                                    bgcolor: "#f0f9ff",
-                                                                    color: "#0c4a6e",
-                                                                    borderRight: "2px solid #bae6fd",
-                                                                    borderBottom: "2px solid #bae6fd",
-                                                                    verticalAlign: "middle",
-                                                                    fontSize: "0.85rem"
-                                                                }}
-                                                                align="center"
-                                                            >
-                                                                {group.groupKgs.toLocaleString()}
-                                                            </TableCell>
-                                                        )}
-
-                                                        <TableCell
-                                                            sx={{
-                                                                fontWeight: 700,
-                                                                borderRight: "1px solid #cbd5e1",
-                                                                color: "#334155",
-                                                                cursor: "pointer",
-                                                                "&:hover": { color: "#1e3a8a" },
-                                                                fontSize: "0.825rem",
-                                                                py: 1
-                                                            }}
-                                                            onClick={() => handleToggleExpandVoucher(category.name, group.groupName, vt.name)}
-                                                        >
-                                                            <Box display="flex" alignItems="center" gap={0.5}>
-                                                                {isExpanded ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
-                                                                {vt.name}
-                                                            </Box>
-                                                        </TableCell>
-
-                                                        <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
-                                                            {vt.baseKgs.toLocaleString()}
-                                                        </TableCell>
-
-                                                        <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
-                                                            {(vt.roleSums["Total_Qty"] || 0).toLocaleString()}
-                                                        </TableCell>
-                                                        <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
-                                                            {(vt.roleSums["Total_Count"] || 0).toLocaleString()}
-                                                        </TableCell>
-                                                        <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
-                                                            {(vt.roleSums["Total_Item_Count"] || 0).toLocaleString()}
-                                                        </TableCell>
-
-                                                        <TableCell sx={{ fontStyle: "italic", color: "text.secondary", borderRight: "1px solid #cbd5e1", py: 1 }} align="center">
-                                                            -
-                                                        </TableCell>
-
-                                                        {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => {
-                                                            const value = vt.roleSums[col.key] || 0;
-                                                            return (
-                                                                <TableCell key={col.key} sx={{ fontWeight: 800, borderRight: "1px solid #cbd5e1", py: 1, bgcolor: "#f1f5f9" }} align="center">
-                                                                    {value > 0 ? value.toLocaleString() : "0"}
-                                                                </TableCell>
-                                                            );
-                                                        })}
-                                                    </TableRow>
-                                                );
-
-                                                isFirstCategoryRow = false;
-                                                isFirstGroupRow = false;
-
-                                                const staffRows = isExpanded && hasStaff ? (
-                                                    filteredStaff.map((sc: any) => {
-                                                        const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
-                                                        const isStaffExpanded = expandedStaff.includes(staffKey);
-                                                        const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns, qtyType);
-                                                        const hasInvoices = invoicesList.length > 0;
-                                                        const staffRow = (
-                                                            <TableRow key={sc.Cost_Center_Id || sc.Cost_Center_Name} sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
-                                                                <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} />
-                                                                <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} />
-                                                                <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
-                                                                    {getStaffCellValue(sc, "Total_Qty", "qty", qtyType, roleColumns).toLocaleString()}
-                                                                </TableCell>
-                                                                <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
-                                                                    {getStaffCellValue(sc, "Total_Count", "count", qtyType, roleColumns).toLocaleString()}
-                                                                </TableCell>
-                                                                <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
-                                                                    {getStaffCellValue(sc, "Total_Item_Count", "item_count", qtyType, roleColumns).toLocaleString()}
-                                                                </TableCell>
+                                                    const mainRow = (
+                                                        <TableRow key={vt.name} sx={{ bgcolor: "#f8fafc", "&:hover": { bgcolor: "#f1f5f9" } }}>
+                                                            {isFirstCategoryRow && (
                                                                 <TableCell
+                                                                    rowSpan={categorySpan}
                                                                     sx={{
-                                                                        fontWeight: 650,
-                                                                        color: "#1e3a8a",
-                                                                        cursor: "pointer",
-                                                                        borderRight: "1px solid #e2e8f0",
-                                                                        py: 0.8,
-                                                                        fontSize: "0.8rem",
-                                                                        pl: 4,
-                                                                        "&:hover": { textDecoration: "underline" }
+                                                                        fontWeight: 800,
+                                                                        bgcolor: "#e0f2fe",
+                                                                        color: "#0369a1",
+                                                                        borderRight: "2px solid #7dd3fc",
+                                                                        borderBottom: "2px solid #7dd3fc",
+                                                                        verticalAlign: "middle",
+                                                                        fontSize: "0.85rem"
                                                                     }}
-                                                                    onClick={() => handleToggleExpandStaff(category.name, group.groupName, vt.name, sc.Emp_Id, sc.Cost_Center_Name, sc.allEmpIds)}
+                                                                    align="center"
                                                                 >
-                                                                    <Box display="flex" alignItems="center" gap={0.5}>
-                                                                        {isStaffExpanded ? (
-                                                                            <KeyboardArrowUpIcon sx={{ fontSize: "0.9rem" }} />
-                                                                        ) : (
-                                                                            <KeyboardArrowDownIcon sx={{ fontSize: "0.9rem" }} />
-                                                                        )}
-                                                                        {sc.Cost_Center_Name}
-                                                                    </Box>
+                                                                    <Typography variant="body2" fontWeight={800} mb={1}>
+                                                                        {category.name}
+                                                                    </Typography>
+                                                                    {category.categoryKgs.toLocaleString()}
                                                                 </TableCell>
-                                                                {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => {
-                                                                    const metric: "qty" | "count" | "item_count" = col.metric || "qty";
-                                                                    const roleVal = getStaffCellValue(sc, col.key, metric, qtyType, roleColumns);
-                                                                    return (
-                                                                        <TableCell key={col.key} sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
-                                                                            {roleVal > 0 ? roleVal.toLocaleString() : "0"}
-                                                                        </TableCell>
-                                                                    );
-                                                                })}
-                                                            </TableRow>
-                                                        );
-                                                        const invoiceRows = isStaffExpanded && hasInvoices ? (
-                                                            invoicesList.map((inv: any, idx: number) => (
-                                                                <TableRow key={`${staffKey}_${inv.Inv_No}_${idx}`} sx={{ bgcolor: "#ffffff", "&:hover": { bgcolor: "#f8fafc" } }}>
-                                                                    <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} />
-                                                                    <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} />
-                                                                    <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
-                                                                        {getInvoiceCellValue(inv, "Total_Qty", "qty", qtyType, roleColumns).toLocaleString()}
+                                                            )}
+
+                                                            {isFirstGroupRow && (
+                                                                <TableCell
+                                                                    rowSpan={groupSpan}
+                                                                    sx={{
+                                                                        fontWeight: 750,
+                                                                        bgcolor: "#f0f9ff",
+                                                                        color: "#0c4a6e",
+                                                                        borderRight: "2px solid #bae6fd",
+                                                                        borderBottom: "2px solid #bae6fd",
+                                                                        verticalAlign: "middle",
+                                                                        fontSize: "0.85rem"
+                                                                    }}
+                                                                    align="center"
+                                                                >
+                                                                    {group.groupName}
+                                                                </TableCell>
+                                                            )}
+
+                                                            {isFirstGroupRow && (
+                                                                <TableCell
+                                                                    rowSpan={groupSpan}
+                                                                    sx={{
+                                                                        fontWeight: 750,
+                                                                        bgcolor: "#f0f9ff",
+                                                                        color: "#0c4a6e",
+                                                                        borderRight: "2px solid #bae6fd",
+                                                                        borderBottom: "2px solid #bae6fd",
+                                                                        verticalAlign: "middle",
+                                                                        fontSize: "0.85rem"
+                                                                    }}
+                                                                    align="center"
+                                                                >
+                                                                    {group.groupKgs.toLocaleString()}
+                                                                </TableCell>
+                                                            )}
+
+                                                            <TableCell
+                                                                sx={{
+                                                                    fontWeight: 700,
+                                                                    borderRight: "1px solid #cbd5e1",
+                                                                    color: "#334155",
+                                                                    cursor: "pointer",
+                                                                    "&:hover": { color: "#1e3a8a" },
+                                                                    fontSize: "0.825rem",
+                                                                    py: 1
+                                                                }}
+                                                                onClick={() => handleToggleExpandVoucher(category.name, group.groupName, vt.name)}
+                                                            >
+                                                                <Box display="flex" alignItems="center" gap={0.5}>
+                                                                    {isExpanded ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+                                                                    {vt.name}
+                                                                </Box>
+                                                            </TableCell>
+
+                                                            <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
+                                                                {vt.baseKgs.toLocaleString()}
+                                                            </TableCell>
+
+                                                            <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
+                                                                {(vt.roleSums["Total_Qty"] || 0).toLocaleString()}
+                                                            </TableCell>
+                                                            <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
+                                                                {(vt.roleSums["Total_Count"] || 0).toLocaleString()}
+                                                            </TableCell>
+                                                            <TableCell sx={{ fontWeight: 700, borderRight: "1px solid #cbd5e1", fontSize: "0.825rem", py: 1 }} align="center">
+                                                                {(vt.roleSums["Total_Item_Count"] || 0).toLocaleString()}
+                                                            </TableCell>
+
+                                                            <TableCell sx={{ fontStyle: "italic", color: "text.secondary", borderRight: "1px solid #cbd5e1", py: 1 }} align="center">
+                                                                -
+                                                            </TableCell>
+
+                                                            {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => {
+                                                                const value = vt.roleSums[col.key] || 0;
+                                                                return (
+                                                                    <TableCell key={col.key} sx={{ fontWeight: 800, borderRight: "1px solid #cbd5e1", py: 1, bgcolor: "#f1f5f9" }} align="center">
+                                                                        {value > 0 ? value.toLocaleString() : "0"}
                                                                     </TableCell>
-                                                                    <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
-                                                                        {getInvoiceCellValue(inv, "Total_Count", "count", qtyType, roleColumns).toLocaleString()}
+                                                                );
+                                                            })}
+                                                        </TableRow>
+                                                    );
+
+                                                    isFirstCategoryRow = false;
+                                                    isFirstGroupRow = false;
+
+                                                    const staffRows = isExpanded && hasStaff ? (
+                                                        filteredStaff.map((sc: any) => {
+                                                            const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
+                                                            const isStaffExpanded = expandedStaff.includes(staffKey);
+                                                            const invoicesList = getFilteredStaffByCategories(invoiceData[staffKey] || [], roleColumns, qtyType);
+                                                            const hasInvoices = invoicesList.length > 0;
+                                                            const staffRow = (
+                                                                <TableRow key={sc.Cost_Center_Id || sc.Cost_Center_Name} sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
+                                                                    <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} />
+                                                                    <TableCell sx={{ borderRight: "1px solid #e2e8f0", py: 0.8 }} />
+                                                                    <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
+                                                                        {getStaffCellValue(sc, "Total_Qty", "qty", qtyType, roleColumns).toLocaleString()}
                                                                     </TableCell>
-                                                                    <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
-                                                                        {getInvoiceCellValue(inv, "Total_Item_Count", "item_count", qtyType, roleColumns).toLocaleString()}
+                                                                    <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
+                                                                        {getStaffCellValue(sc, "Total_Count", "count", qtyType, roleColumns).toLocaleString()}
+                                                                    </TableCell>
+                                                                    <TableCell sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
+                                                                        {getStaffCellValue(sc, "Total_Item_Count", "item_count", qtyType, roleColumns).toLocaleString()}
                                                                     </TableCell>
                                                                     <TableCell
                                                                         sx={{
-                                                                            color: "#334155",
-                                                                            borderRight: "1px solid #cbd5e1",
-                                                                            py: 0.6,
+                                                                            fontWeight: 650,
+                                                                            color: "#1e3a8a",
+                                                                            cursor: "pointer",
+                                                                            borderRight: "1px solid #e2e8f0",
+                                                                            py: 0.8,
                                                                             fontSize: "0.8rem",
-                                                                            pl: 6
+                                                                            pl: 4,
+                                                                            "&:hover": { textDecoration: "underline" }
                                                                         }}
+                                                                        onClick={() => handleToggleExpandStaff(category.name, group.groupName, vt.name, sc.Emp_Id, sc.Cost_Center_Name, sc.allEmpIds)}
                                                                     >
-                                                                        {inv.Inv_No}
+                                                                        <Box display="flex" alignItems="center" gap={0.5}>
+                                                                            {isStaffExpanded ? (
+                                                                                <KeyboardArrowUpIcon sx={{ fontSize: "0.9rem" }} />
+                                                                            ) : (
+                                                                                <KeyboardArrowDownIcon sx={{ fontSize: "0.9rem" }} />
+                                                                            )}
+                                                                            {sc.Cost_Center_Name}
+                                                                        </Box>
                                                                     </TableCell>
                                                                     {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => {
                                                                         const metric: "qty" | "count" | "item_count" = col.metric || "qty";
-                                                                        const val = getInvoiceCellValue(inv, col.key, metric, qtyType, roleColumns);
+                                                                        const roleVal = getStaffCellValue(sc, col.key, metric, qtyType, roleColumns);
                                                                         return (
-                                                                            <TableCell
-                                                                                key={col.key}
-                                                                                sx={{
-                                                                                    color: "#475569",
-                                                                                    borderRight: "1px solid #cbd5e1",
-                                                                                    py: 0.6,
-                                                                                    fontSize: "0.8rem"
-                                                                                }}
-                                                                                align="center"
-                                                                            >
-                                                                                {val !== undefined && val !== null ? val.toLocaleString() : "0"}
+                                                                            <TableCell key={col.key} sx={{ color: "#475569", borderRight: "1px solid #e2e8f0", py: 0.8, fontSize: "0.8rem" }} align="center">
+                                                                                {roleVal > 0 ? roleVal.toLocaleString() : "0"}
                                                                             </TableCell>
                                                                         );
                                                                     })}
                                                                 </TableRow>
-                                                            ))
-                                                        ) : null;
-                                                        return (
-                                                            <React.Fragment key={sc.Emp_Id || sc.Cost_Center_Name}>
-                                                                {staffRow}
-                                                                {invoiceRows}
-                                                            </React.Fragment>
-                                                        );
-                                                    })
-                                                ) : null;
+                                                            );
+                                                            const invoiceRows = isStaffExpanded && hasInvoices ? (
+                                                                invoicesList.map((inv: any, idx: number) => (
+                                                                    <TableRow key={`${staffKey}_${inv.Inv_No}_${idx}`} sx={{ bgcolor: "#ffffff", "&:hover": { bgcolor: "#f8fafc" } }}>
+                                                                        <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} />
+                                                                        <TableCell sx={{ borderRight: "1px solid #cbd5e1", py: 0.6 }} />
+                                                                        <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
+                                                                            {getInvoiceCellValue(inv, "Total_Qty", "qty", qtyType, roleColumns).toLocaleString()}
+                                                                        </TableCell>
+                                                                        <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
+                                                                            {getInvoiceCellValue(inv, "Total_Count", "count", qtyType, roleColumns).toLocaleString()}
+                                                                        </TableCell>
+                                                                        <TableCell sx={{ color: "#475569", borderRight: "1px solid #cbd5e1", py: 0.6, fontSize: "0.8rem" }} align="center">
+                                                                            {getInvoiceCellValue(inv, "Total_Item_Count", "item_count", qtyType, roleColumns).toLocaleString()}
+                                                                        </TableCell>
+                                                                        <TableCell
+                                                                            sx={{
+                                                                                color: "#334155",
+                                                                                borderRight: "1px solid #cbd5e1",
+                                                                                py: 0.6,
+                                                                                fontSize: "0.8rem",
+                                                                                pl: 6
+                                                                            }}
+                                                                        >
+                                                                            {inv.Inv_No}
+                                                                        </TableCell>
+                                                                        {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => {
+                                                                            const metric: "qty" | "count" | "item_count" = col.metric || "qty";
+                                                                            const val = getInvoiceCellValue(inv, col.key, metric, qtyType, roleColumns);
+                                                                            return (
+                                                                                <TableCell
+                                                                                    key={col.key}
+                                                                                    sx={{
+                                                                                        color: "#475569",
+                                                                                        borderRight: "1px solid #cbd5e1",
+                                                                                        py: 0.6,
+                                                                                        fontSize: "0.8rem"
+                                                                                    }}
+                                                                                    align="center"
+                                                                                >
+                                                                                    {val !== undefined && val !== null ? val.toLocaleString() : "0"}
+                                                                                </TableCell>
+                                                                            );
+                                                                        })}
+                                                                    </TableRow>
+                                                                ))
+                                                            ) : null;
+                                                            return (
+                                                                <React.Fragment key={sc.Emp_Id || sc.Cost_Center_Name}>
+                                                                    {staffRow}
+                                                                    {invoiceRows}
+                                                                </React.Fragment>
+                                                            );
+                                                        })
+                                                    ) : null;
 
-                                                return (
-                                                    <React.Fragment key={vt.name}>
-                                                        {mainRow}
-                                                        {staffRows}
-                                                    </React.Fragment>
-                                                );
+                                                    return (
+                                                        <React.Fragment key={vt.name}>
+                                                            {mainRow}
+                                                            {staffRows}
+                                                        </React.Fragment>
+                                                    );
+                                                });
                                             });
-                                        });
-                                    })
-                                ) : (
-                                    <TableRow>
-                                        <TableCell colSpan={9 + roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").length} align="center" sx={{ py: 6 }}>
-                                            No records found.
-                                        </TableCell>
-                                    </TableRow>
-                                )}
-                            </TableBody>
-                        </Table>
+                                        })
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={9 + roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").length} align="center" sx={{ py: 6 }}>
+                                                No records found.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
                         </TableContainer>
                     )}
                 </Box>
@@ -2370,6 +2825,149 @@ const OverallStaffReport: React.FC = () => {
                     </Button>
                     <Button variant="contained" onClick={handleQuickSave}>
                         Save
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Export Options Modal Dialog */}
+            <Dialog
+                open={exportDialogOpen}
+                onClose={() => setExportDialogOpen(false)}
+                maxWidth="sm"
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: 3,
+                        p: 1,
+                        boxShadow: "0 10px 40px rgba(0,0,0,0.15)"
+                    }
+                }}
+            >
+                <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", pb: 1 }}>
+                    <Box display="flex" alignItems="center" gap={1.25}>
+                        <FileDownloadIcon sx={{ color: "#1E3A8A", fontSize: 26 }} />
+                        <Typography variant="h6" fontWeight={700} color="#1E3A8A">
+                            Export Report Options
+                        </Typography>
+                    </Box>
+                    <IconButton size="small" onClick={() => setExportDialogOpen(false)}>
+                        <CloseIcon />
+                    </IconButton>
+                </DialogTitle>
+
+                <DialogContent dividers sx={{ display: "flex", flexDirection: "column", gap: 2, py: 2.5 }}>
+                    {/* Option 1: Default Summary Export */}
+                    <Paper
+                        variant="outlined"
+                        sx={{
+                            p: 2,
+                            borderRadius: 2,
+                            borderColor: "#cbd5e1",
+                            transition: "all 0.2s",
+                            "&:hover": { borderColor: "#1E3A8A", bgcolor: "#f8fafc" }
+                        }}
+                    >
+                        <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={2}>
+                            <Box>
+                                <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                                    <TableChartIcon sx={{ fontSize: 18, color: "#1E3A8A" }} />
+                                    <Chip label="Default" size="small" sx={{ fontWeight: 700, fontSize: "0.65rem", bgcolor: "#e2e8f0" }} />
+                                    <Typography variant="subtitle2" fontWeight={700} color="#1e293b">
+                                        Default Export (Summary View)
+                                    </Typography>
+                                </Box>
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                    Exports the standard hierarchical Category, Group, and Voucher Type overview summary with totals.
+                                </Typography>
+                            </Box>
+                            <Box display="flex" flexDirection="column" gap={1} flexShrink={0}>
+                                <Button
+                                    variant="contained"
+                                    size="small"
+                                    onClick={() => {
+                                        setExportDialogOpen(false);
+                                        handleDefaultExportExcel();
+                                    }}
+                                    sx={{
+                                        textTransform: "none",
+                                        bgcolor: "#1E3A8A",
+                                        fontWeight: 600,
+                                        borderRadius: 1.5,
+                                        "&:hover": { bgcolor: "#1b3580" }
+                                    }}
+                                >
+                                    Export Excel
+                                </Button>
+                                <Button
+                                    variant="outlined"
+                                    size="small"
+                                    onClick={() => {
+                                        setExportDialogOpen(false);
+                                        handleDefaultExportPDF();
+                                    }}
+                                    sx={{
+                                        textTransform: "none",
+                                        fontWeight: 600,
+                                        borderRadius: 1.5
+                                    }}
+                                >
+                                    Export PDF
+                                </Button>
+                            </Box>
+                        </Box>
+                    </Paper>
+
+                    {/* Option 2: Staff-wise Export */}
+                    <Paper
+                        variant="outlined"
+                        sx={{
+                            p: 2,
+                            borderRadius: 2,
+                            borderColor: "#86efac",
+                            bgcolor: "#f0fdf4",
+                            transition: "all 0.2s",
+                            "&:hover": { borderColor: "#16a34a", boxShadow: "0 4px 12px rgba(34, 197, 94, 0.15)" }
+                        }}
+                    >
+                        <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={2}>
+                            <Box>
+                                <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                                    <PersonIcon sx={{ fontSize: 18, color: "#15803d" }} />
+                                    <Chip label="Staff-wise" size="small" color="success" sx={{ fontWeight: 700, fontSize: "0.65rem", bgcolor: "#dcfce7", color: "#15803d" }} />
+                                    <Typography variant="subtitle2" fontWeight={700} color="#15803d">
+                                        Staff-wise Export (Invoice Expansion)
+                                    </Typography>
+                                </Box>
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                    {selectedStaffFilters.length === 1
+                                        ? `Exports single Excel file named "${selectedStaffFilters[0]}" containing full invoice-level expansion details.`
+                                        : selectedStaffFilters.length > 1
+                                            ? `Exports Excel file with separate tabs for ${selectedStaffFilters.length} selected staff with full invoice expansions.`
+                                            : "Exports Excel file with a separate tab for EACH staff member with full invoice expansions."}
+                                </Typography>
+                            </Box>
+                            <Button
+                                variant="contained"
+                                color="success"
+                                size="small"
+                                disabled={exportingStaffWise}
+                                onClick={handleStaffWiseExportExcel}
+                                sx={{
+                                    textTransform: "none",
+                                    fontWeight: 700,
+                                    borderRadius: 1.5,
+                                    flexShrink: 0,
+                                    boxShadow: "0 2px 6px rgba(34, 197, 94, 0.2)"
+                                }}
+                            >
+                                {exportingStaffWise ? <CircularProgress size={18} color="inherit" /> : "Staff-wise Excel"}
+                            </Button>
+                        </Box>
+                    </Paper>
+                </DialogContent>
+                <DialogActions sx={{ px: 2, py: 1.5 }}>
+                    <Button onClick={() => setExportDialogOpen(false)} sx={{ textTransform: "none", color: "text.secondary" }}>
+                        Close
                     </Button>
                 </DialogActions>
             </Dialog>

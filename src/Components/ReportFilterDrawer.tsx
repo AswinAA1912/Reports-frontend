@@ -12,7 +12,8 @@ import {
     Radio,
     FormControl,
     FormLabel,
-    Autocomplete
+    Autocomplete,
+    Checkbox
 } from "@mui/material";
 import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
 
@@ -32,9 +33,10 @@ interface ReportFilterDrawerProps {
 
     // OLD (keep for compatibility)
     dropdownLabel?: string;
-    dropdownValue?: string | number;
+    dropdownValue?: string | number | (string | number)[];
     dropdownOptions?: DropdownOption[];
-    onDropdownChange?: (value: string | number) => void;
+    dropdownMultiple?: boolean;
+    onDropdownChange?: (value: any) => void;
 
     // NEW ✅
     filterLevels?: Record<number, any[]>;
@@ -95,6 +97,7 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
     dropdownLabel,
     dropdownValue,
     dropdownOptions,
+    dropdownMultiple = false,
     onDropdownChange,
 
     // NEW ✅
@@ -289,27 +292,66 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                     {!filterLevels &&
                         dropdownOptions &&
                         dropdownOptions.length > 0 && (
-                            <TextField
-                                select
-                                label={dropdownLabel}
-                                fullWidth
-                                value={dropdownValue ?? ""}
-                                onChange={(e) => {
-                                    const value = e.target.value;
-                                    const option = dropdownOptions.find(
-                                        (opt) => String(opt.value) === value
-                                    );
-                                    onDropdownChange?.(option ? option.value : "");
-                                }}
-                                sx={{ mb: 2 }}
-                            >
-                                <MenuItem value="">All</MenuItem>
-                                {dropdownOptions.map((opt) => (
-                                    <MenuItem key={opt.value} value={String(opt.value)}>
-                                        {opt.label}
-                                    </MenuItem>
-                                ))}
-                            </TextField>
+                            dropdownMultiple ? (
+                                <Autocomplete
+                                    multiple
+                                    options={dropdownOptions}
+                                    disableCloseOnSelect
+                                    getOptionLabel={(option) => option.label}
+                                    isOptionEqualToValue={(option, val) => String(option.value) === String(val.value)}
+                                    value={
+                                        dropdownOptions.filter((opt) =>
+                                            Array.isArray(dropdownValue)
+                                                ? dropdownValue.some((v) => String(v) === String(opt.value))
+                                                : false
+                                        )
+                                    }
+                                    onChange={(_, newValue) => {
+                                        const values = newValue.map((opt) => opt.value);
+                                        onDropdownChange?.(values);
+                                    }}
+                                    renderOption={(props, option, { selected }) => (
+                                        <li {...props} key={option.value}>
+                                            <Checkbox
+                                                size="small"
+                                                checked={selected}
+                                                sx={{ mr: 1 }}
+                                            />
+                                            {option.label}
+                                        </li>
+                                    )}
+                                    renderInput={(params) => (
+                                        <TextField
+                                            {...params}
+                                            label={dropdownLabel}
+                                            placeholder={`Select ${dropdownLabel || "options"}...`}
+                                        />
+                                    )}
+                                    sx={{ mb: 2 }}
+                                />
+                            ) : (
+                                <TextField
+                                    select
+                                    label={dropdownLabel}
+                                    fullWidth
+                                    value={dropdownValue ?? ""}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        const option = dropdownOptions.find(
+                                            (opt) => String(opt.value) === value
+                                        );
+                                        onDropdownChange?.(option ? option.value : "");
+                                    }}
+                                    sx={{ mb: 2 }}
+                                >
+                                    <MenuItem value="">All</MenuItem>
+                                    {dropdownOptions.map((opt) => (
+                                        <MenuItem key={opt.value} value={String(opt.value)}>
+                                            {opt.label}
+                                        </MenuItem>
+                                    ))}
+                                </TextField>
+                            )
                         )}
 
                     {stockFilter && onStockFilterChange && (

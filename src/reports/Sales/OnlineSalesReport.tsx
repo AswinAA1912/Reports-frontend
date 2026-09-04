@@ -57,6 +57,21 @@ type ColumnConfig = {
   type?: "date" | "number" | "text";
 };
 
+const isSnoCol = (col: { key?: string; label?: string }): boolean => {
+  const normKey = (col.key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const normLabel = (col.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return (
+    normKey === "sno" ||
+    normKey === "slno" ||
+    normKey === "serialno" ||
+    normKey === "rowno" ||
+    normLabel === "sno" ||
+    normLabel === "slno" ||
+    normLabel === "serialno" ||
+    normLabel === "rowno"
+  );
+};
+
 const OnlineSalesReportPage: React.FC = () => {
   const { toggleMode, setToggleMode } = useToggleMode();
 
@@ -205,43 +220,54 @@ const OnlineSalesReportPage: React.FC = () => {
     baseCols: ColumnConfig[],
     templateCols: ColumnConfig[]
   ): ColumnConfig[] => {
+    // 1. Deduplicate template columns (in case DB already has duplicates)
+    const seenTemplateKeys = new Set<string>();
+    const uniqueTemplateCols: ColumnConfig[] = [];
 
-    // 🔥 STEP 1: Create all columns from backend template
-    const templateBasedCols: ColumnConfig[] = templateCols.map((t) => ({
-      key: t.key,
-      label: t.label || t.key,
-      enabled: t.enabled,
-      order: t.order ?? 0,
-      groupBy: t.groupBy ?? 0,
-    }));
+    for (const t of templateCols) {
+      if (isSnoCol(t)) continue; // Never keep any S.No in template columns array
+      const normKey = (t.key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!normKey || seenTemplateKeys.has(normKey)) continue;
+      seenTemplateKeys.add(normKey);
+      uniqueTemplateCols.push(t);
+    }
 
-    // 🔥 STEP 2: Ensure S.NO always exists
+    // 2. Find template-level S.No configuration if present
+    const templateSno = templateCols.find((t) => isSnoCol(t));
+
     const snoCol: ColumnConfig = {
       key: "sno",
       label: "S.No",
-      enabled: true,
+      enabled: templateSno ? templateSno.enabled : true,
       order: 0,
     };
 
-    // 🔥 STEP 3: Merge base columns (for types etc.)
-    const merged = templateBasedCols.map((col) => {
+    // 3. Merge base columns (for types etc.)
+    const merged = uniqueTemplateCols.map((col) => {
       const base = baseCols.find(
-        (b) => b.key.toLowerCase() === col.key.toLowerCase()
+        (b) =>
+          (b.key || "").toLowerCase().replace(/[^a-z0-9]/g, "") ===
+          (col.key || "").toLowerCase().replace(/[^a-z0-9]/g, "")
       );
 
       return {
-        ...col,
-        type: base?.type, // preserve type
+        key: col.key,
+        label: col.label || base?.label || col.key,
+        enabled: col.enabled,
+        order: col.order ?? 0,
+        groupBy: col.groupBy ?? 0,
+        type: base?.type,
       };
     });
 
-    // 🔥 STEP 4: Add missing base columns as disabled
+    // 4. Add missing base columns as disabled (excluding sno)
     const missingBase = baseCols
       .filter(
         (b) =>
-          !templateBasedCols.some(
-            (t) => t.key.toLowerCase() === b.key.toLowerCase()
-          ) && b.key !== "sno"
+          !isSnoCol(b) &&
+          !seenTemplateKeys.has(
+            (b.key || "").toLowerCase().replace(/[^a-z0-9]/g, "")
+          )
       )
       .map((b) => ({
         ...b,
@@ -251,13 +277,28 @@ const OnlineSalesReportPage: React.FC = () => {
     return [snoCol, ...merged, ...missingBase];
   };
 
-  const enabledColumns = useMemo(
-    () =>
-      columns
-        .filter(c => c.enabled)
-        .sort((a, b) => a.order - b.order),
-    [columns]
-  );
+  const enabledColumns = useMemo(() => {
+    const seen = new Set<string>();
+    let hasSno = false;
+
+    return columns
+      .filter((c) => {
+        if (!c.enabled) return false;
+
+        // Ensure strictly only ONE serial number column is ever enabled/rendered
+        if (isSnoCol(c)) {
+          if (hasSno) return false;
+          hasSno = true;
+          return true;
+        }
+
+        const normKey = (c.key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (seen.has(normKey)) return false;
+        seen.add(normKey);
+        return true;
+      })
+      .sort((a, b) => a.order - b.order);
+  }, [columns]);
 
   const handleExportPDF = () => {
     const rows =
@@ -334,8 +375,26 @@ const OnlineSalesReportPage: React.FC = () => {
     newCols: ColumnConfig[],
     currentCols: ColumnConfig[]
   ) => {
-    return newCols.map(col => {
-      const existing = currentCols.find(c => c.key === col.key);
+    let hasSno = false;
+    const seen = new Set<string>();
+    const deduplicatedNewCols = newCols.filter((col) => {
+      if (isSnoCol(col)) {
+        if (hasSno) return false;
+        hasSno = true;
+        return true;
+      }
+      const normKey = (col.key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!normKey || seen.has(normKey)) return false;
+      seen.add(normKey);
+      return true;
+    });
+
+    return deduplicatedNewCols.map((col) => {
+      const existing = currentCols.find(
+        (c) =>
+          (c.key || "").toLowerCase().replace(/[^a-z0-9]/g, "") ===
+          (col.key || "").toLowerCase().replace(/[^a-z0-9]/g, "")
+      );
 
       return {
         ...col,
@@ -684,15 +743,16 @@ const OnlineSalesReportPage: React.FC = () => {
               <TableRow key={i}>
                 {enabledColumns.map((col) => {
                   const align = isNumericCol(col.key) ? "right" : "left";
+
+                  if (isSnoCol(col)) {
+                    return (
+                      <TableCell key={col.key} align={align}>
+                        {(pageNo - 1) * rowsPerPage + i + 1}
+                      </TableCell>
+                    );
+                  }
+
                   switch (col.key) {
-
-                    case "sno":
-                      return (
-                        <TableCell key={col.key} align={align}>
-                          {(pageNo - 1) * rowsPerPage + i + 1}
-                        </TableCell>
-                      );
-
                     case "Ledger_Date":
                       return (
                         <TableCell key={col.key} align={align}>
@@ -826,15 +886,21 @@ const OnlineSalesReportPage: React.FC = () => {
   ): ColumnConfig[] => {
     if (!data.length) return baseColumns;
 
-    const existingKeys = baseColumns.map(c => c.key);
+    const existingKeys = new Set(
+      baseColumns.map((c) => (c.key || "").toLowerCase().replace(/[^a-z0-9]/g, ""))
+    );
 
     const dynamicCols: ColumnConfig[] = Object.keys(data[0])
-      .filter(key => !existingKeys.includes(key))
+      .filter((key) => {
+        if (isSnoCol({ key })) return false;
+        const norm = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+        return !existingKeys.has(norm);
+      })
       .map((key, index) => ({
         key,
         label: key
           .replace(/_/g, " ")
-          .replace(/\b\w/g, c => c.toUpperCase()),
+          .replace(/\b\w/g, (c) => c.toUpperCase()),
         enabled: false,
         order: baseColumns.length + index,
       }));
@@ -865,6 +931,31 @@ const OnlineSalesReportPage: React.FC = () => {
       if (!isEditTemplate || !selectedTemplateId) {
         const userData = JSON.parse(localStorage.getItem("user") || "{}");
 
+        const cleanColumns = (cols: ColumnConfig[]) => {
+          let hasSno = false;
+          const seen = new Set<string>();
+          return cols
+            .filter((c) => {
+              if (isSnoCol(c)) {
+                if (hasSno) return false;
+                hasSno = true;
+                return true;
+              }
+              const normKey = (c.key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+              if (!normKey || seen.has(normKey)) return false;
+              seen.add(normKey);
+              return true;
+            })
+            .map((c) => ({
+              key: isSnoCol(c) ? "sno" : c.key,
+              label: isSnoCol(c) ? "S.No" : c.label,
+              enabled: c.enabled,
+              order: c.order,
+              groupBy: c.groupBy ?? 0,
+              dataType: "nvarchar"
+            }));
+        };
+
         const createPayload = {
           reportName: reportName.trim(),
           parentReport: parentReportName,
@@ -872,23 +963,8 @@ const OnlineSalesReportPage: React.FC = () => {
           expandedSP: spConfig.expandedSP,
           createdBy: Number(userData.id || 0),
 
-          abstractColumns: abstractColumns.map((c) => ({
-            key: c.key,
-            label: c.label,
-            enabled: c.enabled,
-            order: c.order,
-            groupBy: c.groupBy ?? 0,
-            dataType: "nvarchar"
-          })),
-
-          expandedColumns: expandedColumns.map((c) => ({
-            key: c.key,
-            label: c.label,
-            enabled: c.enabled,
-            order: c.order,
-            groupBy: c.groupBy ?? 0,
-            dataType: "nvarchar"
-          }))
+          abstractColumns: cleanColumns(abstractColumns),
+          expandedColumns: cleanColumns(expandedColumns)
         };
 
         await SettingsService.saveReportSettings(createPayload);
@@ -908,30 +984,42 @@ const OnlineSalesReportPage: React.FC = () => {
          Using existing service only
       =============================== */
 
+      const cleanEditColumns = (cols: ColumnConfig[]) => {
+        let hasSno = false;
+        const seen = new Set<string>();
+        return cols
+          .filter((c) => {
+            if (isSnoCol(c)) {
+              if (hasSno) return false;
+              hasSno = true;
+              return true;
+            }
+            const normKey = (c.key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+            if (!normKey || seen.has(normKey)) return false;
+            seen.add(normKey);
+            return true;
+          })
+          .map((c) => ({
+            key: isSnoCol(c) ? "sno" : c.key,
+            label: isSnoCol(c) ? "S.No" : c.label,
+            enabled: c.enabled,
+            order: c.order,
+            groupBy: c.groupBy ?? 0
+          }));
+      };
+
       await SettingsService.updateReport({
         reportId: selectedTemplateId,
         typeId: 1,
         reportName: reportName.trim(),
-        columns: abstractColumns.map((c) => ({
-          key: c.key,
-          label: c.label,
-          enabled: c.enabled,
-          order: c.order,
-          groupBy: c.groupBy ?? 0
-        }))
+        columns: cleanEditColumns(abstractColumns)
       });
 
       await SettingsService.updateReport({
         reportId: selectedTemplateId,
         typeId: 2,
         reportName: reportName.trim(),
-        columns: expandedColumns.map((c) => ({
-          key: c.key,
-          label: c.label,
-          enabled: c.enabled,
-          order: c.order,
-          groupBy: c.groupBy ?? 0
-        }))
+        columns: cleanEditColumns(expandedColumns)
       });
 
       toast.success("Template Saved Successfully ✅");

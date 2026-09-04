@@ -46,6 +46,7 @@ import RetailerLocations from "./RetailerLocations";
 import RecievablePayableReport from "../reports/Expenses/recievablePayableReport";
 import OverallStaffReport from "../reports/StaffBased/overallStaffReport";
 import SalesStockGodown from "../reports/Stock/SalesStockGodown";
+import UserRights from "../settings/UserRights";
 
 interface AppRoutingProps {
   setActiveCategory: (category: string) => void;
@@ -86,7 +87,7 @@ const AppRouting: React.FC<AppRoutingProps> = ({
   setActiveCategory,
   globalLoading,
 }) => {
-  const { token, isInitializing } = useAuth();
+  const { token, isInitializing, user } = useAuth();
 
   if (isInitializing) return <GlobalLoader loading />;
 
@@ -594,6 +595,24 @@ const AppRouting: React.FC<AppRoutingProps> = ({
           element={
             <RequireAuth>
               <RetailerLocations />
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/userRights"
+          element={
+            <RequireAuth>
+              {(() => {
+                const isDevOrAdmin = user && (String(user.UserTypeId) === "0" || String(user.UserTypeId) === "1");
+                return isDevOrAdmin ? (
+                  <AppLayout fullWidth>
+                    <UserRights />
+                  </AppLayout>
+                ) : (
+                  <Navigate to="/dashboard" replace />
+                );
+              })()}
             </RequireAuth>
           }
         />

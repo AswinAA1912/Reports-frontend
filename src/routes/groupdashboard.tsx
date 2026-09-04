@@ -25,7 +25,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/authContext";
 import Header from "../Layout/Header";
 import { useQuery } from "@tanstack/react-query";
-import { MenuService } from "../services/menus.service";
+import { fetchAndFilterMenus } from "../utils/menuRights";
 import { handleExternalOrMenuNavigation } from "../utils/navigation";
 import { DashBoardSalesGraph } from "../services/graphAnalysis.services";
 
@@ -38,17 +38,11 @@ const GroupDashboard: React.FC = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
   const { data: menuList = [], isLoading } = useQuery({
-    queryKey: ["dashboard-menus"],
+    queryKey: ["dashboard-menus", user?.id],
     queryFn: async () => {
-      const res = await MenuService.getMenus();
-
-      return res.data.data
-        .filter((menu: any) => menu.menu_type === 1 && menu.is_active === 3)
-        .flatMap((menu: any) =>
-          (menu.SubMenu || []).filter((sub: any) => sub.is_active === 3)
-        )
-        .sort((a: any, b: any) => a.display_order - b.display_order);
+      return await fetchAndFilterMenus(user);
     },
+    enabled: !!user,
   });
 
   const today = new Date();

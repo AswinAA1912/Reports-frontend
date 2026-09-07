@@ -212,7 +212,7 @@ export const employeeReportGroupService = {
       { params }
     ),
 
-  getEmployeeInvoices: (params?: { Fromdate?: string; Todate?: string; Overall_GroupName?: string; Group_Name?: string; Voucher_Type?: string; Emp_Id?: number; Emp_Id_Is_Unassigned?: number }) =>
+  getEmployeeInvoices: (params?: { Fromdate?: string; Todate?: string; Overall_GroupName?: string; Group_Name?: string; Voucher_Type?: string | number; Voucher_Type_Id?: number; VoucherId?: number; Emp_Id?: number; Emp_Id_Is_Unassigned?: number }) =>
     axios.get<{ success: boolean; data: any[] }>(
       `${getBaseURL()}api/reports/externalAPI/overallStaffCategorywise/invoices`,
       { params }

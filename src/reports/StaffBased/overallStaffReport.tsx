@@ -84,6 +84,7 @@ const discoverRoleColumns = (data: any[], currentCols: ColumnConfig[]): ColumnCo
         "Group_Name",
         "Overall_GroupName",
         "Voucher_Type",
+        "Voucher_Type_Id",
         "Voucher_Ref_Id",
         "Total_Tonnage",
         "Invoice_Count",
@@ -1161,8 +1162,11 @@ const OverallStaffReport: React.FC = () => {
                 totalTonnage = roleSums["Total_Tonnage"];
                 totalCount = roleSums["Invoice_Count"];
 
+                const vtId = r.Voucher_Type_Id || r.VoucherId || r.Vocher_Type_Id || voucherTypes.find((v: any) => String(v.label).trim().toUpperCase() === String(r.Voucher_Type).trim().toUpperCase() || String(v.Voucher_Type).trim().toUpperCase() === String(r.Voucher_Type).trim().toUpperCase())?.Value;
+
                 return {
                     name: r.Voucher_Type,
+                    voucherTypeId: vtId !== undefined && vtId !== null ? Number(vtId) : undefined,
                     baseKgs: totalTonnage,
                     roleSums,
                     totalTonnage,
@@ -1242,8 +1246,11 @@ const OverallStaffReport: React.FC = () => {
                     totalTonnage = roleSums["Total_Tonnage"];
                     totalCount = roleSums["Invoice_Count"];
 
+                    const vtId = r.Voucher_Type_Id || r.VoucherId || r.Vocher_Type_Id || voucherTypes.find((v: any) => String(v.label).trim().toUpperCase() === String(r.Voucher_Type).trim().toUpperCase() || String(v.Voucher_Type).trim().toUpperCase() === String(r.Voucher_Type).trim().toUpperCase())?.Value;
+
                     return {
                         name: r.Voucher_Type,
+                        voucherTypeId: vtId !== undefined && vtId !== null ? Number(vtId) : undefined,
                         baseKgs: totalTonnage,
                         roleSums,
                         totalTonnage,
@@ -1390,7 +1397,8 @@ const OverallStaffReport: React.FC = () => {
         voucherName: string,
         empId: number,
         _staffName: string,
-        allEmpIds?: any[]
+        allEmpIds?: any[],
+        voucherTypeId?: number
     ) => {
         const vKey = `${parentCategory}_${groupName}_${voucherName}`;
         const staffKey = `${vKey}_${empId || 'unassigned'}`;
@@ -1401,13 +1409,22 @@ const OverallStaffReport: React.FC = () => {
             if (!invoiceData[staffKey]) {
                 try {
                     const empIds = allEmpIds && allEmpIds.length > 0 ? allEmpIds : [empId];
+                    const matchedVoucher = voucherTypes.find((v: any) => 
+                        String(v.label).trim().toUpperCase() === String(voucherName).trim().toUpperCase() || 
+                        String(v.Voucher_Type).trim().toUpperCase() === String(voucherName).trim().toUpperCase() ||
+                        String(v.Value) === String(voucherName)
+                    );
+                    const resolvedVoucherTypeId = voucherTypeId !== undefined && voucherTypeId !== null
+                        ? Number(voucherTypeId)
+                        : (matchedVoucher ? Number(matchedVoucher.Value) : undefined);
+
                     const promises = empIds.map(id =>
                         employeeReportGroupService.getEmployeeInvoices({
                             Fromdate: fromDate,
                             Todate: toDate,
                             Overall_GroupName: parentCategory === "ADJUSTMENTS" ? "PROCESS" : parentCategory,
                             Group_Name: groupName,
-                            Voucher_Type: voucherName,
+                            Voucher_Type: resolvedVoucherTypeId !== undefined ? resolvedVoucherTypeId : voucherName,
                             Emp_Id: id || undefined,
                             Emp_Id_Is_Unassigned: id ? 0 : 1
                         })
@@ -1804,6 +1821,7 @@ const OverallStaffReport: React.FC = () => {
                 parentCategory: string;
                 groupName: string;
                 voucherName: string;
+                voucherTypeId?: number;
                 empIds: (number | undefined)[];
             }
             const invoiceJobs: InvoiceJob[] = [];
@@ -1819,11 +1837,20 @@ const OverallStaffReport: React.FC = () => {
                                 const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
                                 if (!localInvoiceData[staffKey]) {
                                     const empIds = sc.allEmpIds && sc.allEmpIds.length > 0 ? sc.allEmpIds : [sc.Emp_Id];
+                                    const matchedVoucher = voucherTypes.find((v: any) => 
+                                        String(v.label).trim().toUpperCase() === String(vt.name).trim().toUpperCase() || 
+                                        String(v.Voucher_Type).trim().toUpperCase() === String(vt.name).trim().toUpperCase()
+                                    );
+                                    const resolvedVtId = vt.voucherTypeId !== undefined && vt.voucherTypeId !== null
+                                        ? Number(vt.voucherTypeId)
+                                        : (matchedVoucher ? Number(matchedVoucher.Value) : undefined);
+
                                     invoiceJobs.push({
                                         staffKey,
                                         parentCategory: cat.name,
                                         groupName: group.groupName,
                                         voucherName: vt.name,
+                                        voucherTypeId: resolvedVtId,
                                         empIds
                                     });
                                 }
@@ -1845,7 +1872,7 @@ const OverallStaffReport: React.FC = () => {
                                 Todate: toDate,
                                 Overall_GroupName: job.parentCategory === "ADJUSTMENTS" ? "PROCESS" : job.parentCategory,
                                 Group_Name: job.groupName,
-                                Voucher_Type: job.voucherName,
+                                Voucher_Type: job.voucherTypeId !== undefined ? job.voucherTypeId : job.voucherName,
                                 Emp_Id: id || undefined,
                                 Emp_Id_Is_Unassigned: id ? 0 : 1
                             })
@@ -2469,7 +2496,7 @@ const OverallStaffReport: React.FC = () => {
                                                                             pl: 4,
                                                                             "&:hover": { textDecoration: "underline" }
                                                                         }}
-                                                                        onClick={() => handleToggleExpandStaff(category.name, group.groupName, vt.name, sc.Emp_Id, sc.Cost_Center_Name, sc.allEmpIds)}
+                                                                        onClick={() => handleToggleExpandStaff(category.name, group.groupName, vt.name, sc.Emp_Id, sc.Cost_Center_Name, sc.allEmpIds, vt.voucherTypeId)}
                                                                     >
                                                                         <Box display="flex" alignItems="center" gap={0.5}>
                                                                             {isStaffExpanded ? (

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNumericalFilter } from "../../hooks/useNumericalFilter";
 import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
 import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import {
     Box,
     Table,
@@ -23,7 +24,6 @@ import {
     DialogActions,
     DialogTitle,
     DialogContent,
-    Checkbox,
     CircularProgress,
     Accordion,
     AccordionSummary,
@@ -258,10 +258,9 @@ const LOSStaffBasedReport: React.FC = () => {
     const [filterAnchor, setFilterAnchor] =
         useState<null | HTMLElement>(null);
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
-    const [searchText, setSearchText] = useState("");
     type FiltersMap = {
         Date: { from: string; to: string };
-        columnFilters: Record<string, string[]>;
+        columnFilters: Record<string, string[] | undefined>;
     };
 
     const [filters, setFilters] = useState<FiltersMap>({
@@ -567,7 +566,7 @@ const LOSStaffBasedReport: React.FC = () => {
                 return false;
 
             for (const [key, values] of Object.entries(filters.columnFilters)) {
-                if (!values || values.length === 0) continue;
+                if (values === undefined) continue;
 
                 const rowValue = String(row[key] ?? "")
                     .trim()
@@ -768,7 +767,6 @@ const LOSStaffBasedReport: React.FC = () => {
         header: string
     ) => {
         setActiveHeader(header);
-        setSearchText("");
         setFilterAnchor(e.currentTarget);
     };
 
@@ -1962,135 +1960,37 @@ const LOSStaffBasedReport: React.FC = () => {
                 </Box>
             </AppLayout>
 
-            {activeHeader && (
-                <Menu
-                    anchorEl={filterAnchor}
-                    open={Boolean(filterAnchor)}
-                    onClose={() => setFilterAnchor(null)}
-                >
-                    <Box p={2} sx={{ minWidth: 240 }}>
-
-                        {/* ===== DATE FILTER ===== */}
-                        {activeHeader === "Stock_Journal_date" && (
-                            <Box display="flex" flexDirection="column" gap={1}>
-                                <TextField
-                                    type="date"
-                                    value={filters.Date.from}
-                                    onChange={(e) =>
-                                        setFilters(p => ({
-                                            ...p,
-                                            Date: { ...p.Date, from: e.target.value },
-                                        }))
-                                    }
-                                    size="small"
-                                />
-                                <TextField
-                                    type="date"
-                                    value={filters.Date.to}
-                                    onChange={(e) =>
-                                        setFilters(p => ({
-                                            ...p,
-                                            Date: { ...p.Date, to: e.target.value },
-                                        }))
-                                    }
-                                    size="small"
-                                />
-                                <Button
-                                    size="small"
-                                    variant="contained"
-                                    onClick={() => setFilterAnchor(null)}
-                                    sx={{
-                                        backgroundColor: "#1E3A8A",
-                                        fontWeight: 600,
-                                    }}
-                                >
-                                    Apply
-                                </Button>
-                            </Box>
-                        )}
-
-                        {/* ===== MULTISELECT FILTER (ALL OTHER COLUMNS) ===== */}
-                        {activeHeader !== "Stock_Journal_date" && (
-                            <>
-                                {/* SEARCH */}
-                                <TextField
-                                    size="small"
-                                    fullWidth
-                                    placeholder={`Search ${activeHeader}`}
-                                    value={searchText}
-                                    onChange={(e) => setSearchText(e.target.value)}
-                                    sx={{ mb: 1 }}
-                                />
-
-                                {/* ALL = CLEAR FILTER */}
-                                <MenuItem
-                                    dense
-                                    sx={{ fontWeight: 600 }}
-                                    onClick={() => {
-                                        setFilters(p => {
-                                            const copy = { ...p.columnFilters };
-                                            delete copy[activeHeader]; // 🔥 clear filter
-                                            return { ...p, columnFilters: copy };
-                                        });
-                                    }}
-                                >
-                                    <Checkbox
-                                        size="small"
-                                        checked={
-                                            !filters.columnFilters[activeHeader] ||
-                                            filters.columnFilters[activeHeader].length === 0
-                                        }
-                                    />
-                                    All
-                                </MenuItem>
-
-                                {/* OPTIONS */}
-                                <Box sx={{ maxHeight: 250, overflow: "auto" }}>
-                                    {filterOptions
-                                        .filter(v =>
-                                            v.toLowerCase().includes(searchText.toLowerCase())
-                                        )
-                                        .map(v => {
-                                            const selected =
-                                                filters.columnFilters[activeHeader]?.includes(v) ?? false;
-
-                                            return (
-                                                <MenuItem
-                                                    key={v}
-                                                    dense
-                                                    onClick={() => {
-                                                        setFilters(p => {
-                                                            const existing =
-                                                                p.columnFilters[activeHeader] ?? [];
-
-                                                            const updated = existing.includes(v)
-                                                                ? existing.filter(x => x !== v)
-                                                                : [...existing, v];
-
-                                                            return {
-                                                                ...p,
-                                                                columnFilters: {
-                                                                    ...p.columnFilters,
-                                                                    [activeHeader]: updated,
-                                                                },
-                                                            };
-                                                        });
-                                                    }}
-                                                >
-                                                    <Checkbox
-                                                        size="small"
-                                                        checked={selected}
-                                                    />
-                                                    {v}
-                                                </MenuItem>
-                                            );
-                                        })}
-                                </Box>
-                            </>
-                        )}
-                    </Box>
-                </Menu>
-            )}
+            <HeaderFilterMenu
+                anchorEl={filterAnchor}
+                open={Boolean(filterAnchor)}
+                onClose={() => setFilterAnchor(null)}
+                columnLabel={activeHeader || undefined}
+                options={filterOptions}
+                selectedValues={activeHeader ? filters.columnFilters[activeHeader] : undefined}
+                onFilterChange={(newSelected) => {
+                    if (!activeHeader) return;
+                    setFilters((p) => {
+                        const copy = { ...p.columnFilters };
+                        if (newSelected === undefined) {
+                            delete copy[activeHeader];
+                        } else {
+                            copy[activeHeader] = newSelected;
+                        }
+                        return { ...p, columnFilters: copy };
+                    });
+                    setPage(1);
+                }}
+                isDateColumn={activeHeader === "Stock_Journal_date"}
+                dateFrom={filters.Date.from}
+                dateTo={filters.Date.to}
+                onDateChange={(dates) =>
+                    setFilters((p) => ({
+                        ...p,
+                        Date: { ...p.Date, from: dates.from, to: dates.to },
+                    }))
+                }
+                onApplyDate={() => setFilterAnchor(null)}
+            />
 
             {/* ===== COLUMN SETTINGS ===== */}
             <Menu

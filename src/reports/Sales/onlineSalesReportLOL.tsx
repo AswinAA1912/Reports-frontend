@@ -23,9 +23,9 @@ import {
     DialogActions,
     DialogTitle,
     DialogContent,
-    Checkbox,
     CircularProgress
 } from "@mui/material";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import dayjs from "dayjs";
 import SettingsIcon from "@mui/icons-material/Settings";
 import GroupWorkIcon from "@mui/icons-material/GroupWork";
@@ -179,34 +179,37 @@ const SortableColumnRow = ({ column, onToggle, hasActiveFilter, }: SortableColum
 const CURRENCY_KEYS = ["Total_Invoice_value", "Amount", "Rate"];
 
 const formatCreatedOn = (dateString: any): string => {
-  if (!dateString) return "-";
-  
-  const date = new Date(dateString);
-  if (isNaN(date.getTime())) return "-";
+    if (!dateString) return "-";
+    if (typeof dateString === "string" && (dateString.includes("a.m.") || dateString.includes("p.m."))) {
+        return dateString;
+    }
 
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true
-  });
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return "-";
 
-  const parts = formatter.formatToParts(date);
-  const getPart = (type: string) => parts.find(p => p.type === type)?.value || "";
+    const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true
+    });
 
-  const day = getPart("day");
-  const month = getPart("month");
-  const year = getPart("year");
-  const hour = getPart("hour");
-  const minute = getPart("minute");
-  const dayPeriod = getPart("dayPeriod").toLowerCase();
+    const parts = formatter.formatToParts(date);
+    const getPart = (type: string) => parts.find(p => p.type === type)?.value || "";
 
-  const ampm = dayPeriod.includes("pm") || dayPeriod.includes("p.m") ? "p.m." : "a.m.";
+    const day = getPart("day");
+    const month = getPart("month");
+    const year = getPart("year");
+    const hour = getPart("hour");
+    const minute = getPart("minute");
+    const dayPeriod = getPart("dayPeriod").toLowerCase();
 
-  return `${day}-${month}-${year} ${hour}.${minute} ${ampm}`;
+    const ampm = dayPeriod.includes("pm") || dayPeriod.includes("p.m") ? "p.m." : "a.m.";
+
+    return `${day}-${month}-${year} ${hour}.${minute} ${ampm}`;
 };
 
 /* ================= HELPERS ================= */
@@ -227,8 +230,8 @@ const buildColumnsFromApi = (
         const matched = lolColumns.find(
             col => col.ColumnName?.toUpperCase() === key.toUpperCase()
         );
-        const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
-            ? matched.Alias_Name.trim() 
+        const label = (matched && matched.Alias_Name && matched.Alias_Name.trim())
+            ? matched.Alias_Name.trim()
             : key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 
         return {
@@ -283,12 +286,11 @@ const OnlineSalesReportLOL: React.FC = () => {
     const [filterAnchor, setFilterAnchor] =
         useState<null | HTMLElement>(null);
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
-    const [searchText, setSearchText] = useState("");
     const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
     const [isEditTemplate, setIsEditTemplate] = useState(false);
     type FiltersMap = {
         Date: { from: string; to: string };
-        columnFilters: Record<string, string[]>;
+        columnFilters: Record<string, string[] | undefined>;
     };
 
     const [filters, setFilters] = useState<FiltersMap>({
@@ -533,13 +535,22 @@ const OnlineSalesReportLOL: React.FC = () => {
                 return false;
 
             for (const [key, values] of Object.entries(filters.columnFilters)) {
-                if (!values || values.length === 0) continue;
+                if (values === undefined) continue;
 
-                const rowValue = String(row[key] ?? "").trim().toLowerCase();
+                const rawVal = row[key];
+                const formattedVal = key === "Created_on"
+                    ? (rawVal ? formatCreatedOn(rawVal) : "-")
+                    : key === "Ledger_Date"
+                        ? (rawVal ? dayjs(rawVal).format("DD/MM/YYYY") : "-")
+                        : String(rawVal ?? "");
 
-                const match = values.some(v =>
-                    String(v).trim().toLowerCase() === rowValue
-                );
+                const rowValue = formattedVal.trim().toLowerCase();
+                const rawRowValue = String(rawVal ?? "").trim().toLowerCase();
+
+                const match = values.some(v => {
+                    const target = String(v).trim().toLowerCase();
+                    return target === rowValue || target === rawRowValue;
+                });
 
                 if (!match) return false;
             }
@@ -607,7 +618,12 @@ const OnlineSalesReportLOL: React.FC = () => {
             const map = new Map<string, any[]>();
 
             for (const row of data) {
-                const val = String(row[groupKey] ?? "Others");
+                const rawVal = row[groupKey];
+                const val = groupKey === "Created_on"
+                    ? (rawVal ? formatCreatedOn(rawVal) : "-")
+                    : groupKey === "Ledger_Date"
+                        ? (rawVal ? dayjs(rawVal).format("DD/MM/YYYY") : "-")
+                        : String(rawVal ?? "Others");
 
                 if (!map.has(val)) {
                     map.set(val, []);
@@ -639,6 +655,16 @@ const OnlineSalesReportLOL: React.FC = () => {
                                     sum + Number(r[key] || 0),
                                 0
                             );
+                        }
+
+                        if (key === "Created_on") {
+                            const d = group.__rows[0]?.[key];
+                            return d ? new Date(d).getTime() : 0;
+                        }
+
+                        if (key === "Ledger_Date") {
+                            const d = group.__rows[0]?.[key];
+                            return d ? dayjs(d).valueOf() : 0;
                         }
 
                         return String(group.__rows[0]?.[key] ?? "");
@@ -766,7 +792,6 @@ const OnlineSalesReportLOL: React.FC = () => {
         header: string
     ) => {
         setActiveHeader(header);
-        setSearchText("");
         setFilterAnchor(e.currentTarget);
     };
 
@@ -830,10 +855,15 @@ const OnlineSalesReportLOL: React.FC = () => {
 
         const uniqueValues = Array.from(
             new Set(
-                rawRows   // ✅ FIXED
-                    .map(r => r[activeHeader])
-                    .filter(v => v !== null && v !== undefined && v !== "")
-                    .map(v => String(v).trim())
+                rawRows
+                    .map(r => {
+                        const rawVal = r[activeHeader];
+                        if (rawVal === null || rawVal === undefined || rawVal === "") return null;
+                        if (activeHeader === "Created_on") return formatCreatedOn(rawVal);
+                        if (activeHeader === "Ledger_Date") return dayjs(rawVal).format("DD/MM/YYYY");
+                        return String(rawVal).trim();
+                    })
+                    .filter((v): v is string => Boolean(v))
             )
         );
 
@@ -864,8 +894,15 @@ const OnlineSalesReportLOL: React.FC = () => {
                             grouping[row.__level];
 
                         if (col.key === currentGroupKey) {
+                            const formattedVal =
+                                currentGroupKey === "Created_on"
+                                    ? (row.__value && row.__value !== "-" && !row.__value.includes("m.") ? formatCreatedOn(row.__value) : row.__value)
+                                    : currentGroupKey === "Ledger_Date"
+                                        ? (row.__value && row.__value !== "-" && !row.__value.includes("/") ? dayjs(row.__value).format("DD/MM/YYYY") : row.__value)
+                                        : row.__value;
+
                             exportGroup[col.label] =
-                                `${" ".repeat(row.__level * 4)}${row.__value}`;
+                                `${" ".repeat(row.__level * 4)}${formattedVal}`;
                         }
                         else if (col.isNumeric) {
 
@@ -1082,8 +1119,8 @@ const OnlineSalesReportLOL: React.FC = () => {
             const matched = lolColumns.find(
                 col => col.ColumnName?.toUpperCase() === t.key.toUpperCase()
             );
-            const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
-                ? matched.Alias_Name.trim() 
+            const label = (matched && matched.Alias_Name && matched.Alias_Name.trim())
+                ? matched.Alias_Name.trim()
                 : (t.label || t.key);
 
             return {
@@ -1110,8 +1147,8 @@ const OnlineSalesReportLOL: React.FC = () => {
                 const matched = lolColumns.find(
                     col => col.ColumnName?.toUpperCase() === b.key.toUpperCase()
                 );
-                const label = (matched && matched.Alias_Name && matched.Alias_Name.trim()) 
-                    ? matched.Alias_Name.trim() 
+                const label = (matched && matched.Alias_Name && matched.Alias_Name.trim())
+                    ? matched.Alias_Name.trim()
                     : b.label;
                 return {
                     ...b,
@@ -1540,9 +1577,16 @@ const OnlineSalesReportLOL: React.FC = () => {
                                                         const currentGroupKey = grouping[row.__level];
 
                                                         if (c.key === currentGroupKey) {
+                                                            const displayVal =
+                                                                currentGroupKey === "Created_on"
+                                                                    ? (row.__value && row.__value !== "-" && !row.__value.includes("m.") ? formatCreatedOn(row.__value) : row.__value)
+                                                                    : currentGroupKey === "Ledger_Date"
+                                                                        ? (row.__value && row.__value !== "-" && !row.__value.includes("/") ? dayjs(row.__value).format("DD/MM/YYYY") : row.__value)
+                                                                        : row.__value;
+
                                                             return (
                                                                 <TableCell key={c.key} sx={{ fontWeight: 700 }}>
-                                                                    {row.__value}
+                                                                    {displayVal}
                                                                 </TableCell>
                                                             );
                                                         }
@@ -1605,135 +1649,37 @@ const OnlineSalesReportLOL: React.FC = () => {
                 </Box>
             </AppLayout>
 
-            {activeHeader && (
-                <Menu
-                    anchorEl={filterAnchor}
-                    open={Boolean(filterAnchor)}
-                    onClose={() => setFilterAnchor(null)}
-                >
-                    <Box p={2} sx={{ minWidth: 240 }}>
-
-                        {/* ===== DATE FILTER ===== */}
-                        {activeHeader === "Ledger_Date" && (
-                            <Box display="flex" flexDirection="column" gap={1}>
-                                <TextField
-                                    type="date"
-                                    value={filters.Date.from}
-                                    onChange={(e) =>
-                                        setFilters(p => ({
-                                            ...p,
-                                            Date: { ...p.Date, from: e.target.value },
-                                        }))
-                                    }
-                                    size="small"
-                                />
-                                <TextField
-                                    type="date"
-                                    value={filters.Date.to}
-                                    onChange={(e) =>
-                                        setFilters(p => ({
-                                            ...p,
-                                            Date: { ...p.Date, to: e.target.value },
-                                        }))
-                                    }
-                                    size="small"
-                                />
-                                <Button
-                                    size="small"
-                                    variant="contained"
-                                    onClick={() => setFilterAnchor(null)}
-                                    sx={{
-                                        backgroundColor: "#1E3A8A",
-                                        fontWeight: 600,
-                                    }}
-                                >
-                                    Apply
-                                </Button>
-                            </Box>
-                        )}
-
-                        {/* ===== MULTISELECT FILTER (ALL OTHER COLUMNS) ===== */}
-                        {activeHeader !== "Ledger_Date" && (
-                            <>
-                                {/* SEARCH */}
-                                <TextField
-                                    size="small"
-                                    fullWidth
-                                    placeholder={`Search ${activeHeader}`}
-                                    value={searchText}
-                                    onChange={(e) => setSearchText(e.target.value)}
-                                    sx={{ mb: 1 }}
-                                />
-
-                                {/* ALL = CLEAR FILTER */}
-                                <MenuItem
-                                    dense
-                                    sx={{ fontWeight: 600 }}
-                                    onClick={() => {
-                                        setFilters(p => {
-                                            const copy = { ...p.columnFilters };
-                                            delete copy[activeHeader]; // 🔥 clear filter
-                                            return { ...p, columnFilters: copy };
-                                        });
-                                    }}
-                                >
-                                    <Checkbox
-                                        size="small"
-                                        checked={
-                                            !filters.columnFilters[activeHeader] ||
-                                            filters.columnFilters[activeHeader].length === 0
-                                        }
-                                    />
-                                    All
-                                </MenuItem>
-
-                                {/* OPTIONS */}
-                                <Box sx={{ maxHeight: 250, overflow: "auto" }}>
-                                    {filterOptions
-                                        .filter(v =>
-                                            v.toLowerCase().includes(searchText.toLowerCase())
-                                        )
-                                        .map(v => {
-                                            const selected =
-                                                filters.columnFilters[activeHeader]?.includes(v) ?? false;
-
-                                            return (
-                                                <MenuItem
-                                                    key={v}
-                                                    dense
-                                                    onClick={() => {
-                                                        setFilters(p => {
-                                                            const existing =
-                                                                p.columnFilters[activeHeader] ?? [];
-
-                                                            const updated = existing.includes(v)
-                                                                ? existing.filter(x => x !== v)
-                                                                : [...existing, v];
-
-                                                            return {
-                                                                ...p,
-                                                                columnFilters: {
-                                                                    ...p.columnFilters,
-                                                                    [activeHeader]: updated,
-                                                                },
-                                                            };
-                                                        });
-                                                    }}
-                                                >
-                                                    <Checkbox
-                                                        size="small"
-                                                        checked={selected}
-                                                    />
-                                                    {v}
-                                                </MenuItem>
-                                            );
-                                        })}
-                                </Box>
-                            </>
-                        )}
-                    </Box>
-                </Menu>
-            )}
+            <HeaderFilterMenu
+                anchorEl={filterAnchor}
+                open={Boolean(filterAnchor)}
+                onClose={() => setFilterAnchor(null)}
+                columnLabel={activeHeader || undefined}
+                options={filterOptions}
+                selectedValues={activeHeader ? filters.columnFilters[activeHeader] : undefined}
+                onFilterChange={(newSelected) => {
+                    if (!activeHeader) return;
+                    setFilters((p) => {
+                        const copy = { ...p.columnFilters };
+                        if (newSelected === undefined) {
+                            delete copy[activeHeader];
+                        } else {
+                            copy[activeHeader] = newSelected;
+                        }
+                        return { ...p, columnFilters: copy };
+                    });
+                    setPage(1);
+                }}
+                isDateColumn={activeHeader === "Ledger_Date"}
+                dateFrom={filters.Date.from}
+                dateTo={filters.Date.to}
+                onDateChange={(dates) =>
+                    setFilters((p) => ({
+                        ...p,
+                        Date: { ...p.Date, from: dates.from, to: dates.to },
+                    }))
+                }
+                onApplyDate={() => setFilterAnchor(null)}
+            />
 
             {/* ===== COLUMN SETTINGS ===== */}
             <Menu

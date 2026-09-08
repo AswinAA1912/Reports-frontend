@@ -2311,7 +2311,7 @@ const InStockReport: React.FC = () => {
     const showCreatedOn = processMode || outwardMode || popupFilterType === "Trip In" || String(popupFilterType).startsWith("Trip");
 
     return (
-        <Box sx={{ width: "100%", minHeight: "100vh", bgcolor: "#f8fafc", p: 2, boxSizing: "border-box" }}>
+        <Box sx={{ width: "100%", minHeight: "100%", bgcolor: "#f8fafc", p: 2, boxSizing: "border-box" }}>
             <PageHeader
                 onExportExcel={handleExportExcel}
                 onExportPDF={handleExportPDF}

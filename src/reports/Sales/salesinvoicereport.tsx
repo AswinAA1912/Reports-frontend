@@ -197,9 +197,9 @@ const SalesInvoiceReportPage: React.FC = () => {
 
       {/* ===== SCROLLABLE CONTENT ===== */}
       <AppLayout fullWidth>
-        <Box>
-          <TableContainer component={Paper}>
-            <Table size="small">
+        <Box sx={{ flex: 1, minHeight: 0, height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", p: 1 }}>
+          <TableContainer component={Paper} sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+            <Table size="small" stickyHeader>
               <TableHead sx={{ background: "#1E3A8A" }}>
                 <TableRow>
                   <TableCell sx={headStyle}>S.No</TableCell>

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNumericalFilter } from "../../hooks/useNumericalFilter";
 import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
 import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import {
     Box,
     Table,
@@ -86,6 +87,9 @@ const NUMERIC_KEYS = [
 
 const formatCreatedOn = (dateString: any): string => {
   if (!dateString) return "-";
+  if (typeof dateString === "string" && (dateString.includes("a.m.") || dateString.includes("p.m."))) {
+    return dateString;
+  }
   
   const date = new Date(dateString);
   if (isNaN(date.getTime())) return "-";
@@ -128,7 +132,7 @@ type ColumnConfig = {
 
 type FiltersMap = {
     Date: { from: string; to: string };
-    columnFilters: Record<string, string[]>;
+    columnFilters: Record<string, string[] | undefined>;
 };
 
 /* ================= HELPERS ================= */
@@ -220,7 +224,6 @@ const SalesReport: React.FC = () => {
     const [filterAnchor, setFilterAnchor] =
         useState<null | HTMLElement>(null);
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
-    const [searchText, setSearchText] = useState("");
 
     /* ===== FILTERS ===== */
     const [filters, setFilters] = useState<FiltersMap>({
@@ -240,8 +243,6 @@ const SalesReport: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [stockFilter, setStockFilter] = useState<"hasValues" | "zero" | "all">("hasValues");
     const [columnMode, setColumnMode] = useState<Record<string, "total" | "avg">>({});
-    const selectedValues =
-        activeHeader ? filters.columnFilters[activeHeader!] ?? [] : [];
     const [templateConfig, setTemplateConfig] = useState<{
         abstract: ColumnConfig[];
         expanded: ColumnConfig[];
@@ -536,7 +537,7 @@ const SalesReport: React.FC = () => {
 
             // ✅ COLUMN FILTERS
             for (const [key, values] of Object.entries(filters.columnFilters)) {
-                if (!values.length) continue;
+                if (values === undefined) continue;
                 const rowValue = String(row[key] ?? "");
                 if (!values.some(v => v === rowValue)) return false;
             }
@@ -615,7 +616,10 @@ const SalesReport: React.FC = () => {
             const map = new Map<string, any[]>();
 
             for (const row of data) {
-                const val = String(row[groupKey] ?? "Others");
+                const rawVal = row[groupKey];
+                const val = groupKey === "Created_on"
+                    ? (rawVal ? formatCreatedOn(rawVal) : "-")
+                    : String(rawVal ?? "Others");
                 if (!map.has(val)) map.set(val, []);
                 map.get(val)!.push(row);
             }
@@ -797,7 +801,7 @@ const SalesReport: React.FC = () => {
         const rowsForOptions = numFilteredAndSortedRows.filter(row => {
             for (const [key, values] of Object.entries(filters.columnFilters)) {
                 if (key === activeHeader) continue; // ✅ skip current column
-                if (!values.length) continue;
+                if (values === undefined) continue;
 
                 const rowValue = String(row[key] ?? "");
                 if (!values.includes(rowValue)) return false;
@@ -844,10 +848,6 @@ const SalesReport: React.FC = () => {
         });
     };
 
-    const mergedOptions = Array.from(
-        new Set([...selectedValues, ...filterOptions])
-    );
-
     const renderRows = (rows: any[]) =>
         rows.map((row: any, rowIndex: number) => {
             if (row.__group) {
@@ -883,9 +883,14 @@ const SalesReport: React.FC = () => {
                             {enabledColumns.map(c => {
                                 // ✅ Show group value in grouped column
                                 if (c.key === appliedGroupBy[row.__level]) {
+                                    const displayVal =
+                                        c.key === "Created_on"
+                                            ? (row.__value && row.__value !== "-" && !row.__value.includes("m.") ? formatCreatedOn(row.__value) : row.__value)
+                                            : row.__value;
+
                                     return (
                                         <TableCell key={c.key} align={c.isNumeric ? "right" : "left"} sx={{ fontWeight: 600 }}>
-                                            {row.__value}
+                                            {displayVal}
                                         </TableCell>
                                     );
                                 }
@@ -1427,97 +1432,27 @@ const SalesReport: React.FC = () => {
                 </Box>
             </AppLayout >
 
-            {/* ===== FILTER MENU ===== */}
-            {
-                activeHeader && (
-                    <Menu
-                        anchorEl={filterAnchor}
-                        open={Boolean(filterAnchor)}
-                        onClose={() => setFilterAnchor(null)}
-                    >
-                        <Box p={2} minWidth={260}>
-
-                            {/* 🔍 SEARCH */}
-                            <TextField
-                                size="small"
-                                fullWidth
-                                placeholder={`Search ${activeHeader}`}
-                                value={searchText}
-                                onChange={e => setSearchText(e.target.value)}
-                                sx={{ mb: 1 }}
-                            />
-
-                            {/* CLEAR */}
-                            <MenuItem
-                                onClick={() => {
-                                    setFilters(p => {
-                                        const copy = { ...p.columnFilters };
-                                        delete copy[activeHeader];
-                                        return { ...p, columnFilters: copy };
-                                    });
-
-                                    setFilterAnchor(null);
-                                }}
-                            >
-                                All
-                            </MenuItem>
-
-                            {/* 🔥 MULTISELECT OPTIONS */}
-                            {[
-                                ...selectedValues,
-                                ...mergedOptions.filter(v => !selectedValues.includes(v))
-                            ]
-                                .filter(v =>
-                                    v.toLowerCase().includes(searchText.toLowerCase())
-                                )
-                                .map(v => {
-                                    const selected =
-                                        filters.columnFilters[activeHeader]?.includes(v) ?? false;
-
-                                    return (
-                                        <MenuItem
-                                            key={v}
-                                            onClick={() =>
-                                                setFilters(p => {
-                                                    const existing =
-                                                        p.columnFilters[activeHeader!] ?? [];
-
-                                                    return {
-                                                        ...p,
-                                                        columnFilters: {
-                                                            ...p.columnFilters,
-                                                            [activeHeader!]: selected
-                                                                ? existing.filter(x => x !== v)
-                                                                : [...existing, v],
-                                                        },
-                                                    };
-                                                })
-                                            }
-                                            sx={{
-                                                backgroundColor: selected
-                                                    ? "rgba(30, 58, 138, 0.15)"
-                                                    : "transparent",
-                                                fontWeight: selected ? 600 : 400,
-                                                display: "flex",
-                                                alignItems: "center",
-                                                gap: 1
-                                            }}
-                                        >
-                                            {/* ✅ Checkbox (important for UX) */}
-                                            <input
-                                                type="checkbox"
-                                                checked={selected}
-                                                readOnly
-                                            />
-
-                                            {v}
-                                        </MenuItem>
-                                    );
-                                })}
-                        </Box>
-                    </Menu>
-                )
-            }
+            <HeaderFilterMenu
+                anchorEl={filterAnchor}
+                open={Boolean(filterAnchor)}
+                onClose={() => setFilterAnchor(null)}
+                columnLabel={activeHeader || undefined}
+                options={filterOptions}
+                selectedValues={activeHeader ? filters.columnFilters[activeHeader] : undefined}
+                onFilterChange={(newSelected) => {
+                    if (!activeHeader) return;
+                    setFilters((p) => {
+                        const copy = { ...p.columnFilters };
+                        if (newSelected === undefined) {
+                            delete copy[activeHeader];
+                        } else {
+                            copy[activeHeader] = newSelected;
+                        }
+                        return { ...p, columnFilters: copy };
+                    });
+                    setPage(1);
+                }}
+            />
 
             {/* ===== COLUMN SETTINGS MENU ===== */}
             <Menu
@@ -1570,7 +1505,7 @@ const SalesReport: React.FC = () => {
                                 <SortableColumnItem
                                     key={col.key}
                                     column={col}
-                                    showFilter={!!filters.columnFilters[col.key]?.length || !!numRangeFilter[col.key]}
+                                    showFilter={filters.columnFilters[col.key] !== undefined || !!numRangeFilter[col.key]}
                                     onToggle={() =>
                                         setColumns(prev =>
                                             prev.map(c =>

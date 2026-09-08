@@ -9,12 +9,12 @@ import {
   TableRow,
   Paper,
   Menu,
-  MenuItem,
   TextField,
   Button,
   Slider,
   Typography,
 } from "@mui/material";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import dayjs from "dayjs";
@@ -47,9 +47,12 @@ const UnitEconomicsReportPage: React.FC = () => {
   const [rowsPerPage, setRowsPerPage] = useState(100);
 
   /* -------- FILTERS -------- */
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<{
+    Date: { from: string; to: string };
+    Product?: string[];
+  }>({
     Date: { from: today, to: today },
-    Product: "",
+    Product: undefined,
   });
 
   const [tempDate, setTempDate] = useState(filters.Date);
@@ -57,7 +60,6 @@ const UnitEconomicsReportPage: React.FC = () => {
   /* -------- HEADER FILTER -------- */
   const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
   const [activeHeader, setActiveHeader] = useState<string | null>(null);
-  const [searchText, setSearchText] = useState("");
   const [lastSyncDate, setLastSyncDate] = useState<string | null>(null);
 
   /* -------- SUMMARY -------- */
@@ -194,9 +196,9 @@ const UnitEconomicsReportPage: React.FC = () => {
   useEffect(() => {
     let rows = [...rawApiData];
 
-    if (filters.Product) {
+    if (filters.Product !== undefined) {
       rows = rows.filter(
-        (r) => r.Product_Name === filters.Product
+        (r) => filters.Product!.includes(r.Product_Name)
       );
     }
 
@@ -233,12 +235,9 @@ const UnitEconomicsReportPage: React.FC = () => {
   /* ================= DROPDOWNS ================= */
   const products = useMemo(
     () =>
-      [...new Set(data.map((d) => d.Product_Name))]
-        .filter(Boolean)
-        .filter((p) =>
-          p.toLowerCase().includes(searchText.toLowerCase())
-        ),
-    [data, searchText]
+      [...new Set(rawApiData.map((d) => d.Product_Name))]
+        .filter(Boolean),
+    [rawApiData]
   );
 
   /* ================= SUMMARY ================= */
@@ -250,7 +249,6 @@ const UnitEconomicsReportPage: React.FC = () => {
   const openFilter = (e: React.MouseEvent<HTMLElement>, column: string) => {
     setActiveHeader(column);
     setFilterAnchor(e.currentTarget);
-    setSearchText("");
 
     if (["Bill_Qty", "Rate", "Amount", "COGS"].includes(column)) {
       if (summaryColumn === column) {
@@ -449,80 +447,44 @@ const UnitEconomicsReportPage: React.FC = () => {
             </Table>
           </TableContainer>
 
-          {/* ===== FILTER MENU (SAME PATTERN AS REFERENCE) ===== */}
+          {/* Categorical / Date Filter Menu */}
+          <HeaderFilterMenu
+            anchorEl={filterAnchor}
+            open={Boolean(filterAnchor) && Boolean(activeHeader) && !isNumericColumn(activeHeader!)}
+            onClose={() => setFilterAnchor(null)}
+            columnLabel={activeHeader || undefined}
+            options={
+              activeHeader === "Product"
+                ? products
+                : []
+            }
+            selectedValues={
+              activeHeader === "Product"
+                ? filters.Product
+                : undefined
+            }
+            onFilterChange={(newSelected) => {
+              if (activeHeader === "Product") {
+                setFilters((p) => ({ ...p, Product: newSelected }));
+              }
+              setPage(1);
+            }}
+            isDateColumn={activeHeader === "Date"}
+            dateFrom={tempDate.from}
+            dateTo={tempDate.to}
+            onDateChange={(dates) => setTempDate(dates)}
+            onApplyDate={() => {
+              setFilters((p) => ({ ...p, Date: tempDate }));
+              setFilterAnchor(null);
+            }}
+          />
+
+          {/* Numerical Filter Menu */}
           <Menu
             anchorEl={filterAnchor}
-            open={Boolean(filterAnchor)}
+            open={Boolean(filterAnchor) && Boolean(activeHeader) && isNumericColumn(activeHeader!)}
             onClose={() => setFilterAnchor(null)}
           >
-            {activeHeader === "Product" && (
-              <Box p={2} sx={{ minWidth: 220 }}>
-                <TextField
-                  size="small"
-                  fullWidth
-                  placeholder="Search Product"
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                  sx={{ mb: 1 }}
-                />
-
-                {/* ✅ ALL – ALWAYS FIRST */}
-                <MenuItem
-                  sx={{ fontWeight: 600 }}
-                  onClick={() => {
-                    setFilters((f) => ({ ...f, Product: "" }));
-                    setFilterAnchor(null);
-                  }}
-                >
-                  All
-                </MenuItem>
-
-                {/* ✅ PRODUCT LIST BELOW ALL */}
-                {products.map((p) => (
-                  <MenuItem
-                    key={p}
-                    onClick={() => {
-                      setFilters((f) => ({ ...f, Product: p }));
-                      setFilterAnchor(null);
-                    }}
-                  >
-                    {p}
-                  </MenuItem>
-                ))}
-              </Box>
-            )}
-
-            {activeHeader === "Date" && (
-              <Box p={2} display="flex" flexDirection="column" gap={1}>
-                <TextField
-                  type="date"
-                  value={tempDate.from}
-                  onChange={(e) =>
-                    setTempDate((p) => ({ ...p, from: e.target.value }))
-                  }
-                />
-                <TextField
-                  type="date"
-                  value={tempDate.to}
-                  onChange={(e) =>
-                    setTempDate((p) => ({ ...p, to: e.target.value }))
-                  }
-                />
-                <Button
-                  variant="contained"
-                  onClick={() => {
-                    setFilters((p) => ({ ...p, Date: tempDate }));
-                    setFilterAnchor(null);
-                  }}
-                  sx={{
-                    backgroundColor: "#1E3A8A",
-                    fontWeight: 600,
-                  }}
-                >
-                  Apply
-                </Button>
-              </Box>
-            )}
 
             {activeHeader && isNumericColumn(activeHeader) && (() => {
               const { min, max } = getMinMax(activeHeader);

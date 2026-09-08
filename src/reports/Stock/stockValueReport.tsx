@@ -954,10 +954,10 @@ const StockValueReport: React.FC = () => {
                         display: "flex",
                         flexDirection: "column",
                         maxHeight: "calc(100vh - 130px)",
-                        overflow: "visible",
+                        overflow: "hidden",
                     }}
                 >
-                    <TableContainer >
+                    <TableContainer sx={{ maxHeight: "calc(100vh - 130px)", overflow: "auto" }}>
                         {loading ? (
                             <Box
                                 sx={{

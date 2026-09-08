@@ -27,8 +27,8 @@ import {
     RadioGroup,
     FormControlLabel,
     Radio,
-    Checkbox
 } from "@mui/material";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import dayjs from "dayjs";
 import SettingsIcon from "@mui/icons-material/Settings";
 import GroupWorkIcon from "@mui/icons-material/GroupWork";
@@ -217,14 +217,13 @@ const RateMasterAdminReport: React.FC = () => {
     const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null);
     const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
-    const [searchText, setSearchText] = useState("");
 
     const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
     const [, setIsEditTemplate] = useState(false);
     const [saveDialogOpen, setSaveDialogOpen] = useState(false);
     const [reportName, setReportName] = useState("");
 
-    const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+    const [columnFilters, setColumnFilters] = useState<Record<string, string[] | undefined>>({});
 
     const [grouping, setGrouping] = useState<string[]>([]);
     const [pendingGrouping, setPendingGrouping] = useState<string[]>([]);
@@ -432,7 +431,7 @@ const RateMasterAdminReport: React.FC = () => {
         return radioFilteredRows.filter(row => {
             // Text Header filters
             for (const [key, filterVals] of Object.entries(columnFilters)) {
-                if (filterVals && filterVals.length > 0) {
+                if (filterVals !== undefined) {
                     const val = String(row[key] ?? "");
                     if (!filterVals.includes(val)) {
                         return false;
@@ -600,20 +599,7 @@ const RateMasterAdminReport: React.FC = () => {
         if (col?.isNumeric) return; // Handled by Numerical Filter Hook
 
         setActiveHeader(key);
-        setSearchText("");
         setFilterAnchor(e.currentTarget);
-    };
-
-    const handleFilterSelect = (val: string) => {
-        const current = columnFilters[activeHeader!] || [];
-        const updated = current.includes(val)
-            ? current.filter(x => x !== val)
-            : [...current, val];
-
-        setColumnFilters(prev => ({
-            ...prev,
-            [activeHeader!]: updated
-        }));
     };
 
     const handleSortClick = (e: React.MouseEvent, key: string) => {
@@ -675,13 +661,6 @@ const RateMasterAdminReport: React.FC = () => {
         const vals = [...new Set(radioFilteredRows.map(x => String(x[activeHeader] ?? "")))].filter(Boolean);
         return vals.sort();
     }, [activeHeader, radioFilteredRows]);
-
-    const filteredOptions = useMemo(() => {
-        if (!searchText) return filterOptions;
-        return filterOptions.filter(opt =>
-            opt.toLowerCase().includes(searchText.toLowerCase())
-        );
-    }, [searchText, filterOptions]);
 
     /* ================= DRAWER SUBMIT/RESET ================= */
 
@@ -1081,7 +1060,7 @@ const RateMasterAdminReport: React.FC = () => {
                                         key={col.key}
                                         column={col}
                                         onToggle={handleToggleColumn}
-                                        hasActiveFilter={Boolean(columnFilters[col.key]?.length)}
+                                        hasActiveFilter={columnFilters[col.key] !== undefined}
                                     />
                                 ))}
                         </SortableContext>
@@ -1128,75 +1107,30 @@ const RateMasterAdminReport: React.FC = () => {
             </Menu>
 
             {/* ******* STRING COLUMN HEADER FILTER MENU ******* */}
-            <Menu
+            <HeaderFilterMenu
                 anchorEl={filterAnchor}
                 open={Boolean(filterAnchor)}
                 onClose={() => {
                     setFilterAnchor(null);
                     setActiveHeader(null);
                 }}
-                PaperProps={{
-                    sx: {
-                        width: 250,
-                        maxHeight: 350,
-                        p: 1,
+                columnLabel={columns.find((c) => c.key === activeHeader)?.label || activeHeader || undefined}
+                options={filterOptions}
+                selectedValues={activeHeader ? columnFilters[activeHeader] : undefined}
+                onFilterChange={(selected: string[] | undefined) => {
+                    if (activeHeader) {
+                        setColumnFilters((prev) => {
+                            const copy = { ...prev };
+                            if (selected === undefined) {
+                                delete copy[activeHeader];
+                            } else {
+                                copy[activeHeader] = selected;
+                            }
+                            return copy;
+                        });
                     }
                 }}
-            >
-                <Box p={1}>
-                    <TextField
-                        size="small"
-                        fullWidth
-                        placeholder="Search..."
-                        value={searchText}
-                        onChange={(e) => setSearchText(e.target.value)}
-                        sx={{ mb: 1 }}
-                    />
-                    <Box sx={{ maxHeight: 200, overflow: "auto" }}>
-                        {filteredOptions.length === 0 ? (
-                            <Typography variant="caption" color="textSecondary" align="center" display="block">
-                                No options found
-                            </Typography>
-                        ) : (
-                            filteredOptions.map((opt) => {
-                                const isChecked = (columnFilters[activeHeader!] || []).includes(opt);
-                                return (
-                                    <Box key={opt} display="flex" alignItems="center">
-                                        <Checkbox
-                                            size="small"
-                                            checked={isChecked}
-                                            onChange={() => handleFilterSelect(opt)}
-                                        />
-                                        <Typography variant="body2" noWrap sx={{ userSelect: "none", cursor: "pointer" }} onClick={() => handleFilterSelect(opt)}>
-                                            {opt}
-                                        </Typography>
-                                    </Box>
-                                );
-                            })
-                        )}
-                    </Box>
-
-                    {columnFilters[activeHeader!]?.length > 0 && (
-                        <Box display="flex" justifyContent="flex-end" mt={1}>
-                            <Button
-                                size="small"
-                                color="warning"
-                                onClick={() => {
-                                    setColumnFilters(prev => {
-                                        const copy = { ...prev };
-                                        delete copy[activeHeader!];
-                                        return copy;
-                                    });
-                                    setFilterAnchor(null);
-                                    setActiveHeader(null);
-                                }}
-                            >
-                                Clear
-                            </Button>
-                        </Box>
-                    )}
-                </Box>
-            </Menu>
+            />
 
             {/* ******* NUMERICAL RANGE FILTER MENU ******* */}
             <NumericalFilterMenu

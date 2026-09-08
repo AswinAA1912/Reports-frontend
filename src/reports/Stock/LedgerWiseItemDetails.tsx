@@ -3,6 +3,7 @@ import { useNumericalFilter } from "../../hooks/useNumericalFilter";
 import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
 import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import { useSearchParams } from "react-router-dom";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import {
     Box,
     Table,
@@ -125,7 +126,6 @@ const LedgerItemWiseDetails: React.FC = () => {
         useState<null | HTMLElement>(null);
     const [activeHeader, setActiveHeader] =
         useState<string | null>(null);
-    const [searchText, setSearchText] = useState("");
     const [groupDialogOpen, setGroupDialogOpen] = useState(false);
     const [groupBy, setGroupBy] = useState<string[]>(() => {
         const saved = sessionStorage.getItem("ledgerGroupBy");
@@ -283,8 +283,8 @@ const LedgerItemWiseDetails: React.FC = () => {
     const filteredRows = useMemo(() => {
         return rows.filter(row => {
             // ✅ COLUMN FILTERS
-            for (const [key, values] of Object.entries(filters.columnFilters) as [string, string[]][]) {
-                if (!values.length) continue;
+            for (const [key, values] of Object.entries(filters.columnFilters) as [string, string[] | undefined][]) {
+                if (values === undefined) continue;
                 if (!values.includes(String(row[key] ?? ""))) return false;
             }
 
@@ -1049,86 +1049,33 @@ const LedgerItemWiseDetails: React.FC = () => {
             </AppLayout>
 
             {/* FILTER MENU */}
-
-            {activeHeader && (
-                <Menu
-                    anchorEl={filterAnchor}
-                    open={Boolean(filterAnchor)}
-                    onClose={() => setFilterAnchor(null)}
-                >
-                    <Box p={2} minWidth={240}>
-
-                        {/* SEARCH */}
-                        <TextField
-                            size="small"
-                            fullWidth
-                            placeholder="Search"
-                            value={searchText}
-                            onChange={e => setSearchText(e.target.value)}
-                            sx={{ mb: 1 }}
-                        />
-
-                        {/* ALL OPTION */}
-                        <MenuItem
-                            onClick={() => {
-
-                                setFilters(prev => ({
-                                    ...prev,
-                                    columnFilters: {
-                                        ...prev.columnFilters,
-                                        [activeHeader]: []
-                                    }
-                                }));
-
-                            }}
-                            sx={{ fontWeight: 600 }}
-                        >
-                            All
-                        </MenuItem>
-
-                        {/* VALUES */}
-                        {filterOptions
-                            .filter(v =>
-                                v.toLowerCase().includes(searchText.toLowerCase())
-                            )
-                            .map(v => {
-
-                                const selected =
-                                    filters.columnFilters[activeHeader]?.includes(v);
-
-                                return (
-                                    <MenuItem
-                                        key={v}
-                                        selected={selected}
-                                        onClick={() => {
-
-                                            setFilters(prev => {
-
-                                                const current =
-                                                    prev.columnFilters[activeHeader] || [];
-
-                                                const updated = current.includes(v)
-                                                    ? current.filter((x: string) => x !== v)
-                                                    : [...current, v];
-
-                                                return {
-                                                    ...prev,
-                                                    columnFilters: {
-                                                        ...prev.columnFilters,
-                                                        [activeHeader]: updated
-                                                    }
-                                                };
-                                            });
-
-                                        }}
-                                    >
-                                        {v}
-                                    </MenuItem>
-                                );
-                            })}
-                    </Box>
-                </Menu>
-            )}
+            <HeaderFilterMenu
+                anchorEl={filterAnchor}
+                open={Boolean(filterAnchor) && Boolean(activeHeader)}
+                onClose={() => {
+                    setFilterAnchor(null);
+                    setActiveHeader(null);
+                }}
+                columnLabel={columns.find((c) => c.key === activeHeader)?.label || activeHeader || undefined}
+                options={filterOptions}
+                selectedValues={activeHeader ? filters.columnFilters[activeHeader] : undefined}
+                onFilterChange={(selected: string[] | undefined) => {
+                    if (activeHeader) {
+                        setFilters((prev: any) => {
+                            const copy = { ...prev.columnFilters };
+                            if (selected === undefined) {
+                                delete copy[activeHeader];
+                            } else {
+                                copy[activeHeader] = selected;
+                            }
+                            return {
+                                ...prev,
+                                columnFilters: copy,
+                            };
+                        });
+                    }
+                }}
+            />
 
             {/* *******COLUMN SETIINGS******** */}
             <Menu

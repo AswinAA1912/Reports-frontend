@@ -2030,7 +2030,10 @@ const DayAbstractReport: React.FC = () => {
                     sx={{
                         p: 1,
                         backgroundColor: "#fff",
-                        minHeight: "100vh",
+                        minHeight: "100%",
+                        width: "max-content",
+                        minWidth: "100%",
+                        boxSizing: "border-box",
                     }}
                 >
 

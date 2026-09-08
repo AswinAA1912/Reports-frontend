@@ -16,13 +16,11 @@ import {
     DialogTitle,
     DialogContent,
     TextField,
-    Menu,
-    Checkbox,
     MenuItem,
     DialogActions,
     Button,
-
 } from "@mui/material";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import GroupWorkIcon from "@mui/icons-material/GroupWork";
 import { SettingsService } from "../../services/reportSettings.services";
 import { toast } from "react-toastify";
@@ -106,11 +104,8 @@ const CostingReport: React.FC = () => {
     const [filterAnchor, setFilterAnchor] =
         useState<null | HTMLElement>(null);
 
-    const [searchText, setSearchText] =
-        useState("");
-
     const [stockFilter, setStockFilter] =
-        useState<string[]>([]);
+        useState<string[] | undefined>(undefined);
 
     const [columnFilterAnchor, setColumnFilterAnchor] =
         useState<null | HTMLElement>(null);
@@ -119,7 +114,7 @@ const CostingReport: React.FC = () => {
         useState("");
 
     const [columnFilters, setColumnFilters] =
-        useState<Record<string, string[]>>({});
+        useState<Record<string, string[] | undefined>>({});
 
     const [columns, setColumns] =
         useState<ColumnConfig[]>([]);
@@ -455,7 +450,7 @@ const CostingReport: React.FC = () => {
             /* STOCK ITEM FILTER */
 
             if (
-                stockFilter.length &&
+                stockFilter !== undefined &&
                 !stockFilter.includes(row.Stock_Item)
             ) {
                 return false;
@@ -469,7 +464,7 @@ const CostingReport: React.FC = () => {
                     columnFilters[key];
 
                 if (
-                    selectedValues?.length &&
+                    selectedValues !== undefined &&
                     !selectedValues.includes(
                         row[key]
                     )
@@ -1740,208 +1735,52 @@ const CostingReport: React.FC = () => {
                 </DialogActions>
             </Dialog>
 
-            <Menu
+            <HeaderFilterMenu
                 anchorEl={filterAnchor}
                 open={Boolean(filterAnchor)}
                 onClose={() => setFilterAnchor(null)}
-            >
-                <Box p={2} minWidth={250}>
+                columnLabel="Stock Item"
+                options={Array.from(
+                    new Set(costingRows.map((x) => x.Stock_Item))
+                )
+                    .filter(Boolean)
+                    .map(String)}
+                selectedValues={stockFilter}
+                onFilterChange={(selected: string[] | undefined) => setStockFilter(selected)}
+            />
 
-                    <TextField
-                        size="small"
-                        fullWidth
-                        placeholder="Search Stock Item"
-                        value={searchText}
-                        onChange={(e) =>
-                            setSearchText(e.target.value)
-                        }
-                        sx={{ mb: 1 }}
-                    />
-
-                    <MenuItem
-                        dense
-                        onClick={() =>
-                            setStockFilter([])
-                        }
-                    >
-                        <Checkbox
-                            checked={!stockFilter.length}
-                        />
-                        All
-                    </MenuItem>
-
-                    <Box
-                        sx={{
-                            maxHeight: 250,
-                            overflow: "auto",
-                        }}
-                    >
-                        {Array.from(
-                            new Set(
-                                costingRows.map(
-                                    (x) => x.Stock_Item
-                                )
-                            )
-                        )
-                            .filter((x) =>
-                                x
-                                    .toLowerCase()
-                                    .includes(
-                                        searchText.toLowerCase()
-                                    )
-                            )
-                            .map((item) => {
-
-                                const checked =
-                                    stockFilter.includes(item);
-
-                                return (
-                                    <MenuItem
-                                        key={item}
-                                        dense
-                                        onClick={() => {
-
-                                            setStockFilter((prev) =>
-
-                                                checked
-                                                    ? prev.filter(
-                                                        (x) => x !== item
-                                                    )
-                                                    : [...prev, item]
-                                            );
-                                        }}
-                                    >
-                                        <Checkbox checked={checked} />
-                                        {item}
-                                    </MenuItem>
-                                );
-                            })}
-                    </Box>
-                </Box>
-            </Menu>
-
-            <Menu
+            <HeaderFilterMenu
                 anchorEl={columnFilterAnchor}
                 open={Boolean(columnFilterAnchor)}
-                onClose={() =>
-                    setColumnFilterAnchor(null)
+                onClose={() => setColumnFilterAnchor(null)}
+                columnLabel={activeFilterColumn.replace(/_/g, " ")}
+                options={
+                    activeFilterColumn
+                        ? Array.from(
+                              new Set(
+                                  costingRows.map(
+                                      (x) => x[activeFilterColumn]
+                                  )
+                              )
+                          )
+                              .filter(Boolean)
+                              .map(String)
+                        : []
                 }
-            >
-                <Box p={2} minWidth={250}>
-
-                    <TextField
-                        size="small"
-                        fullWidth
-                        placeholder={`Search ${activeFilterColumn}`}
-                        value={searchText}
-                        onChange={(e) =>
-                            setSearchText(e.target.value)
-                        }
-                        sx={{ mb: 1 }}
-                    />
-
-                    <MenuItem
-                        dense
-                        onClick={() => {
-
-                            setColumnFilters((prev) => ({
-                                ...prev,
-                                [activeFilterColumn]: [],
-                            }));
-                        }}
-                    >
-                        <Checkbox
-                            checked={
-                                !(
-                                    columnFilters[
-                                    activeFilterColumn
-                                    ] || []
-                                ).length
-                            }
-                        />
-                        All
-                    </MenuItem>
-
-                    <Box
-                        sx={{
-                            maxHeight: 250,
-                            overflow: "auto",
-                        }}
-                    >
-                        {Array.from(
-                            new Set(
-                                costingRows.map(
-                                    (x) =>
-                                        x[
-                                        activeFilterColumn
-                                        ]
-                                )
-                            )
-                        )
-                            .filter((x) =>
-                                String(x || "")
-                                    .toLowerCase()
-                                    .includes(
-                                        searchText.toLowerCase()
-                                    )
-                            )
-                            .map((item) => {
-
-                                const checked =
-                                    (
-                                        columnFilters[
-                                        activeFilterColumn
-                                        ] || []
-                                    ).includes(item);
-
-                                return (
-                                    <MenuItem
-                                        key={item}
-                                        dense
-                                        onClick={() => {
-
-                                            setColumnFilters(
-                                                (prev) => {
-
-                                                    const existing =
-                                                        prev[
-                                                        activeFilterColumn
-                                                        ] || [];
-
-                                                    return {
-                                                        ...prev,
-
-                                                        [activeFilterColumn]:
-                                                            checked
-                                                                ? existing.filter(
-                                                                    (
-                                                                        x
-                                                                    ) =>
-                                                                        x !==
-                                                                        item
-                                                                )
-                                                                : [
-                                                                    ...existing,
-                                                                    item,
-                                                                ],
-                                                    };
-                                                }
-                                            );
-                                        }}
-                                    >
-                                        <Checkbox
-                                            checked={
-                                                checked
-                                            }
-                                        />
-
-                                        {item || "-"}
-                                    </MenuItem>
-                                );
-                            })}
-                    </Box>
-                </Box>
-            </Menu>
+                selectedValues={
+                    activeFilterColumn
+                        ? columnFilters[activeFilterColumn]
+                        : undefined
+                }
+                onFilterChange={(selected: string[] | undefined) => {
+                    if (activeFilterColumn) {
+                        setColumnFilters((prev) => ({
+                            ...prev,
+                            [activeFilterColumn]: selected,
+                        }));
+                    }
+                }}
+            />
 
             {/* /////// TEMPLATE /////// */}
             <Dialog

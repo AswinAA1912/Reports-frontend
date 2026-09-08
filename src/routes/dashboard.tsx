@@ -24,8 +24,6 @@ import { fetchAndFilterMenus } from "../utils/menuRights";
 import { handleExternalOrMenuNavigation } from "../utils/navigation";
 import { DashBoardSalesGraph } from "../services/graphAnalysis.services";
 
-const HEADER_HEIGHT = 64;
-
 const Dashboard: React.FC = () => {
   const { user, token } = useAuth();
   const navigate = useNavigate();
@@ -107,14 +105,23 @@ const Dashboard: React.FC = () => {
   }));
 
   return (
-    <>
-      <Header headerColor="#1E3A8A" showSearch={false} />
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        width: "100%",
+        overflow: "hidden",
+      }}
+    >
+      <Header headerColor="#1E3A8A" showSearch={false} position="static" />
 
       <Box
         sx={{
+          flex: 1,
+          minHeight: 0,
           display: "flex",
           flexDirection: isMobile ? "column" : "row",
-          height: isMobile ? "auto" : `calc(115vh - ${HEADER_HEIGHT}px)`,
           width: "100%",
           overflow: "hidden",
           backgroundColor: "#cfe6ec",
@@ -335,7 +342,7 @@ const Dashboard: React.FC = () => {
           )}
         </Box>
       </Box>
-    </>
+    </Box>
   );
 };
 

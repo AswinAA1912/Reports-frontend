@@ -2325,7 +2325,9 @@ const StockAbstractReport: React.FC = () => {
                     sx={{
                         p: 1.5,
                         backgroundColor: "#fff",
-                        minHeight: "100vh",
+                        minHeight: "100%",
+                        width: "100%",
+                        boxSizing: "border-box",
                     }}
                 >
                     {/* ACTION & SELECTION BAR */}

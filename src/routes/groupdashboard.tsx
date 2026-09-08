@@ -29,8 +29,6 @@ import { fetchAndFilterMenus } from "../utils/menuRights";
 import { handleExternalOrMenuNavigation } from "../utils/navigation";
 import { DashBoardSalesGraph } from "../services/graphAnalysis.services";
 
-const HEADER_HEIGHT = 64;
-
 const GroupDashboard: React.FC = () => {
   const { user, token } = useAuth();
   const navigate = useNavigate();
@@ -155,14 +153,23 @@ const GroupDashboard: React.FC = () => {
   }, [menuList]);
 
   return (
-    <>
-      <Header headerColor="#1E3A8A" showSearch={false} />
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        width: "100%",
+        overflow: "hidden",
+      }}
+    >
+      <Header headerColor="#1E3A8A" showSearch={false} position="static" />
 
       <Box
         sx={{
+          flex: 1,
+          minHeight: 0,
           display: "flex",
           flexDirection: isMobile ? "column" : "row",
-          height: isMobile ? "auto" : `calc(100vh - ${HEADER_HEIGHT}px)`,
           width: "100%",
           overflow: "hidden",
           backgroundColor: "#cfe6ec",
@@ -430,7 +437,7 @@ const GroupDashboard: React.FC = () => {
           <Button onClick={() => setOpenDialog(false)}>Close</Button>
         </DialogActions>
       </Dialog>
-    </>
+    </Box>
   );
 };
 

@@ -19,11 +19,10 @@ import {
     Button,
     IconButton,
     Menu,
-    MenuItem,
-    TextField,
     Checkbox,
     FormControlLabel,
 } from "@mui/material";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import CloseIcon from "@mui/icons-material/Close";
 import FilterAltIcon from "@mui/icons-material/FilterAlt";
 import dayjs from "dayjs";
@@ -417,16 +416,14 @@ const CashBoxReport: React.FC = () => {
     // Header filters for Expanded side
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
     const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
-    const [searchText, setSearchText] = useState("");
-    const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({
-        voucher_name: [],
-        Account_name: [],
-        invoice_no: []
+    const [columnFilters, setColumnFilters] = useState<Record<string, string[] | undefined>>({
+        voucher_name: undefined,
+        Account_name: undefined,
+        invoice_no: undefined
     });
 
     const handleHeaderClick = (e: React.MouseEvent<HTMLElement>, columnKey: string) => {
         setActiveHeader(columnKey);
-        setSearchText("");
         setFilterAnchor(e.currentTarget);
     };
 
@@ -1109,14 +1106,17 @@ const CashBoxReport: React.FC = () => {
         const { Data } = detailedData;
 
         let filtered = Data.filter((item: any) => {
-            const voucherFilter = columnFilters.voucher_name || [];
-            if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucher_name)) return false;
+            const voucherFilter = columnFilters.voucher_name;
+            if (voucherFilter !== undefined && !voucherFilter.includes(item.voucher_name)) return false;
 
-            const nameFilter = columnFilters.Account_name || [];
-            if (nameFilter.length > 0 && !nameFilter.includes(item.Account_name)) return false;
+            const nameFilter = columnFilters.Account_name;
+            if (nameFilter !== undefined) {
+                const displayName = (Number(item.Dr_Amount) > 0 ? item.Credit_Names : (Number(item.Cr_Amount) > 0 ? item.Debit_Names : item.Account_name)) || "";
+                if (!nameFilter.includes(displayName)) return false;
+            }
 
-            const invoiceNoFilter = columnFilters.invoice_no || [];
-            if (invoiceNoFilter.length > 0 && !invoiceNoFilter.includes(item.invoice_no)) return false;
+            const invoiceNoFilter = columnFilters.invoice_no;
+            if (invoiceNoFilter !== undefined && !invoiceNoFilter.includes(item.invoice_no)) return false;
 
             return true;
         });
@@ -1795,7 +1795,7 @@ const CashBoxReport: React.FC = () => {
     };
 
     return (
-        <Box sx={{ width: "100%", overflowX: "hidden", minHeight: "100vh", bgcolor: "#f1f5f9" }}>
+        <Box sx={{ width: "100%", minHeight: "100%", bgcolor: "#f1f5f9", boxSizing: "border-box" }}>
             <PageHeader
                 toggleMode={toggleMode}
                 onToggleChange={setToggleMode}
@@ -2575,86 +2575,47 @@ const CashBoxReport: React.FC = () => {
             />
 
             {/* Header Column Filters Menu Popup */}
-            <Menu
+            <HeaderFilterMenu
                 anchorEl={filterAnchor}
-                open={Boolean(filterAnchor)}
-                onClose={() => setFilterAnchor(null)}
-                PaperProps={{
-                    sx: {
-                        maxHeight: 450,
-                        width: activeHeader === "Account_name" ? 450 : 250,
-                        boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)",
-                        borderRadius: 1.5,
-                        border: "1px solid #e2e8f0"
+                open={Boolean(filterAnchor) && Boolean(activeHeader)}
+                onClose={() => {
+                    setFilterAnchor(null);
+                    setActiveHeader(null);
+                }}
+                columnLabel={detailedColumns.find((c) => c.key === activeHeader)?.label || activeHeader || undefined}
+                options={
+                    activeHeader && detailedData?.Data
+                        ? Array.from(
+                              new Set(
+                                  detailedData.Data.map((x: any) => {
+                                      if (activeHeader === "Account_name") {
+                                          return (
+                                              (Number(x.Dr_Amount) > 0
+                                                  ? x.Credit_Names
+                                                  : Number(x.Cr_Amount) > 0
+                                                  ? x.Debit_Names
+                                                  : x.Account_name) || ""
+                                          );
+                                      }
+                                      return x[activeHeader] || "";
+                                  })
+                              )
+                          )
+                              .filter((v) => v !== undefined && v !== null && String(v).trim() !== "")
+                              .map(String)
+                        : []
+                }
+                selectedValues={activeHeader ? columnFilters[activeHeader] : undefined}
+                onFilterChange={(selected: string[] | undefined) => {
+                    if (activeHeader) {
+                        setColumnFilters((prev) => ({
+                            ...prev,
+                            [activeHeader]: selected,
+                        }));
+                        setPage(1);
                     }
                 }}
-            >
-                {activeHeader && (
-                    <Box p={1.5}>
-                        <TextField
-                            size="small"
-                            fullWidth
-                            placeholder="Search..."
-                            value={searchText}
-                            onChange={(e) => setSearchText(e.target.value)}
-                            sx={{ mb: 1.5 }}
-                        />
-                        <Box sx={{ maxHeight: 330, overflowY: "auto" }}>
-                            {(() => {
-                                if (!detailedData || !detailedData.Data) return null;
-                                const allValues = Array.from(
-                                    new Set(detailedData.Data.map((x: any) => {
-                                        if (activeHeader === "Account_name") {
-                                            return (Number(x.Dr_Amount) > 0 ? x.Credit_Names : (Number(x.Cr_Amount) > 0 ? x.Debit_Names : x.Account_name)) || "";
-                                        }
-                                        return x[activeHeader] || "";
-                                    }))
-                                ).filter((v) => v !== undefined && v !== null && String(v).trim() !== "" && String(v).toLowerCase().includes(searchText.toLowerCase()));
-
-                                const selectedValues = columnFilters[activeHeader] || [];
-
-                                // Sort selected values first
-                                const sortedValues = [
-                                    ...allValues.filter((v) => selectedValues.includes(v)),
-                                    ...allValues.filter((v) => !selectedValues.includes(v)),
-                                ];
-
-                                return sortedValues.map((v) => {
-                                    const isSelected = selectedValues.includes(v);
-
-                                    return (
-                                        <MenuItem
-                                            key={String(v)}
-                                            onClick={() => {
-                                                setColumnFilters((prev) => {
-                                                    const prevValues = prev[activeHeader] || [];
-                                                    const newValues = prevValues.includes(v)
-                                                        ? prevValues.filter((x: any) => x !== v)
-                                                        : [...prevValues, v];
-
-                                                    return {
-                                                        ...prev,
-                                                        [activeHeader]: newValues,
-                                                    };
-                                                });
-                                            }}
-                                            sx={{
-                                                backgroundColor: isSelected ? "#e0e7ff" : "transparent",
-                                                fontWeight: isSelected ? 600 : 400,
-                                                "&:hover": {
-                                                    backgroundColor: isSelected ? "#c7d2fe" : "#f1f5f9",
-                                                },
-                                            }}
-                                        >
-                                            {String(v)}
-                                        </MenuItem>
-                                    );
-                                });
-                            })()}
-                        </Box>
-                    </Box>
-                )}
-            </Menu>
+            />
 
             {/* ===== COLUMN SETTINGS MENU ===== */}
             <Menu

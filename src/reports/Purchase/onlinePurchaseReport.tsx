@@ -10,7 +10,6 @@ import {
   Paper,
   Menu,
   Button,
-  MenuItem,
   TextField,
   Tooltip,
   IconButton,
@@ -21,6 +20,7 @@ import {
   DialogContent,
   DialogTitle
 } from "@mui/material";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import CircularProgress from "@mui/material/CircularProgress";
 import dayjs from "dayjs";
 import { toast } from "react-toastify";
@@ -65,7 +65,6 @@ const OnlinePurchaseReportPage: React.FC = () => {
 
   const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
   const [activeHeader, setActiveHeader] = useState<string | null>(null);
-  const [searchText, setSearchText] = useState("");
   const [settingsAnchor, setSettingsAnchor] =
     useState<null | HTMLElement>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -122,7 +121,6 @@ const OnlinePurchaseReportPage: React.FC = () => {
       ? abstractColumns
       : expandedColumns;
 
-  const activeCol = columns.find(c => c.key === activeHeader);
 
   const setColumns =
     toggleMode === "Abstract"
@@ -422,7 +420,7 @@ const OnlinePurchaseReportPage: React.FC = () => {
 
         // ✅ MULTI SELECT SUPPORT
         if (Array.isArray(value)) {
-          if (value.length === 0) return true;
+          if (value.length === 0) return false;
           return value.includes(row[key]);
         }
 
@@ -483,13 +481,11 @@ const OnlinePurchaseReportPage: React.FC = () => {
   };
 
 
-  /* ================= HEADER CLICK ================= */
   const handleHeaderClick = (
     e: React.MouseEvent<HTMLElement>,
     columnKey: string
   ) => {
     setActiveHeader(columnKey);
-    setSearchText("");
     setFilterAnchor(e.currentTarget);
   };
 
@@ -883,137 +879,51 @@ const OnlinePurchaseReportPage: React.FC = () => {
           )}
 
           {/* ================= FILTER MENU ================= */}
-          <Menu
-            anchorEl={filterAnchor}
-            open={
-              Boolean(filterAnchor) &&
-              Boolean(activeHeader) &&
-              activeCol?.type !== "number"
-            }
-            onClose={() => setFilterAnchor(null)}
-          >
-
-            {/* ===== DATE FILTER ===== */}
-            {activeHeader && (
-              <Box p={2} sx={{ minWidth: 220 }}>
-
-                {/* ✅ DATE FILTER */}
-                {activeHeader === "Ledger_Date" ? (
-                  <>
-                    <TextField
-                      type="date"
-                      size="small"
-                      fullWidth
-                      value={columnFilters[activeHeader]?.from || ""}
-                      sx={{ mb: 1 }}
-                      onChange={(e) =>
-                        setColumnFilters((prev) => ({
-                          ...prev,
-                          [activeHeader]: {
-                            ...prev[activeHeader],
-                            from: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-
-                    <TextField
-                      type="date"
-                      size="small"
-                      fullWidth
-                      value={columnFilters[activeHeader]?.to || ""}
-                      sx={{ mb: 1 }}
-                      onChange={(e) =>
-                        setColumnFilters((prev) => ({
-                          ...prev,
-                          [activeHeader]: {
-                            ...prev[activeHeader],
-                            to: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-
-                    <Button
-                      fullWidth
-                      variant="contained"
-                      onClick={() => setFilterAnchor(null)}
-                    >
-                      Apply
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    {/* ✅ SEARCH */}
-                    <TextField
-                      size="small"
-                      fullWidth
-                      placeholder="Search"
-                      value={searchText}
-                      onChange={(e) => setSearchText(e.target.value)}
-                      sx={{ mb: 1 }}
-                    />
-
-                    {/* ✅ CLEAR FILTER */}
-                    <MenuItem
-                      sx={{ fontWeight: 600 }}
-                      onClick={() => {
-                        setColumnFilters((prev) => ({
-                          ...prev,
-                          [activeHeader]: [],
-                        }));
-                        setFilterAnchor(null);
-                      }}
-                    >
-                      All
-                    </MenuItem>
-
-                    {/* ✅ VALUES */}
-                    {[...new Set(
-                      (toggleMode === "Abstract" ? rawAbstract : rawExpanded)
-                        .map((r) => r[activeHeader])
-                    )]
-                      .filter(Boolean)
-                      .filter((v) =>
-                        String(v).toLowerCase().includes(searchText.toLowerCase())
+          <HeaderFilterMenu
+              anchorEl={filterAnchor}
+              open={Boolean(filterAnchor)}
+              onClose={() => setFilterAnchor(null)}
+              columnLabel={activeHeader || undefined}
+              options={
+                activeHeader
+                  ? Array.from(
+                      new Set(
+                        (toggleMode === "Abstract" ? rawAbstract : rawExpanded)
+                          .map((r) => r[activeHeader])
+                          .filter(Boolean)
+                          .map(String)
                       )
-                      .map((v) => {
-                        const selectedValues = columnFilters[activeHeader] || [];
-
-                        const isSelected = selectedValues.includes(v);
-
-                        return (
-                          <MenuItem
-                            key={v}
-                            onClick={() => {
-                              setColumnFilters((prev) => {
-                                const prevValues = prev[activeHeader] || [];
-
-                                const newValues = prevValues.includes(v)
-                                  ? prevValues.filter((x: any) => x !== v) // remove
-                                  : [...prevValues, v]; // add
-
-                                return {
-                                  ...prev,
-                                  [activeHeader]: newValues,
-                                };
-                              });
-                            }}
-                            sx={{
-                              backgroundColor: isSelected ? "#e0e7ff" : "transparent",
-                              fontWeight: isSelected ? 600 : 400,
-                            }}
-                          >
-                            {v}
-                          </MenuItem>
-                        );
-                      })}
-                  </>
-                )}
-              </Box>
-            )}
-
-          </Menu>
+                    )
+                  : []
+              }
+              selectedValues={activeHeader ? columnFilters[activeHeader] : undefined}
+              onFilterChange={(newSelected) => {
+                if (!activeHeader) return;
+                setColumnFilters((prev) => {
+                  const copy = { ...prev };
+                  if (newSelected === undefined) {
+                    delete copy[activeHeader];
+                  } else {
+                    copy[activeHeader] = newSelected;
+                  }
+                  return copy;
+                });
+              }}
+              isDateColumn={activeHeader === "Ledger_Date"}
+              dateFrom={columnFilters[activeHeader || ""]?.from || ""}
+              dateTo={columnFilters[activeHeader || ""]?.to || ""}
+              onDateChange={(dates) =>
+                setColumnFilters((prev) => ({
+                  ...prev,
+                  [activeHeader!]: {
+                    ...prev[activeHeader!],
+                    from: dates.from,
+                    to: dates.to,
+                  },
+                }))
+              }
+              onApplyDate={() => setFilterAnchor(null)}
+            />
         </Box>
       </AppLayout>
 
@@ -1070,7 +980,7 @@ const OnlinePurchaseReportPage: React.FC = () => {
                   showFilter={
                     col.key === "Ledger_Date"
                       ? !!columnFilters[col.key]?.from || !!columnFilters[col.key]?.to
-                      : !!columnFilters[col.key]
+                      : columnFilters[col.key] !== undefined
                   }
                   onToggle={() =>
                     setColumns(prev =>

@@ -26,7 +26,6 @@ import {
     MenuItem,
     Autocomplete,
     CircularProgress,
-    Popover,
     RadioGroup,
     Radio,
     FormLabel,
@@ -46,6 +45,7 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import PageHeader from "../../Layout/PageHeader";
 import AppLayout from "../../Layout/appLayout";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import { toast } from "react-toastify";
 import { SettingsService } from "../../services/reportSettings.services";
@@ -464,11 +464,11 @@ const getFilteredStaffByCategories = (staffList: any[], roleColumns: ColumnConfi
     });
 };
 
-const getFilteredStaffList = (staffList: any[], selectedFilters: string[], roleCols: ColumnConfig[], qtyType: "Qty" | "Act_Qty" = "Qty") => {
+const getFilteredStaffList = (staffList: any[], selectedFilters: string[] | undefined, roleCols: ColumnConfig[], qtyType: "Qty" | "Act_Qty" = "Qty") => {
     const categoryFiltered = getFilteredStaffByCategories(staffList, roleCols, qtyType);
     return categoryFiltered.filter((sc: any) => {
-        if (selectedFilters.length === 0) return true;
-        const name = sc.Cost_Center_Name || "Unassigned";
+        if (selectedFilters === undefined) return true;
+        const name = (sc.Cost_Center_Name || "Unassigned").trim();
         return selectedFilters.includes(name);
     });
 };
@@ -579,9 +579,8 @@ const OverallStaffReport: React.FC = () => {
 
     // Involved Staff Filter States
     const [involvedStaff, setInvolvedStaff] = useState<any[]>([]);
-    const [selectedStaffFilters, setSelectedStaffFilters] = useState<string[]>([]);
+    const [selectedStaffFilters, setSelectedStaffFilters] = useState<string[] | undefined>(undefined);
     const [staffFilterAnchor, setStaffFilterAnchor] = useState<null | HTMLElement>(null);
-    const [staffSearchQuery, setStaffSearchQuery] = useState("");
 
     const fetchInvolvedStaff = async () => {
         try {
@@ -642,7 +641,7 @@ const OverallStaffReport: React.FC = () => {
     // Load staff data on-demand only when a staff filter is actively selected by the user
     useEffect(() => {
         const loadFilteredStaffData = async () => {
-            if (reportData.length === 0 || selectedStaffFilters.length === 0) return;
+            if (reportData.length === 0 || selectedStaffFilters === undefined || selectedStaffFilters.length === 0) return;
 
             const normalizeCategory = (cat: string) => {
                 if (!cat) return "";
@@ -703,20 +702,6 @@ const OverallStaffReport: React.FC = () => {
 
         loadFilteredStaffData();
     }, [reportData, fromDate, toDate, selectedStaffFilters]);
-
-    const handleToggleStaff = (name: string) => {
-        setSelectedStaffFilters(prev => {
-            if (prev.includes(name)) {
-                return prev.filter(n => n !== name);
-            } else {
-                return [...prev, name];
-            }
-        });
-    };
-
-    const handleToggleSelectAll = () => {
-        setSelectedStaffFilters([]);
-    };
 
     // Fetch voucher types, godowns, and groups concurrently in parallel on mount
     useEffect(() => {
@@ -800,7 +785,7 @@ const OverallStaffReport: React.FC = () => {
     useEffect(() => {
         fetchReportData();
         fetchInvolvedStaff();
-        setSelectedStaffFilters([]);
+        setSelectedStaffFilters(undefined);
     }, [fromDate, toDate]);
 
     // Selected Expanded Voucher Types (First Expansion level)
@@ -1279,28 +1264,20 @@ const OverallStaffReport: React.FC = () => {
         return categories;
     }, [groups, reportData, roleColumns, staffData, selectedStaffFilters, qtyType, linkedVoucherNames]);
 
-    const gridStaffNames = useMemo(() => {
+    const allStaffOptions = useMemo(() => {
         const names = new Set<string>();
-        tableCategories.forEach(cat => {
-            cat.groups.forEach(g => {
-                g.voucherTypes.forEach((vt: any) => {
-                    const filteredStaff = getFilteredStaffList(vt.staff || [], [], roleColumns, qtyType);
-                    filteredStaff.forEach((sc: any) => {
-                        if (sc.Cost_Center_Name) {
-                            names.add(sc.Cost_Center_Name);
-                        }
-                    });
-                });
+        involvedStaff.forEach((s: any) => {
+            const n = (s.Cost_Center_Name || "Unassigned").trim();
+            if (n) names.add(n);
+        });
+        Object.values(staffData).forEach(list => {
+            list.forEach((sc: any) => {
+                const n = (sc.Cost_Center_Name || "Unassigned").trim();
+                if (n) names.add(n);
             });
         });
-        return Array.from(names).sort();
-    }, [tableCategories, roleColumns, qtyType]);
-
-    const filteredGridStaffNames = useMemo(() => {
-        return gridStaffNames.filter(name =>
-            name.toLowerCase().includes(staffSearchQuery.toLowerCase())
-        );
-    }, [gridStaffNames, staffSearchQuery]);
+        return Array.from(names).sort((a, b) => a.localeCompare(b));
+    }, [involvedStaff, staffData]);
 
     // Toggles expanded voucher state & fetches group employees dynamically
     const handleToggleExpandVoucher = async (parentCategory: string, groupName: string, voucherName: string) => {
@@ -1409,8 +1386,8 @@ const OverallStaffReport: React.FC = () => {
             if (!invoiceData[staffKey]) {
                 try {
                     const empIds = allEmpIds && allEmpIds.length > 0 ? allEmpIds : [empId];
-                    const matchedVoucher = voucherTypes.find((v: any) => 
-                        String(v.label).trim().toUpperCase() === String(voucherName).trim().toUpperCase() || 
+                    const matchedVoucher = voucherTypes.find((v: any) =>
+                        String(v.label).trim().toUpperCase() === String(voucherName).trim().toUpperCase() ||
                         String(v.Voucher_Type).trim().toUpperCase() === String(voucherName).trim().toUpperCase() ||
                         String(v.Value) === String(voucherName)
                     );
@@ -1760,13 +1737,15 @@ const OverallStaffReport: React.FC = () => {
 
             // Determine target staff names
             let targetStaffList: string[] = [];
-            if (selectedStaffFilters.length > 0) {
+            if (selectedStaffFilters !== undefined && selectedStaffFilters.length > 0) {
                 targetStaffList = [...selectedStaffFilters];
-            } else {
-                targetStaffList = [...gridStaffNames];
+            } else if (selectedStaffFilters === undefined) {
+                targetStaffList = [...allStaffOptions];
                 if (targetStaffList.length === 0) {
-                    targetStaffList = involvedStaff.map(s => s.Cost_Center_Name || "Unassigned");
+                    targetStaffList = involvedStaff.map(s => (s.Cost_Center_Name || "Unassigned").trim());
                 }
+            } else {
+                targetStaffList = [];
             }
 
             if (targetStaffList.length === 0) {
@@ -1837,8 +1816,8 @@ const OverallStaffReport: React.FC = () => {
                                 const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
                                 if (!localInvoiceData[staffKey]) {
                                     const empIds = sc.allEmpIds && sc.allEmpIds.length > 0 ? sc.allEmpIds : [sc.Emp_Id];
-                                    const matchedVoucher = voucherTypes.find((v: any) => 
-                                        String(v.label).trim().toUpperCase() === String(vt.name).trim().toUpperCase() || 
+                                    const matchedVoucher = voucherTypes.find((v: any) =>
+                                        String(v.label).trim().toUpperCase() === String(vt.name).trim().toUpperCase() ||
                                         String(v.Voucher_Type).trim().toUpperCase() === String(vt.name).trim().toUpperCase()
                                     );
                                     const resolvedVtId = vt.voucherTypeId !== undefined && vt.voucherTypeId !== null
@@ -2044,10 +2023,10 @@ const OverallStaffReport: React.FC = () => {
 
             // Filename: if 1 staff is filtered, use staff's name; else use overall staff wise name
             let exportFileName = "";
-            if (selectedStaffFilters.length === 1) {
+            if (selectedStaffFilters && selectedStaffFilters.length === 1) {
                 const singleName = selectedStaffFilters[0].replace(/[\\/:*?"<>|]/g, "_").trim();
                 exportFileName = `${singleName}_${dayjs().format("DDMMYYYY")}.xlsx`;
-            } else if (selectedStaffFilters.length > 1) {
+            } else if (selectedStaffFilters && selectedStaffFilters.length > 1) {
                 exportFileName = `Staff_Wise_Report_${dayjs().format("DDMMYYYY")}.xlsx`;
             } else {
                 exportFileName = `Overall_Staff_Wise_Report_${dayjs().format("DDMMYYYY")}.xlsx`;
@@ -2172,7 +2151,7 @@ const OverallStaffReport: React.FC = () => {
             </ReportFilterDrawer>
 
             <AppLayout fullWidth>
-                <Box px={2} pb={1} pt={1}>
+                <Box px={2} pb={1} pt={1} sx={{ flex: 1, minHeight: 0, height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
                     {selectedGodownIds.length > 0 && (
                         <Box display="flex" alignItems="center" flexWrap="wrap" gap={1} mb={1}>
                             <Typography variant="body2" sx={{ fontWeight: 600, color: "#475569", fontSize: "0.75rem" }}>
@@ -2233,7 +2212,7 @@ const OverallStaffReport: React.FC = () => {
                             </Typography>
                         </Box>
                     ) : (
-                        <TableContainer component={Paper} elevation={1} sx={{ borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto", maxHeight: "calc(100vh - 90px)" }}>
+                        <TableContainer component={Paper} elevation={1} sx={{ flex: 1, minHeight: 0, borderRadius: 2, border: "1px solid #cbd5e1", overflow: "auto" }}>
                             <Table size="medium" stickyHeader>
                                 <TableHead>
                                     <TableRow sx={{ bgcolor: "#1E3A8A" }}>
@@ -2269,7 +2248,9 @@ const OverallStaffReport: React.FC = () => {
                                             }}
                                             onClick={(e) => setStaffFilterAnchor(e.currentTarget)}
                                         >
-                                            STAFF NAME
+                                            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 0.5 }}>
+                                                <span>STAFF NAME</span>
+                                            </Box>
                                         </TableCell>
 
                                         {roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order).map(col => (
@@ -2596,72 +2577,18 @@ const OverallStaffReport: React.FC = () => {
                 </Box>
             </AppLayout>
 
-            {/* Staff Filter Popover */}
-            <Popover
-                open={Boolean(staffFilterAnchor)}
+            {/* Staff Filter Menu */}
+            <HeaderFilterMenu
                 anchorEl={staffFilterAnchor}
-                onClose={() => {
-                    setStaffFilterAnchor(null);
-                    setStaffSearchQuery("");
+                open={Boolean(staffFilterAnchor)}
+                onClose={() => setStaffFilterAnchor(null)}
+                columnLabel="STAFF NAME"
+                options={allStaffOptions}
+                selectedValues={selectedStaffFilters}
+                onFilterChange={(newSelected) => {
+                    setSelectedStaffFilters(newSelected);
                 }}
-                anchorOrigin={{
-                    vertical: "bottom",
-                    horizontal: "left",
-                }}
-                transformOrigin={{
-                    vertical: "top",
-                    horizontal: "left",
-                }}
-            >
-                <Box p={2} width={250} display="flex" flexDirection="column" gap={1}>
-                    <TextField
-                        size="small"
-                        placeholder="Search staff..."
-                        value={staffSearchQuery}
-                        onChange={(e) => setStaffSearchQuery(e.target.value)}
-                        fullWidth
-                    />
-
-                    <Box sx={{ maxHeight: 250, overflowY: "auto", my: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
-                        {filteredGridStaffNames.length === 0 ? (
-                            <Typography variant="caption" color="text.secondary" p={1}>
-                                No staff found
-                            </Typography>
-                        ) : (
-                            <>
-                                <FormControlLabel
-                                    control={
-                                        <Checkbox
-                                            size="small"
-                                            checked={selectedStaffFilters.length === 0}
-                                            onChange={handleToggleSelectAll}
-                                        />
-                                    }
-                                    label="All"
-                                    sx={{ margin: 0, "& .MuiFormControlLabel-label": { fontSize: "0.8rem", fontWeight: 700 } }}
-                                />
-                                {filteredGridStaffNames.map(name => {
-                                    const isChecked = selectedStaffFilters.includes(name);
-                                    return (
-                                        <FormControlLabel
-                                            key={name}
-                                            control={
-                                                <Checkbox
-                                                    size="small"
-                                                    checked={isChecked}
-                                                    onChange={() => handleToggleStaff(name)}
-                                                />
-                                            }
-                                            label={name}
-                                            sx={{ margin: 0, "& .MuiFormControlLabel-label": { fontSize: "0.8rem" } }}
-                                        />
-                                    );
-                                })}
-                            </>
-                        )}
-                    </Box>
-                </Box>
-            </Popover>
+            />
 
             {/* Column Config Settings Dialog popover */}
             <Dialog
@@ -2966,9 +2893,9 @@ const OverallStaffReport: React.FC = () => {
                                     </Typography>
                                 </Box>
                                 <Typography variant="caption" color="text.secondary" display="block">
-                                    {selectedStaffFilters.length === 1
+                                    {selectedStaffFilters && selectedStaffFilters.length === 1
                                         ? `Exports single Excel file named "${selectedStaffFilters[0]}" containing full invoice-level expansion details.`
-                                        : selectedStaffFilters.length > 1
+                                        : selectedStaffFilters && selectedStaffFilters.length > 1
                                             ? `Exports Excel file with separate tabs for ${selectedStaffFilters.length} selected staff with full invoice expansions.`
                                             : "Exports Excel file with a separate tab for EACH staff member with full invoice expansions."}
                                 </Typography>

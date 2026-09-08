@@ -12,9 +12,6 @@ import {
     TableRow,
     Paper,
     CircularProgress,
-    Menu,
-    MenuItem,
-    TextField,
     Chip,
     Stack,
     Radio,
@@ -25,6 +22,7 @@ import {
     Typography
 } from "@mui/material";
 import dayjs from "dayjs";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import PageHeader from "../../Layout/PageHeader";
 import AppLayout from "../../Layout/appLayout";
 import CommonPagination from "../../Components/CommonPagination";
@@ -58,7 +56,6 @@ const StockValueRateMasterReport: React.FC = () => {
     const [stockValues, setStockValues] = useState<StockValue[]>([]);
     const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
-    const [searchText, setSearchText] = useState("");
     const [selectedBrand, setSelectedBrand] = useState<string>("All");
 
     const [page, setPage] = useState(1);
@@ -121,19 +118,16 @@ const StockValueRateMasterReport: React.FC = () => {
         e: React.MouseEvent<HTMLElement>,
         columnKey: string
     ) => {
-        if (columnKey !== "Product_Name") return;
-
         setActiveHeader(columnKey);
-        setSearchText("");
         setFilterAnchor(e.currentTarget);
     };
 
     const applyFilters = (rows: any[]) => {
         return rows.filter((row) => {
             // ✅ PRODUCT NAME FILTER
-            const selectedProducts = columnFilters.Product_Name || [];
+            const selectedProducts = columnFilters.Product_Name;
 
-            if (selectedProducts.length > 0) {
+            if (selectedProducts !== undefined) {
                 if (!selectedProducts.includes(row.Product_Name)) {
                     return false;
                 }
@@ -488,75 +482,20 @@ const StockValueRateMasterReport: React.FC = () => {
                 </Box>
             </AppLayout>
 
-            <Menu
+            <HeaderFilterMenu
                 anchorEl={filterAnchor}
                 open={Boolean(filterAnchor) && activeHeader === "Product_Name"}
                 onClose={() => setFilterAnchor(null)}
-            >
-                <Box p={2} sx={{ minWidth: 220 }}>
-
-                    {/* SEARCH */}
-                    <TextField
-                        size="small"
-                        fullWidth
-                        placeholder="Search"
-                        value={searchText}
-                        onChange={(e) => setSearchText(e.target.value)}
-                        sx={{ mb: 1 }}
-                    />
-
-                    {/* CLEAR */}
-                    <MenuItem
-                        sx={{ fontWeight: 600 }}
-                        onClick={() => {
-                            setColumnFilters((prev) => ({
-                                ...prev,
-                                Product_Name: [],
-                            }));
-                            setFilterAnchor(null);
-                        }}
-                    >
-                        All
-                    </MenuItem>
-
-                    {/* OPTIONS */}
-                    {[...new Set(mergedData.map((r) => r.Product_Name))]
-                        .filter(Boolean)
-                        .filter((v) =>
-                            String(v).toLowerCase().includes(searchText.toLowerCase())
-                        )
-                        .map((v) => {
-                            const selected = columnFilters.Product_Name || [];
-                            const isSelected = selected.includes(v);
-
-                            return (
-                                <MenuItem
-                                    key={v}
-                                    onClick={() => {
-                                        setColumnFilters((prev) => {
-                                            const prevValues = prev.Product_Name || [];
-
-                                            const newValues = prevValues.includes(v)
-                                                ? prevValues.filter((x: any) => x !== v)
-                                                : [...prevValues, v];
-
-                                            return {
-                                                ...prev,
-                                                Product_Name: newValues,
-                                            };
-                                        });
-                                    }}
-                                    sx={{
-                                        backgroundColor: isSelected ? "#e0e7ff" : "transparent",
-                                        fontWeight: isSelected ? 600 : 400,
-                                    }}
-                                >
-                                    {v}
-                                </MenuItem>
-                            );
-                        })}
-                </Box>
-            </Menu>
+                columnLabel="Product Name"
+                options={Array.from(new Set(mergedData.map((r) => r.Product_Name))).filter(Boolean).map(String)}
+                selectedValues={columnFilters.Product_Name}
+                onFilterChange={(selected: string[] | undefined) => {
+                    setColumnFilters((prev) => ({
+                        ...prev,
+                        Product_Name: selected,
+                    }));
+                }}
+            />
 
             <NumericalFilterMenu
                 anchorEl={numFilterAnchor}

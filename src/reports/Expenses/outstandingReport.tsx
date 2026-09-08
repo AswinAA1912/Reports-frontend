@@ -20,11 +20,11 @@ import {
     DialogActions,
     DialogTitle,
     DialogContent,
-    Checkbox,
     CircularProgress,
     ToggleButton,
     ToggleButtonGroup,
 } from "@mui/material";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 
 import dayjs from "dayjs";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -86,7 +86,7 @@ type FiltersMap = {
         from: string;
         to: string;
     };
-    columnFilters: Record<string, string[]>;
+    columnFilters: Record<string, string[] | undefined>;
 };
 
 /* ================= CONSTANTS ================= */
@@ -277,10 +277,7 @@ const OutstandingReport: React.FC = () => {
     const [filterAnchor, setFilterAnchor] =
         useState<null | HTMLElement>(null);
 
-    const [activeHeader, setActiveHeader] =
-        useState<string | null>(null);
-
-    const [searchText, setSearchText] = useState("");
+    const [activeHeader, setActiveHeader] = useState<string | null>(null);
 
     const [groupDialogOpen, setGroupDialogOpen] =
         useState(false);
@@ -418,8 +415,7 @@ const OutstandingReport: React.FC = () => {
                         )
                     ) {
                         if (
-                            !values ||
-                            values.length === 0
+                            values === undefined
                         )
                             continue;
 
@@ -850,8 +846,6 @@ const OutstandingReport: React.FC = () => {
             header
         );
 
-        setSearchText("");
-
         setFilterAnchor(
             e.currentTarget
         );
@@ -928,7 +922,7 @@ const OutstandingReport: React.FC = () => {
 
                 if (column === activeHeader) continue;
 
-                if (!values?.length) continue;
+                if (values === undefined) continue;
 
                 const rowValue = String(row[column] ?? "")
                     .trim()
@@ -1946,162 +1940,27 @@ const OutstandingReport: React.FC = () => {
             </AppLayout >
             {/* ================= HEADER FILTER MENU ================= */}
 
-            {
-                activeHeader && (
-                    <Menu
-                        anchorEl={filterAnchor}
-                        open={Boolean(filterAnchor)}
-                        onClose={() =>
-                            setFilterAnchor(
-                                null
-                            )
+            <HeaderFilterMenu
+                anchorEl={filterAnchor}
+                open={Boolean(filterAnchor)}
+                onClose={() => setFilterAnchor(null)}
+                columnLabel={activeHeader || undefined}
+                options={filterOptions}
+                selectedValues={activeHeader ? filters.columnFilters[activeHeader] : undefined}
+                onFilterChange={(newSelected) => {
+                    if (!activeHeader) return;
+                    setFilters((p) => {
+                        const copy = { ...p.columnFilters };
+                        if (newSelected === undefined) {
+                            delete copy[activeHeader];
+                        } else {
+                            copy[activeHeader] = newSelected;
                         }
-                    >
-                        <Box
-                            p={2}
-                            sx={{
-                                minWidth: 240,
-                            }}
-                        >
-                            <TextField
-                                size="small"
-                                fullWidth
-                                placeholder={`Search ${activeHeader}`}
-                                value={searchText}
-                                onChange={e =>
-                                    setSearchText(
-                                        e.target.value
-                                    )
-                                }
-                                sx={{
-                                    mb: 1,
-                                }}
-                            />
-
-                            <MenuItem
-                                dense
-                                sx={{
-                                    fontWeight: 600,
-                                }}
-                                onClick={() => {
-                                    setFilters(
-                                        prev => {
-                                            const copy =
-                                            {
-                                                ...prev.columnFilters,
-                                            };
-
-                                            delete copy[
-                                                activeHeader
-                                            ];
-
-                                            return {
-                                                ...prev,
-                                                columnFilters:
-                                                    copy,
-                                            };
-                                        }
-                                    );
-                                }}
-                            >
-                                <Checkbox
-                                    size="small"
-                                    checked={
-                                        !filters
-                                            .columnFilters[
-                                        activeHeader
-                                        ] ||
-                                        filters
-                                            .columnFilters[
-                                            activeHeader
-                                        ]
-                                            .length ===
-                                        0
-                                    }
-                                />
-                                All
-                            </MenuItem>
-
-                            <Box
-                                sx={{
-                                    maxHeight: 250,
-                                    overflow: "auto",
-                                }}
-                            >
-                                {filterOptions
-                                    .filter(v =>
-                                        v
-                                            .toLowerCase()
-                                            .includes(
-                                                searchText.toLowerCase()
-                                            )
-                                    )
-                                    .map(v => {
-                                        const selected =
-                                            filters
-                                                .columnFilters[
-                                                activeHeader
-                                            ]?.includes(
-                                                v
-                                            ) ??
-                                            false;
-
-                                        return (
-                                            <MenuItem
-                                                key={v}
-                                                dense
-                                                onClick={() => {
-                                                    setFilters(
-                                                        prev => {
-                                                            const existing =
-                                                                prev
-                                                                    .columnFilters[
-                                                                activeHeader
-                                                                ] ??
-                                                                [];
-
-                                                            const updated =
-                                                                existing.includes(
-                                                                    v
-                                                                )
-                                                                    ? existing.filter(
-                                                                        x =>
-                                                                            x !==
-                                                                            v
-                                                                    )
-                                                                    : [
-                                                                        ...existing,
-                                                                        v,
-                                                                    ];
-
-                                                            return {
-                                                                ...prev,
-                                                                columnFilters:
-                                                                {
-                                                                    ...prev.columnFilters,
-                                                                    [activeHeader]:
-                                                                        updated,
-                                                                },
-                                                            };
-                                                        }
-                                                    );
-                                                }}
-                                            >
-                                                <Checkbox
-                                                    size="small"
-                                                    checked={
-                                                        selected
-                                                    }
-                                                />
-                                                {v}
-                                            </MenuItem>
-                                        );
-                                    })}
-                            </Box>
-                        </Box>
-                    </Menu>
-                )
-            }
+                        return { ...p, columnFilters: copy };
+                    });
+                    setPage(1);
+                }}
+            />
 
             {/* ================= COLUMN SETTINGS ================= */}
 

@@ -945,13 +945,6 @@ const UserRights: React.FC = () => {
                           display: "flex",
                           flexDirection: "column",
                           gap: 0.6,
-                          "&::-webkit-scrollbar": { width: 6 },
-                          "&::-webkit-scrollbar-thumb": {
-                            backgroundColor: "#94a3b8",
-                            borderRadius: 3,
-                            "&:hover": { backgroundColor: "#64748b" },
-                          },
-                          "&::-webkit-scrollbar-track": { backgroundColor: "#f8fafc" },
                         }}
                       >
                         {activeMenuDetails.length > 0 ? (
@@ -1258,20 +1251,6 @@ const UserRights: React.FC = () => {
                         display: "flex",
                         flexDirection: "column",
                         gap: 1.5,
-                        "&::-webkit-scrollbar": {
-                          width: "8px",
-                        },
-                        "&::-webkit-scrollbar-thumb": {
-                          backgroundColor: "#94a3b8",
-                          borderRadius: "4px",
-                        },
-                        "&::-webkit-scrollbar-thumb:hover": {
-                          backgroundColor: "#64748b",
-                        },
-                        "&::-webkit-scrollbar-track": {
-                          backgroundColor: "#f1f5f9",
-                          borderRadius: "4px",
-                        },
                       }}
                     >
                       {Object.entries(filteredGroupedMenus).map(([category, items]) => {

@@ -108,7 +108,7 @@ const AppRouting: React.FC<AppRoutingProps> = ({
           path="/dashboard"
           element={
             <RequireAuth>
-              <AppLayout>
+              <AppLayout fullWidth>
                 <Dashboard />
               </AppLayout>
             </RequireAuth>

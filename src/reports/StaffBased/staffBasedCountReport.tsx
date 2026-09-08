@@ -14,10 +14,8 @@ import {
     Typography,
     Tooltip,
     CircularProgress,
-    Checkbox,
-    TextField,
-    MenuItem,
 } from "@mui/material";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 
 import dayjs from "dayjs";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -316,11 +314,8 @@ const StaffBasedCountReport: React.FC =
         const [activeHeader, setActiveHeader] =
             useState<string>("");
 
-        const [searchText, setSearchText] =
-            useState("");
-
         const [headerFilters, setHeaderFilters] =
-            useState<Record<string, string[]>>({});
+            useState<Record<string, string[] | undefined>>({});
 
         /* ================= API LOAD ================= */
 
@@ -353,7 +348,7 @@ const StaffBasedCountReport: React.FC =
             return rawRows.filter((row) => {
                 return Object.entries(headerFilters).every(
                     ([key, selected]) => {
-                        if (!selected.length) {
+                        if (selected === undefined) {
                             return true;
                         }
 
@@ -1258,7 +1253,6 @@ const StaffBasedCountReport: React.FC =
                                                                     openNumFilter(e, c.key);
                                                                 } else {
                                                                     setActiveHeader(c.key);
-                                                                    setSearchText("");
                                                                     setFilterAnchor(
                                                                         e.currentTarget as HTMLElement
                                                                     );
@@ -1409,149 +1403,27 @@ const StaffBasedCountReport: React.FC =
                             </Table>
                         </TableContainer>
 
-                        <Menu
+                        <HeaderFilterMenu
                             anchorEl={filterAnchor}
                             open={Boolean(filterAnchor)}
-                            onClose={() =>
-                                setFilterAnchor(null)
-                            }
-                        >
-                            <Box
-                                p={2}
-                                sx={{
-                                    minWidth: 250,
-                                }}
-                            >
-                                <TextField
-                                    size="small"
-                                    fullWidth
-                                    placeholder={`Search ${activeHeader}`}
-                                    value={searchText}
-                                    onChange={(e) =>
-                                        setSearchText(
-                                            e.target.value
-                                        )
+                            onClose={() => setFilterAnchor(null)}
+                            columnLabel={activeHeader || undefined}
+                            options={filterOptions.map(String)}
+                            selectedValues={activeHeader ? headerFilters[activeHeader] : undefined}
+                            onFilterChange={(newSelected) => {
+                                if (!activeHeader) return;
+                                setHeaderFilters((prev) => {
+                                    const copy = { ...prev };
+                                    if (newSelected === undefined) {
+                                        delete copy[activeHeader];
+                                    } else {
+                                        copy[activeHeader] = newSelected;
                                     }
-                                    sx={{ mb: 1 }}
-                                />
-
-                                <MenuItem
-                                    dense
-                                    onClick={() =>
-                                        setHeaderFilters(
-                                            (prev) => {
-                                                const copy =
-                                                {
-                                                    ...prev,
-                                                };
-
-                                                delete copy[
-                                                    activeHeader
-                                                ];
-
-                                                return copy;
-                                            }
-                                        )
-                                    }
-                                >
-                                    <Checkbox
-                                        checked={
-                                            !headerFilters[
-                                                activeHeader
-                                            ]?.length
-                                        }
-                                    />
-                                    All
-                                </MenuItem>
-
-                                <Box
-                                    sx={{
-                                        maxHeight: 300,
-                                        overflow: "auto",
-                                    }}
-                                >
-                                    {filterOptions
-                                        .filter((v) =>
-                                            String(v)
-                                                .toLowerCase()
-                                                .includes(
-                                                    searchText.toLowerCase()
-                                                )
-                                        )
-                                        .map((value) => {
-                                            const selected =
-                                                headerFilters[
-                                                    activeHeader
-                                                ]?.includes(
-                                                    String(
-                                                        value
-                                                    )
-                                                ) ??
-                                                false;
-
-                                            return (
-                                                <MenuItem
-                                                    key={String(
-                                                        value
-                                                    )}
-                                                    dense
-                                                    onClick={() => {
-                                                        setHeaderFilters(
-                                                            (
-                                                                prev
-                                                            ) => {
-                                                                const existing =
-                                                                    prev[
-                                                                    activeHeader
-                                                                    ] ??
-                                                                    [];
-
-                                                                const updated =
-                                                                    existing.includes(
-                                                                        String(
-                                                                            value
-                                                                        )
-                                                                    )
-                                                                        ? existing.filter(
-                                                                            (
-                                                                                x
-                                                                            ) =>
-                                                                                x !==
-                                                                                String(
-                                                                                    value
-                                                                                )
-                                                                        )
-                                                                        : [
-                                                                            ...existing,
-                                                                            String(
-                                                                                value
-                                                                            ),
-                                                                        ];
-
-                                                                return {
-                                                                    ...prev,
-                                                                    [activeHeader]:
-                                                                        updated,
-                                                                };
-                                                            }
-                                                        );
-                                                    }}
-                                                >
-                                                    <Checkbox
-                                                        checked={
-                                                            selected
-                                                        }
-                                                    />
-
-                                                    {String(
-                                                        value
-                                                    )}
-                                                </MenuItem>
-                                            );
-                                        })}
-                                </Box>
-                            </Box>
-                        </Menu>
+                                    return copy;
+                                });
+                                setPage(1);
+                            }}
+                        />
 
                         <CommonPagination
                             totalRows={

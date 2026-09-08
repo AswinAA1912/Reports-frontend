@@ -19,6 +19,15 @@ const theme = createTheme({
   typography: {
     fontFamily: "'Inter', 'Poppins', 'Sansation', sans-serif",
   },
+  components: {
+    MuiTableContainer: {
+      styleOverrides: {
+        root: {
+          overflow: "auto",
+        },
+      },
+    },
+  },
 });
 
 const App: React.FC = () => {

@@ -9,7 +9,6 @@ import {
     TableRow,
     Paper,
     Menu,
-    MenuItem,
     TextField,
     Button,
     Dialog,
@@ -17,10 +16,10 @@ import {
     DialogContent,
     DialogActions,
     CircularProgress,
-    Checkbox,
     Slider,
     Typography,
 } from "@mui/material";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import SyncIcon from "@mui/icons-material/Sync";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
@@ -59,11 +58,16 @@ const UnitEconomicsAdmin: React.FC = () => {
     const [rowsPerPage, setRowsPerPage] = useState(100);
 
     /* -------- FILTERS -------- */
-    const [filters, setFilters] = useState({
+    const [filters, setFilters] = useState<{
+        Date: { from: string; to: string };
+        Product?: string[];
+        invoice_no?: string[];
+        Retailer_Name?: string[];
+    }>({
         Date: { from: today, to: today },
-        Product: [] as string[],
-        invoice_no: [] as string[],
-        Retailer_Name: [] as string[],
+        Product: undefined,
+        invoice_no: undefined,
+        Retailer_Name: undefined,
     });
 
     const [tempDate, setTempDate] = useState(filters.Date);
@@ -76,7 +80,7 @@ const UnitEconomicsAdmin: React.FC = () => {
     /* -------- HEADER FILTER -------- */
     const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
-    const [searchText, setSearchText] = useState("");
+
 
     /* -------- SUMMARY -------- */
     const [summaryColumn, setSummaryColumn] = useState<keyof AdminUnitEconomicsReport | null>(null);
@@ -275,14 +279,14 @@ const UnitEconomicsAdmin: React.FC = () => {
 
     useEffect(() => {
         let rows = [...rawApiData];
-        if (filters.Product && filters.Product.length > 0) {
-            rows = rows.filter((r) => filters.Product.includes(r.Product_Name));
+        if (filters.Product !== undefined) {
+            rows = rows.filter((r) => filters.Product!.includes(r.Product_Name));
         }
-        if (filters.invoice_no && filters.invoice_no.length > 0) {
-            rows = rows.filter((r) => filters.invoice_no.includes(r.invoice_no));
+        if (filters.invoice_no !== undefined) {
+            rows = rows.filter((r) => filters.invoice_no!.includes(r.invoice_no));
         }
-        if (filters.Retailer_Name && filters.Retailer_Name.length > 0) {
-            rows = rows.filter((r) => filters.Retailer_Name.includes(r.Retailer_Name));
+        if (filters.Retailer_Name !== undefined) {
+            rows = rows.filter((r) => filters.Retailer_Name!.includes(r.Retailer_Name));
         }
         // Apply Range Filter
         if (rangeFilter) {
@@ -315,31 +319,22 @@ const UnitEconomicsAdmin: React.FC = () => {
     const products = useMemo(
         () =>
             [...new Set(rawApiData.map((d) => d.Product_Name))]
-                .filter(Boolean)
-                .filter((p) =>
-                    p.toLowerCase().includes(searchText.toLowerCase())
-                ),
-        [rawApiData, searchText]
+                .filter(Boolean),
+        [rawApiData]
     );
 
     const invoiceNos = useMemo(
         () =>
             [...new Set(rawApiData.map((d) => d.invoice_no))]
-                .filter(Boolean)
-                .filter((inv) =>
-                    inv.toLowerCase().includes(searchText.toLowerCase())
-                ),
-        [rawApiData, searchText]
+                .filter(Boolean),
+        [rawApiData]
     );
 
     const retailerNames = useMemo(
         () =>
             [...new Set(rawApiData.map((d) => d.Retailer_Name))]
-                .filter(Boolean)
-                .filter((ret) =>
-                    ret.toLowerCase().includes(searchText.toLowerCase())
-                ),
-        [rawApiData, searchText]
+                .filter(Boolean),
+        [rawApiData]
     );
 
     /* ================= SUMMARY ================= */
@@ -351,7 +346,6 @@ const UnitEconomicsAdmin: React.FC = () => {
     const openFilter = (e: React.MouseEvent<HTMLElement>, column: string) => {
         setActiveHeader(column);
         setFilterAnchor(e.currentTarget);
-        setSearchText("");
 
         if (["Bill_Qty", "Rate", "Amount", "Min_Rate", "COGS_Rate", "GP_MR", "GP_COGS", "TGP_MR", "TGP_COGS", "GP_Percentage_MR", "GP_Percentage_COGS"].includes(column)) {
             if (summaryColumn === column) {
@@ -360,36 +354,6 @@ const UnitEconomicsAdmin: React.FC = () => {
                 setSummaryColumn(column as keyof AdminUnitEconomicsReport);
             }
         }
-    };
-
-    const handleToggleItemDirect = (column: "Product" | "invoice_no" | "Retailer_Name", item: string) => {
-        setFilters((prev) => {
-            const list = prev[column] || [];
-            const newList = list.includes(item)
-                ? list.filter((x) => x !== item)
-                : [...list, item];
-            return {
-                ...prev,
-                [column]: newList,
-            };
-        });
-    };
-
-    const handleToggleSelectAllDirect = (column: "Product" | "invoice_no" | "Retailer_Name", visibleItems: string[]) => {
-        setFilters((prev) => {
-            const list = prev[column] || [];
-            const allSelected = visibleItems.every((x) => list.includes(x));
-            let newList: string[];
-            if (allSelected) {
-                newList = list.filter((x) => !visibleItems.includes(x));
-            } else {
-                newList = [...new Set([...list, ...visibleItems])];
-            }
-            return {
-                ...prev,
-                [column]: newList,
-            };
-        });
     };
 
     useEffect(() => {
@@ -635,181 +599,56 @@ const UnitEconomicsAdmin: React.FC = () => {
                         </Table>
                     </TableContainer>
 
-                    {/* ===== FILTER MENU (SAME PATTERN AS REFERENCE) ===== */}
+                    {/* Categorical / Date Filter Menu */}
+                    <HeaderFilterMenu
+                        anchorEl={filterAnchor}
+                        open={Boolean(filterAnchor) && Boolean(activeHeader) && !isNumericColumn(activeHeader!)}
+                        onClose={() => setFilterAnchor(null)}
+                        columnLabel={activeHeader || undefined}
+                        options={
+                            activeHeader === "Product"
+                                ? products
+                                : activeHeader === "Invoice No"
+                                ? invoiceNos
+                                : activeHeader === "Retailer Name"
+                                ? retailerNames
+                                : []
+                        }
+                        selectedValues={
+                            activeHeader === "Product"
+                                ? filters.Product
+                                : activeHeader === "Invoice No"
+                                ? filters.invoice_no
+                                : activeHeader === "Retailer Name"
+                                ? filters.Retailer_Name
+                                : undefined
+                        }
+                        onFilterChange={(newSelected) => {
+                            if (activeHeader === "Product") {
+                                setFilters((p) => ({ ...p, Product: newSelected }));
+                            } else if (activeHeader === "Invoice No") {
+                                setFilters((p) => ({ ...p, invoice_no: newSelected }));
+                            } else if (activeHeader === "Retailer Name") {
+                                setFilters((p) => ({ ...p, Retailer_Name: newSelected }));
+                            }
+                            setPage(1);
+                        }}
+                        isDateColumn={activeHeader === "Date"}
+                        dateFrom={tempDate.from}
+                        dateTo={tempDate.to}
+                        onDateChange={(dates) => setTempDate(dates)}
+                        onApplyDate={() => {
+                            setFilters((p) => ({ ...p, Date: tempDate }));
+                            setFilterAnchor(null);
+                        }}
+                    />
+
+                    {/* Numerical Filter Menu */}
                     <Menu
                         anchorEl={filterAnchor}
-                        open={Boolean(filterAnchor)}
+                        open={Boolean(filterAnchor) && Boolean(activeHeader) && isNumericColumn(activeHeader!)}
                         onClose={() => setFilterAnchor(null)}
                     >
-                        {activeHeader === "Product" && (
-                            <Box p={2} sx={{ minWidth: 240 }}>
-                                <TextField
-                                    size="small"
-                                    fullWidth
-                                    placeholder="Search Product"
-                                    value={searchText}
-                                    onChange={(e) => setSearchText(e.target.value)}
-                                    sx={{ mb: 1 }}
-                                />
-
-                                <Box sx={{ maxHeight: 200, overflowY: 'auto' }}>
-                                    <MenuItem
-                                        sx={{ fontWeight: 600 }}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleToggleSelectAllDirect("Product", products);
-                                        }}
-                                    >
-                                        <Checkbox
-                                            size="small"
-                                            checked={products.length > 0 && products.every((x) => filters.Product.includes(x))}
-                                            indeterminate={products.some((x) => filters.Product.includes(x)) && !products.every((x) => filters.Product.includes(x))}
-                                        />
-                                        Select All
-                                    </MenuItem>
-
-                                    {products.map((p) => (
-                                        <MenuItem
-                                            key={p}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleToggleItemDirect("Product", p);
-                                            }}
-                                        >
-                                            <Checkbox
-                                                size="small"
-                                                checked={filters.Product.includes(p)}
-                                            />
-                                            {p}
-                                        </MenuItem>
-                                    ))}
-                                </Box>
-                            </Box>
-                        )}
-
-                        {activeHeader === "Invoice No" && (
-                            <Box p={2} sx={{ minWidth: 240 }}>
-                                <TextField
-                                    size="small"
-                                    fullWidth
-                                    placeholder="Search Invoice No"
-                                    value={searchText}
-                                    onChange={(e) => setSearchText(e.target.value)}
-                                    sx={{ mb: 1 }}
-                                />
-
-                                <Box sx={{ maxHeight: 200, overflowY: 'auto' }}>
-                                    <MenuItem
-                                        sx={{ fontWeight: 600 }}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleToggleSelectAllDirect("invoice_no", invoiceNos);
-                                        }}
-                                    >
-                                        <Checkbox
-                                            size="small"
-                                            checked={invoiceNos.length > 0 && invoiceNos.every((x) => filters.invoice_no.includes(x))}
-                                            indeterminate={invoiceNos.some((x) => filters.invoice_no.includes(x)) && !invoiceNos.every((x) => filters.invoice_no.includes(x))}
-                                        />
-                                        Select All
-                                    </MenuItem>
-
-                                    {invoiceNos.map((inv) => (
-                                        <MenuItem
-                                            key={inv}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleToggleItemDirect("invoice_no", inv);
-                                            }}
-                                        >
-                                            <Checkbox
-                                                size="small"
-                                                checked={filters.invoice_no.includes(inv)}
-                                            />
-                                            {inv}
-                                        </MenuItem>
-                                    ))}
-                                </Box>
-                            </Box>
-                        )}
-
-                        {activeHeader === "Retailer Name" && (
-                            <Box p={2} sx={{ minWidth: 240 }}>
-                                <TextField
-                                    size="small"
-                                    fullWidth
-                                    placeholder="Search Retailer"
-                                    value={searchText}
-                                    onChange={(e) => setSearchText(e.target.value)}
-                                    sx={{ mb: 1 }}
-                                />
-
-                                <Box sx={{ maxHeight: 200, overflowY: 'auto' }}>
-                                    <MenuItem
-                                        sx={{ fontWeight: 600 }}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleToggleSelectAllDirect("Retailer_Name", retailerNames);
-                                        }}
-                                    >
-                                        <Checkbox
-                                            size="small"
-                                            checked={retailerNames.length > 0 && retailerNames.every((x) => filters.Retailer_Name.includes(x))}
-                                            indeterminate={retailerNames.some((x) => filters.Retailer_Name.includes(x)) && !retailerNames.every((x) => filters.Retailer_Name.includes(x))}
-                                        />
-                                        Select All
-                                    </MenuItem>
-
-                                    {retailerNames.map((ret) => (
-                                        <MenuItem
-                                            key={ret}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleToggleItemDirect("Retailer_Name", ret);
-                                            }}
-                                        >
-                                            <Checkbox
-                                                size="small"
-                                                checked={filters.Retailer_Name.includes(ret)}
-                                            />
-                                            {ret}
-                                        </MenuItem>
-                                    ))}
-                                </Box>
-                            </Box>
-                        )}
-
-                        {activeHeader === "Date" && (
-                            <Box p={2} display="flex" flexDirection="column" gap={1}>
-                                <TextField
-                                    type="date"
-                                    value={tempDate.from}
-                                    onChange={(e) =>
-                                        setTempDate((p) => ({ ...p, from: e.target.value }))
-                                    }
-                                />
-                                <TextField
-                                    type="date"
-                                    value={tempDate.to}
-                                    onChange={(e) =>
-                                        setTempDate((p) => ({ ...p, to: e.target.value }))
-                                    }
-                                />
-                                <Button
-                                    variant="contained"
-                                    onClick={() => {
-                                        setFilters((p) => ({ ...p, Date: tempDate }));
-                                        setFilterAnchor(null);
-                                    }}
-                                    sx={{
-                                        backgroundColor: "#1E3A8A",
-                                        fontWeight: 600,
-                                    }}
-                                >
-                                    Apply
-                                </Button>
-                            </Box>
-                        )}
 
                         {activeHeader && isNumericColumn(activeHeader) && (() => {
                             const { min, max } = getMinMax(activeHeader);

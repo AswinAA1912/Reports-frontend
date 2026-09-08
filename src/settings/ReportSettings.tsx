@@ -360,20 +360,26 @@ const ReportSettings: React.FC = () => {
             p={2}
             sx={{
                 backgroundColor: "#f4f6f8",
-                minHeight: "100vh",
+                height: "100%",
+                maxHeight: "100%",
+                boxSizing: "border-box",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
             }}
         >
             <ToastContainer position="top-right" autoClose={3000} />
-            <Paper sx={{ p: 3 }}>
-                <Grid container spacing={2}>
+            <Paper sx={{ p: 3, flex: 1, minHeight: 0, height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                <Grid container spacing={2} sx={{ flex: 1, minHeight: 0, height: "100%" }}>
 
                     {/* LEFT SIDE */}
-                    <Grid item xs={12} md={4}>
+                    <Grid item xs={12} md={4} sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
                         <Box
                             sx={{
                                 borderRight: "1px solid #ddd",
                                 pr: 2,
                                 height: "100%",
+                                overflowY: "auto",
                             }}
                         >
                             <Typography variant="subtitle2" mb={2} color="text.secondary">
@@ -446,13 +452,14 @@ const ReportSettings: React.FC = () => {
                     </Grid>
 
                     {/* RIGHT SIDE */}
-                    <Grid item xs={12} md={8}>
+                    <Grid item xs={12} md={8} sx={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
                         {/* TOP BAR */}
                         <Box
                             display="flex"
                             justifyContent="space-between"
                             alignItems="center"
                             mb={2}
+                            flexShrink={0}
                         >
                             <Typography variant="subtitle2" color="text.secondary">
                                 COLUMNS
@@ -474,10 +481,12 @@ const ReportSettings: React.FC = () => {
                             )}
                         </Box>
 
-                        {loading ? (
-                            <CircularProgress />
-                        ) : (
-                            <Grid container spacing={2}>
+                        {/* SCROLLABLE COLUMNS LIST */}
+                        <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto", pr: 1 }}>
+                            {loading ? (
+                                <CircularProgress />
+                            ) : (
+                                <Grid container spacing={2}>
 
                                 {/* 🔥 COLUMN BLOCK (Header + Items together) */}
                                 {columns.map((col, index) => (
@@ -604,6 +613,7 @@ const ReportSettings: React.FC = () => {
                                 ))}
                             </Grid>
                         )}
+                        </Box>
                     </Grid>
                 </Grid>
             </Paper>

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useNumericalFilter } from "../../hooks/useNumericalFilter";
 import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
 import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import {
     Box,
     Paper,
@@ -19,8 +20,6 @@ import {
     Button,
     IconButton,
     Menu,
-    MenuItem,
-    TextField,
     Checkbox,
     FormControlLabel,
 } from "@mui/material";
@@ -502,12 +501,11 @@ const BankAbstractReport: React.FC = () => {
     // Column header dropdown filtering for Expanded view
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
     const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
-    const [searchText, setSearchText] = useState("");
-    const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({
-        voucher_name: [],
-        Account_name: [],
-        Particulars: [],
-        invoice_no: [],
+    const [columnFilters, setColumnFilters] = useState<Record<string, string[] | undefined>>({
+        voucher_name: undefined,
+        Account_name: undefined,
+        Particulars: undefined,
+        invoice_no: undefined,
     });
 
     const filteredDetailedTransactions = useMemo(() => {
@@ -515,17 +513,17 @@ const BankAbstractReport: React.FC = () => {
         const { Data } = detailedData;
 
         let filtered = Data.filter((item: any) => {
-            const voucherFilter = columnFilters.voucher_name || [];
-            if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucher_name)) return false;
+            const voucherFilter = columnFilters.voucher_name;
+            if (voucherFilter !== undefined && !voucherFilter.includes(item.voucher_name)) return false;
 
-            const nameFilter = columnFilters.Account_name || [];
-            if (nameFilter.length > 0 && !nameFilter.includes(item.Account_name)) return false;
+            const nameFilter = columnFilters.Account_name;
+            if (nameFilter !== undefined && !nameFilter.includes(item.Account_name)) return false;
 
-            const particularsFilter = columnFilters.Particulars || [];
-            if (particularsFilter.length > 0 && !particularsFilter.includes(item.Particulars)) return false;
+            const particularsFilter = columnFilters.Particulars;
+            if (particularsFilter !== undefined && !particularsFilter.includes(item.Particulars)) return false;
 
-            const invoiceNoFilter = columnFilters.invoice_no || [];
-            if (invoiceNoFilter.length > 0 && !invoiceNoFilter.includes(item.invoice_no)) return false;
+            const invoiceNoFilter = columnFilters.invoice_no;
+            if (invoiceNoFilter !== undefined && !invoiceNoFilter.includes(item.invoice_no)) return false;
 
             return true;
         });
@@ -1230,13 +1228,11 @@ const BankAbstractReport: React.FC = () => {
     const handleHeaderClick = (event: React.MouseEvent<HTMLElement>, key: keyof typeof columnFilters) => {
         setActiveHeader(key);
         setFilterAnchor(event.currentTarget);
-        setSearchText("");
     };
 
     const handleHeaderFilterClose = () => {
         setActiveHeader(null);
         setFilterAnchor(null);
-        setSearchText("");
     };
 
     const uniqueValuesForHeader = useMemo(() => {
@@ -1250,37 +1246,6 @@ const BankAbstractReport: React.FC = () => {
         });
         return Array.from(setVals).sort();
     }, [activeHeader, detailedData]);
-
-    const handleToggleColumnFilter = (val: string) => {
-        if (!activeHeader) return;
-        setColumnFilters((prev) => {
-            const currentList = prev[activeHeader as keyof typeof columnFilters] || [];
-            const isSelected = currentList.includes(val);
-            let updatedList: string[];
-            if (isSelected) {
-                updatedList = currentList.filter((item) => item !== val);
-            } else {
-                updatedList = [...currentList, val];
-            }
-            return {
-                ...prev,
-                [activeHeader]: updatedList,
-            };
-        });
-        setPage(1);
-    };
-
-    const handleSelectAllColumnFilter = () => {
-        if (!activeHeader) return;
-        const currentList = columnFilters[activeHeader as keyof typeof columnFilters] || [];
-        const isAllSelected = currentList.length === uniqueValuesForHeader.length;
-
-        setColumnFilters((prev) => ({
-            ...prev,
-            [activeHeader]: isAllSelected ? [] : [...uniqueValuesForHeader],
-        }));
-        setPage(1);
-    };
 
     // Excel Export
     const handleExportExcel = (includeDetails: boolean = false, stages = detailedExportStages) => {
@@ -1725,7 +1690,7 @@ const BankAbstractReport: React.FC = () => {
     };
 
     return (
-        <Box sx={{ width: "100%", minHeight: "100vh", bgcolor: "#f8fafc", overflowX: "hidden" }}>
+        <Box sx={{ width: "100%", minHeight: "100%", bgcolor: "#f8fafc", boxSizing: "border-box" }}>
             <PageHeader
                 onExportExcel={() => {
                     if (toggleMode === "Expanded") {
@@ -1784,70 +1749,23 @@ const BankAbstractReport: React.FC = () => {
             />
 
             <Box px={2} pb={4} pt={2}>
-
-                {/* Header Filter Popup Menu */}
-                <Menu
+                <HeaderFilterMenu
                     anchorEl={filterAnchor}
-                    open={Boolean(filterAnchor)}
+                    open={Boolean(filterAnchor) && Boolean(activeHeader)}
                     onClose={handleHeaderFilterClose}
-                    PaperProps={{
-                        sx: { width: 250, maxHeight: 350, p: 1 }
+                    columnLabel={detailedColumns.find((c) => c.key === activeHeader)?.label || activeHeader || undefined}
+                    options={uniqueValuesForHeader}
+                    selectedValues={activeHeader ? columnFilters[activeHeader] : undefined}
+                    onFilterChange={(selected: string[] | undefined) => {
+                        if (activeHeader) {
+                            setColumnFilters((prev) => ({
+                                ...prev,
+                                [activeHeader]: selected,
+                            }));
+                            setPage(1);
+                        }
                     }}
-                >
-                    <Box sx={{ p: 1 }}>
-                        <TextField
-                            size="small"
-                            placeholder="Search..."
-                            fullWidth
-                            value={searchText}
-                            onChange={(e) => setSearchText(e.target.value)}
-                            sx={{ mb: 1 }}
-                        />
-                        <MenuItem
-                            dense
-                            onClick={handleSelectAllColumnFilter}
-                            sx={{ fontWeight: 700, borderRadius: 1 }}
-                        >
-                            <Checkbox
-                                size="small"
-                                checked={
-                                    activeHeader
-                                        ? (columnFilters[activeHeader as keyof typeof columnFilters] || []).length === uniqueValuesForHeader.length
-                                        : false
-                                }
-                                indeterminate={
-                                    activeHeader
-                                        ? (columnFilters[activeHeader as keyof typeof columnFilters] || []).length > 0 &&
-                                        (columnFilters[activeHeader as keyof typeof columnFilters] || []).length < uniqueValuesForHeader.length
-                                        : false
-                                }
-                            />
-                            (Select All)
-                        </MenuItem>
-                        <Box sx={{ maxHeight: 200, overflowY: "auto" }}>
-                            {uniqueValuesForHeader
-                                .filter((val) => val.toLowerCase().includes(searchText.toLowerCase()))
-                                .map((val) => {
-                                    const isChecked = activeHeader
-                                        ? (columnFilters[activeHeader as keyof typeof columnFilters] || []).includes(val)
-                                        : false;
-                                    return (
-                                        <MenuItem
-                                            key={val}
-                                            dense
-                                            onClick={() => handleToggleColumnFilter(val)}
-                                            sx={{ borderRadius: 1 }}
-                                        >
-                                            <Checkbox size="small" checked={isChecked} />
-                                            <Typography variant="body2" noWrap>
-                                                {val}
-                                            </Typography>
-                                        </MenuItem>
-                                    );
-                                })}
-                        </Box>
-                    </Box>
-                </Menu>
+                />
 
                 {/* ===== COLUMN SETTINGS MENU ===== */}
                 <Menu

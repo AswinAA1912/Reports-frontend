@@ -564,10 +564,6 @@ const AnalyticsReportPage: React.FC = () => {
                     height: isMobile ? 250 : 430,
                     overflow: "auto",
                     border: "1px solid #e5e7eb",
-                    "&::-webkit-scrollbar": {
-                      width: "0px",
-                      height: "0px",
-                    },
                   }}
                 >
                   <Table size="small">

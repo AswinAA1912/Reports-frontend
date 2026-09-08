@@ -10,9 +10,6 @@ import {
     Paper,
     TextField,
     CircularProgress,
-    Menu,
-    MenuItem,
-    Checkbox,
     Autocomplete,
     Radio,
     RadioGroup,
@@ -34,6 +31,7 @@ import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import CommonPagination from "../../Components/CommonPagination";
 import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
 import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import { useNumericalFilter } from "../../hooks/useNumericalFilter";
 import { RecievablePayableReportService, RecievablePayableItem } from "../../services/recievablePayableReport.service";
 
@@ -64,8 +62,7 @@ const RecievablePayableReport: React.FC = () => {
     const [groupMode, setGroupMode] = useState<"withGroup" | "withoutGroup">("withGroup");
     const [tempGroupMode, setTempGroupMode] = useState<"withGroup" | "withoutGroup">("withGroup");
     
-    const [accountSearchText, setAccountSearchText] = useState("");
-    const [selectedAccountNames, setSelectedAccountNames] = useState<string[]>([]);
+    const [selectedAccountNames, setSelectedAccountNames] = useState<string[] | undefined>(undefined);
     const [accountFilterAnchor, setAccountFilterAnchor] = useState<null | HTMLElement>(null);
 
     const [filters, setFilters] = useState({
@@ -92,8 +89,7 @@ const RecievablePayableReport: React.FC = () => {
 
             const res = await apiCall({ Todate: filters.Date.to });
             setRows(res.data.data || []);
-            setSelectedAccountNames([]);
-            setAccountSearchText("");
+            setSelectedAccountNames(undefined);
             setPage(1);
         } catch (err: any) {
             console.error("Error loading report data:", err);
@@ -135,13 +131,6 @@ const RecievablePayableReport: React.FC = () => {
         return Array.from(names).sort((a, b) => a.localeCompare(b));
     }, [rows, filters.Group, filters.GroupMode]);
 
-    // Account list filtered by search input inside dropdown menu
-    const filteredAccountOptions = useMemo(() => {
-        return uniqueAccountNames.filter((name) =>
-            name.toLowerCase().includes(accountSearchText.toLowerCase())
-        );
-    }, [uniqueAccountNames, accountSearchText]);
-
     // Apply group filter and header filter selection on account names
     const filteredBySearch = useMemo(() => {
         let source = rows.map((r: any) => {
@@ -159,11 +148,13 @@ const RecievablePayableReport: React.FC = () => {
             source = source.filter((r: any) => r.Group_Name && filters.Group.includes(r.Group_Name));
         }
 
-        if (selectedAccountNames.length === 0) return source;
-        return source.filter(
-            (row) =>
-                row.Account_name && selectedAccountNames.includes(row.Account_name)
-        );
+        if (selectedAccountNames !== undefined) {
+            source = source.filter(
+                (row) =>
+                    row.Account_name && selectedAccountNames.includes(row.Account_name)
+            );
+        }
+        return source;
     }, [rows, selectedAccountNames, filters.Group, filters.GroupMode]);
 
     const {
@@ -564,25 +555,6 @@ const RecievablePayableReport: React.FC = () => {
 
     /* ================= INTERACTION HANDLERS ================= */
 
-    const handleToggleAccount = (name: string) => {
-        setSelectedAccountNames((prev) => {
-            const next = prev.includes(name)
-                ? prev.filter((x) => x !== name)
-                : [...prev, name];
-            return next;
-        });
-        setPage(1);
-    };
-
-    const handleSelectAllAccounts = () => {
-        if (selectedAccountNames.length === uniqueAccountNames.length) {
-            setSelectedAccountNames([]);
-        } else {
-            setSelectedAccountNames(uniqueAccountNames);
-        }
-        setPage(1);
-    };
-
     /* ================= RENDER ================= */
 
     const headerStyle = {
@@ -859,49 +831,18 @@ const RecievablePayableReport: React.FC = () => {
             </AppLayout>
 
             {/* Account Name Header Filter Menu */}
-            <Menu
+            <HeaderFilterMenu
                 anchorEl={accountFilterAnchor}
                 open={Boolean(accountFilterAnchor)}
                 onClose={() => setAccountFilterAnchor(null)}
-            >
-                <Box p={1.5} sx={{ minWidth: 260 }}>
-                    {/* Search Field */}
-                    <TextField
-                        size="small"
-                        fullWidth
-                        placeholder="Search Account Name..."
-                        value={accountSearchText}
-                        onChange={(e) => setAccountSearchText(e.target.value)}
-                        sx={{ mb: 1 }}
-                        autoFocus
-                    />
-
-                    {/* All option */}
-                    <MenuItem dense onClick={handleSelectAllAccounts}>
-                        <Checkbox
-                            size="small"
-                            checked={
-                                selectedAccountNames.length === 0 ||
-                                selectedAccountNames.length === uniqueAccountNames.length
-                            }
-                        />
-                        All
-                    </MenuItem>
-
-                    {/* Checkbox options list */}
-                    <Box sx={{ maxHeight: 250, overflow: "auto" }}>
-                        {filteredAccountOptions.map((name) => {
-                            const isChecked = selectedAccountNames.includes(name);
-                            return (
-                                <MenuItem key={name} dense onClick={() => handleToggleAccount(name)}>
-                                    <Checkbox size="small" checked={isChecked} />
-                                    {name}
-                                </MenuItem>
-                            );
-                        })}
-                    </Box>
-                </Box>
-            </Menu>
+                columnLabel="Account Name"
+                options={uniqueAccountNames}
+                selectedValues={selectedAccountNames}
+                onFilterChange={(selected: string[] | undefined) => {
+                    setSelectedAccountNames(selected);
+                    setPage(1);
+                }}
+            />
 
             {/* Numerical Filter Menu */}
             <NumericalFilterMenu

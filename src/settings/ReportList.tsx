@@ -5,6 +5,7 @@ import {
     Button,
     Paper,
     Table,
+    TableContainer,
     TableHead,
     TableRow,
     TableCell,
@@ -22,7 +23,7 @@ import { SettingsService } from "../services/reportSettings.services";
 import { toast, ToastContainer } from "react-toastify";
 
 // ✅ IMPORT HEADER
-import Header, { HEADER_HEIGHT } from "../Layout/Header";
+import Header from "../Layout/Header";
 
 /* ================= TYPES ================= */
 
@@ -129,179 +130,234 @@ const ReportList: React.FC = () => {
     };
 
     return (
-        <>
+        <Box
+            sx={{
+                height: "100%",
+                maxHeight: "100%",
+                width: "100%",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                boxSizing: "border-box",
+                backgroundColor: "#F1F5F9",
+            }}
+        >
             {/* ✅ HEADER */}
             <Header headerColor="#1E3A8A" />
 
             {/* ✅ PAGE CONTENT */}
-            <Box sx={{ mt: `${HEADER_HEIGHT}px`, p: 2 }}>
+            <Box
+                sx={{
+                    flex: 1,
+                    minHeight: 0,
+                    p: 2,
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
+                    boxSizing: "border-box",
+                }}
+            >
                 <ToastContainer />
 
                 {/* TOP BAR */}
-                <Box display="flex" justifyContent="space-between" mb={2}>
-                    <Typography variant="h6">Report Templates</Typography>
+                <Box
+                    display="flex"
+                    justifyContent="space-between"
+                    alignItems="center"
+                    mb={2}
+                    flexShrink={0}
+                >
+                    <Typography variant="h6" sx={{ fontWeight: 600, color: "#1E3A8A" }}>
+                        Report Templates
+                    </Typography>
 
                     <Button
                         variant="contained"
                         onClick={handleCreate}
-                        sx={{ textTransform: "none" }}
+                        sx={{
+                            textTransform: "none",
+                            backgroundColor: "#1E3A8A",
+                            "&:hover": { backgroundColor: "#1d4ed8" }
+                        }}
                     >
                         Create Template
                     </Button>
                 </Box>
 
-                <Paper sx={{ borderRadius: 2 }}>
+                <Paper
+                    sx={{
+                        flex: 1,
+                        minHeight: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        borderRadius: 2,
+                        overflow: "hidden",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                    }}
+                >
                     {loading ? (
-                        <Box p={3} textAlign="center">
+                        <Box p={3} textAlign="center" sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
                             <CircularProgress />
                         </Box>
                     ) : (
-                        <Table>
-                            <TableHead>
-                                <TableRow
-                                    sx={{
-                                        backgroundColor: "#1E3A8A",
-                                        "& th": {
-                                            color: "#fff",
-                                            fontWeight: 600,
-                                            borderBottom: "none"
-                                        }
-                                    }}
-                                >
-                                    <TableCell width={50}></TableCell>
-                                    <TableCell>Parent Report</TableCell>
-                                    <TableCell>Template Name</TableCell>
-                                    <TableCell>Type</TableCell>
-                                    <TableCell>Created By</TableCell>
-                                    <TableCell>Created At</TableCell>
-                                    <TableCell align="center">Action</TableCell>
-                                </TableRow>
-                            </TableHead>
+                        <TableContainer
+                            sx={{
+                                flex: 1,
+                                minHeight: 0,
+                                height: "100%",
+                                overflow: "auto",
+                            }}
+                        >
+                            <Table stickyHeader>
+                                <TableHead>
+                                    <TableRow
+                                        sx={{
+                                            backgroundColor: "#1E3A8A",
+                                            "& th": {
+                                                color: "#fff",
+                                                backgroundColor: "#1E3A8A",
+                                                fontWeight: 600,
+                                                borderBottom: "none",
+                                                whiteSpace: "nowrap",
+                                                zIndex: 3,
+                                            }
+                                        }}
+                                    >
+                                        <TableCell width={50}></TableCell>
+                                        <TableCell>Parent Report</TableCell>
+                                        <TableCell>Template Name</TableCell>
+                                        <TableCell>Type</TableCell>
+                                        <TableCell>Created By</TableCell>
+                                        <TableCell>Created At</TableCell>
+                                        <TableCell align="center">Action</TableCell>
+                                    </TableRow>
+                                </TableHead>
 
-                            <TableBody>
-                                {Object.keys(grouped).map((parent) => (
-                                    <React.Fragment key={parent}>
+                                <TableBody>
+                                    {Object.keys(grouped).map((parent) => (
+                                        <React.Fragment key={parent}>
 
-                                        {/* 🔷 PARENT ROW */}
-                                        <TableRow
-                                            sx={{
-                                                backgroundColor: "#EEF2FF",
-                                                "& td": { borderBottom: "1px solid #e0e0e0" }
-                                            }}
-                                        >
-                                            <TableCell>
-                                                <IconButton
-                                                    size="small"
-                                                    onClick={() => toggleRow(parent)}
-                                                >
-                                                    {openRows[parent] ? (
-                                                        <KeyboardArrowUp />
-                                                    ) : (
-                                                        <KeyboardArrowDown />
-                                                    )}
-                                                </IconButton>
-                                            </TableCell>
-
-                                            <TableCell colSpan={6}>
-                                                <Typography fontWeight={600}>
-                                                    {parent}
-                                                </Typography>
-                                            </TableCell>
-                                        </TableRow>
-
-                                        {/* ✅ CHILD ROWS DIRECTLY */}
-                                        {openRows[parent] &&
-                                            grouped[parent].map((report) =>
-                                                report.templates.map((type) => (
-                                                    <TableRow
-                                                        key={`${report.Report_Id}-${type.Type_Id}`}
-                                                        hover
-                                                        sx={{
-                                                            "&:hover": {
-                                                                backgroundColor: "#F9FAFB"
-                                                            }
-                                                        }}
+                                            {/* 🔷 PARENT ROW */}
+                                            <TableRow
+                                                sx={{
+                                                    backgroundColor: "#EEF2FF",
+                                                    "& td": { borderBottom: "1px solid #e0e0e0" }
+                                                }}
+                                            >
+                                                <TableCell>
+                                                    <IconButton
+                                                        size="small"
+                                                        onClick={() => toggleRow(parent)}
                                                     >
-                                                        {/* 1️⃣ Expand column */}
-                                                        <TableCell width={50}></TableCell>
+                                                        {openRows[parent] ? (
+                                                            <KeyboardArrowUp />
+                                                        ) : (
+                                                            <KeyboardArrowDown />
+                                                        )}
+                                                    </IconButton>
+                                                </TableCell>
 
-                                                        {/* 2️⃣ Parent column */}
-                                                        <TableCell></TableCell>
+                                                <TableCell colSpan={6}>
+                                                    <Typography fontWeight={600}>
+                                                        {parent}
+                                                    </Typography>
+                                                </TableCell>
+                                            </TableRow>
 
-                                                        {/* 3️⃣ Template Name */}
-                                                        <TableCell sx={{ fontWeight: 500 }}>
-                                                            {report.Report_Name}
-                                                        </TableCell>
+                                            {/* ✅ CHILD ROWS DIRECTLY */}
+                                            {openRows[parent] &&
+                                                grouped[parent].map((report) =>
+                                                    report.templates.map((type) => (
+                                                        <TableRow
+                                                            key={`${report.Report_Id}-${type.Type_Id}`}
+                                                            hover
+                                                            sx={{
+                                                                "&:hover": {
+                                                                    backgroundColor: "#F9FAFB"
+                                                                }
+                                                            }}
+                                                        >
+                                                            {/* 1️⃣ Expand column */}
+                                                            <TableCell width={50}></TableCell>
 
-                                                        {/* 4️⃣ Type */}
-                                                        <TableCell>
-                                                            <Typography
-                                                                sx={{
-                                                                    px: 1.5,
-                                                                    py: 0.5,
-                                                                    borderRadius: 1,
-                                                                    display: "inline-block",
-                                                                    backgroundColor:
-                                                                        type.Report_Type === "Abstract"
-                                                                            ? "#E0F2FE"
-                                                                            : "#EDE9FE",
-                                                                    color:
-                                                                        type.Report_Type === "Abstract"
-                                                                            ? "#0369A1"
-                                                                            : "#5B21B6",
-                                                                    fontSize: 13,
-                                                                    fontWeight: 500
-                                                                }}
-                                                            >
-                                                                {type.Report_Type}
-                                                            </Typography>
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            {report.CreatedByName || "-"}
-                                                        </TableCell>
+                                                            {/* 2️⃣ Parent column */}
+                                                            <TableCell></TableCell>
 
-                                                        <TableCell>
-                                                            {formatDateTime(report.CreatedAt)}
-                                                        </TableCell>
+                                                            {/* 3️⃣ Template Name */}
+                                                            <TableCell sx={{ fontWeight: 500 }}>
+                                                                {report.Report_Name}
+                                                            </TableCell>
 
-                                                        {/* 5️⃣ Action */}
-                                                        <TableCell align="center">
-                                                            <Box display="flex" justifyContent="center" gap={1}>
-                                                                <IconButton
-                                                                    color="primary"
-                                                                    onClick={() =>
-                                                                        handleEdit(report.Report_Id, type.Type_Id)
-                                                                    }
+                                                            {/* 4️⃣ Type */}
+                                                            <TableCell>
+                                                                <Typography
                                                                     sx={{
-                                                                        backgroundColor: "#EEF2FF",
-                                                                        "&:hover": { backgroundColor: "#E0E7FF" }
+                                                                        px: 1.5,
+                                                                        py: 0.5,
+                                                                        borderRadius: 1,
+                                                                        display: "inline-block",
+                                                                        backgroundColor:
+                                                                            type.Report_Type === "Abstract"
+                                                                                ? "#E0F2FE"
+                                                                                : "#EDE9FE",
+                                                                        color:
+                                                                            type.Report_Type === "Abstract"
+                                                                                ? "#0369A1"
+                                                                                : "#5B21B6",
+                                                                        fontSize: 13,
+                                                                        fontWeight: 500
                                                                     }}
                                                                 >
-                                                                    <Edit fontSize="small" />
-                                                                </IconButton>
+                                                                    {type.Report_Type}
+                                                                </Typography>
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                {report.CreatedByName || "-"}
+                                                            </TableCell>
 
-                                                                <IconButton
-                                                                    color="error"
-                                                                    onClick={() =>
-                                                                        handleDeleteClick(report.Report_Id)
-                                                                    }
-                                                                    sx={{
-                                                                        backgroundColor: "#FEF2F2",
-                                                                        "&:hover": { backgroundColor: "#FEE2E2" }
-                                                                    }}
-                                                                >
-                                                                    <Delete fontSize="small" />
-                                                                </IconButton>
-                                                            </Box>
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ))
-                                            )}
+                                                            <TableCell>
+                                                                {formatDateTime(report.CreatedAt)}
+                                                            </TableCell>
 
-                                    </React.Fragment>
-                                ))}
-                            </TableBody>
-                        </Table>
+                                                            {/* 5️⃣ Action */}
+                                                            <TableCell align="center">
+                                                                <Box display="flex" justifyContent="center" gap={1}>
+                                                                    <IconButton
+                                                                        color="primary"
+                                                                        onClick={() =>
+                                                                            handleEdit(report.Report_Id, type.Type_Id)
+                                                                        }
+                                                                        sx={{
+                                                                            backgroundColor: "#EEF2FF",
+                                                                            "&:hover": { backgroundColor: "#E0E7FF" }
+                                                                        }}
+                                                                    >
+                                                                        <Edit fontSize="small" />
+                                                                    </IconButton>
+
+                                                                    <IconButton
+                                                                        color="error"
+                                                                        onClick={() =>
+                                                                            handleDeleteClick(report.Report_Id)
+                                                                        }
+                                                                        sx={{
+                                                                            backgroundColor: "#FEF2F2",
+                                                                            "&:hover": { backgroundColor: "#FEE2E2" }
+                                                                        }}
+                                                                    >
+                                                                        <Delete fontSize="small" />
+                                                                    </IconButton>
+                                                                </Box>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))
+                                                )}
+
+                                        </React.Fragment>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
                     )}
                 </Paper>
             </Box>
@@ -330,7 +386,7 @@ const ReportList: React.FC = () => {
                     </Button>
                 </DialogActions>
             </Dialog>
-        </>
+        </Box>
     );
 };
 

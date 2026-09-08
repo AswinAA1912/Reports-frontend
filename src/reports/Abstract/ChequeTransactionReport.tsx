@@ -18,8 +18,8 @@ import {
     Autocomplete,
     TextField,
     MenuItem,
-    Menu
 } from "@mui/material";
+import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
@@ -194,11 +194,10 @@ const ChequeTransactionReport: React.FC = () => {
     // Header Filters (Party Name, Voucher Type, Cheque No)
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
     const [filterAnchor, setFilterAnchor] = useState<null | HTMLElement>(null);
-    const [searchText, setSearchText] = useState("");
-    const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({
-        creditAccountGet: [],
-        voucherTypeGet: [],
-        check_no: []
+    const [columnFilters, setColumnFilters] = useState<Record<string, string[] | undefined>>({
+        creditAccountGet: undefined,
+        voucherTypeGet: undefined,
+        check_no: undefined
     });
 
     const [creditAccounts, setCreditAccounts] = useState<{ value: any; label: string }[]>([]);
@@ -206,7 +205,6 @@ const ChequeTransactionReport: React.FC = () => {
 
     const handleHeaderClick = (e: React.MouseEvent<HTMLElement>, columnKey: string) => {
         setActiveHeader(columnKey);
-        setSearchText("");
         setFilterAnchor(e.currentTarget);
     };
 
@@ -300,14 +298,14 @@ const ChequeTransactionReport: React.FC = () => {
             if (!(matchesCredit && matchesVoucher && matchesPartyType && matchesPending)) return false;
 
             // Header Column Filters
-            const creditFilter = columnFilters.creditAccountGet || [];
-            if (creditFilter.length > 0 && !creditFilter.includes(item.creditAccountGet)) return false;
+            const creditFilter = columnFilters.creditAccountGet;
+            if (creditFilter !== undefined && !creditFilter.includes(item.creditAccountGet)) return false;
 
-            const voucherFilter = columnFilters.voucherTypeGet || [];
-            if (voucherFilter.length > 0 && !voucherFilter.includes(item.voucherTypeGet)) return false;
+            const voucherFilter = columnFilters.voucherTypeGet;
+            if (voucherFilter !== undefined && !voucherFilter.includes(item.voucherTypeGet)) return false;
 
-            const checkNoFilter = columnFilters.check_no || [];
-            if (checkNoFilter.length > 0 && !checkNoFilter.includes(item.check_no)) return false;
+            const checkNoFilter = columnFilters.check_no;
+            if (checkNoFilter !== undefined && !checkNoFilter.includes(item.check_no)) return false;
 
             return true;
         });
@@ -445,7 +443,7 @@ const ChequeTransactionReport: React.FC = () => {
     };
 
     return (
-        <Box sx={{ width: "100%", overflowX: "hidden", minHeight: "100vh", bgcolor: "#f1f5f9" }}>
+        <Box sx={{ width: "100%", minHeight: "100%", bgcolor: "#f1f5f9", boxSizing: "border-box" }}>
             <PageHeader
                 onExportExcel={handleChequeExportExcel}
                 onExportPDF={handleChequeExportPDF}
@@ -553,7 +551,7 @@ const ChequeTransactionReport: React.FC = () => {
                                         >
                                             <Box display="flex" alignItems="center" gap={0.5}>
                                                 VchType
-                                                {columnFilters.voucherTypeGet.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
+                                                {columnFilters.voucherTypeGet !== undefined && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
                                             </Box>
                                         </TableCell>
                                         <TableCell
@@ -562,7 +560,7 @@ const ChequeTransactionReport: React.FC = () => {
                                         >
                                             <Box display="flex" alignItems="center" gap={0.5}>
                                                 Party Name
-                                                {columnFilters.creditAccountGet.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
+                                                {columnFilters.creditAccountGet !== undefined && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
                                             </Box>
                                         </TableCell>
                                         <TableCell
@@ -571,7 +569,7 @@ const ChequeTransactionReport: React.FC = () => {
                                         >
                                             <Box display="flex" alignItems="center" gap={0.5}>
                                                 Chq.No
-                                                {columnFilters.check_no.length > 0 && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
+                                                {columnFilters.check_no !== undefined && <FilterAltIcon fontSize="small" sx={{ color: "#ffffffff" }} />}
                                             </Box>
                                         </TableCell>
                                         <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 700, py: 1.5, border: "1px solid #cbd5e1" }}>Chq.Date</TableCell>
@@ -655,80 +653,38 @@ const ChequeTransactionReport: React.FC = () => {
             </Box>
 
             {/* Header Column Filters Menu Popup */}
-            <Menu
+            <HeaderFilterMenu
                 anchorEl={filterAnchor}
-                open={Boolean(filterAnchor)}
-                onClose={() => setFilterAnchor(null)}
-                PaperProps={{
-                    sx: {
-                        maxHeight: activeHeader === "creditAccountGet" ? 450 : 300,
-                        width: activeHeader === "creditAccountGet" ? 450 : 250,
-                        boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)",
-                        borderRadius: 1.5,
-                        border: "1px solid #e2e8f0"
+                open={Boolean(filterAnchor) && Boolean(activeHeader)}
+                onClose={() => {
+                    setFilterAnchor(null);
+                    setActiveHeader(null);
+                }}
+                columnLabel={
+                    activeHeader === "creditAccountGet"
+                        ? "Party Name"
+                        : activeHeader === "voucherTypeGet"
+                        ? "Voucher Type"
+                        : activeHeader === "check_no"
+                        ? "Cheque No"
+                        : activeHeader || undefined
+                }
+                options={
+                    activeHeader
+                        ? Array.from(new Set(chequeData.map((x) => x[activeHeader]))).filter(Boolean).map(String)
+                        : []
+                }
+                selectedValues={activeHeader ? columnFilters[activeHeader] : undefined}
+                onFilterChange={(selected: string[] | undefined) => {
+                    if (activeHeader) {
+                        setColumnFilters((prev) => ({
+                            ...prev,
+                            [activeHeader]: selected,
+                        }));
+                        setChequePage(1);
                     }
                 }}
-            >
-                {activeHeader && (
-                    <Box p={1.5}>
-                        <TextField
-                            size="small"
-                            fullWidth
-                            placeholder="Search..."
-                            value={searchText}
-                            onChange={(e) => setSearchText(e.target.value)}
-                            sx={{ mb: 1.5 }}
-                        />
-                        <Box sx={{ maxHeight: activeHeader === "creditAccountGet" ? 330 : 180, overflowY: "auto" }}>
-                            {(() => {
-                                const allValues = Array.from(
-                                    new Set(chequeData.map((x) => x[activeHeader]))
-                                ).filter((v) => v && String(v).toLowerCase().includes(searchText.toLowerCase()));
-
-                                const selectedValues = columnFilters[activeHeader] || [];
-
-                                // Sort selected values first
-                                const sortedValues = [
-                                    ...allValues.filter((v) => selectedValues.includes(v)),
-                                    ...allValues.filter((v) => !selectedValues.includes(v)),
-                                ];
-
-                                return sortedValues.map((v) => {
-                                    const isSelected = selectedValues.includes(v);
-
-                                    return (
-                                        <MenuItem
-                                            key={String(v)}
-                                            onClick={() => {
-                                                setColumnFilters((prev) => {
-                                                    const prevValues = prev[activeHeader] || [];
-                                                    const newValues = prevValues.includes(v)
-                                                        ? prevValues.filter((x: any) => x !== v)
-                                                        : [...prevValues, v];
-
-                                                    return {
-                                                        ...prev,
-                                                        [activeHeader]: newValues,
-                                                    };
-                                                });
-                                            }}
-                                            sx={{
-                                                backgroundColor: isSelected ? "#e0e7ff" : "transparent",
-                                                fontWeight: isSelected ? 600 : 400,
-                                                "&:hover": {
-                                                    backgroundColor: isSelected ? "#c7d2fe" : "#f1f5f9",
-                                                },
-                                            }}
-                                        >
-                                            {String(v)}
-                                        </MenuItem>
-                                    );
-                                });
-                            })()}
-                        </Box>
-                    </Box>
-                )}
-            </Menu>
+            />
 
             <NumericalFilterMenu
                 anchorEl={numFilterAnchor}

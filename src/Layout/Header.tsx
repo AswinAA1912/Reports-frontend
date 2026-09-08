@@ -23,6 +23,7 @@ import logo from "../assets/logo.png";
 interface HeaderProps {
   headerColor?: string;
   showSearch?: boolean;
+  position?: "fixed" | "static" | "sticky" | "relative";
 }
 
 const HEADER_HEIGHT = 64;
@@ -30,6 +31,7 @@ const HEADER_HEIGHT = 64;
 const Header: React.FC<HeaderProps> = ({
   headerColor = "#1E3A8A",
   showSearch = false,
+  position = "static",
 }) => {
   const navigate = useNavigate();
   const { logout, token, user, companies, switchCompany } = useAuth();
@@ -68,10 +70,12 @@ const Header: React.FC<HeaderProps> = ({
 
   return (
     <AppBar
-      position="fixed"
+      position={position}
       sx={{
         background: headerColor,
         height: HEADER_HEIGHT,
+        minHeight: HEADER_HEIGHT,
+        flexShrink: 0,
         zIndex: (theme) => theme.zIndex.drawer + 10,
       }}
     >

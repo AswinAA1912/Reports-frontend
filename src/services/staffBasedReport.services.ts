@@ -99,8 +99,8 @@ export const staffBasedReportService = {
 };
 
 export const StaffBasedCountReportService = {
-  getStaffBasedCountReport: (params?: { Fromdate?: string; Todate?: string}) =>
-    axios.get<{ success: boolean; data: StaffBasedCountReport[]}>(
+  getStaffBasedCountReport: (params?: { Fromdate?: string; Todate?: string }) =>
+    axios.get<{ success: boolean; data: StaffBasedCountReport[] }>(
       //  ` http://192.168.1.5:9001/api/reports/externalAPI/staffbasedCount`,
       `${getBaseURL()}api/reports/externalAPI/staffbasedCount`,
       { params }
@@ -215,6 +215,12 @@ export const employeeReportGroupService = {
   getEmployeeInvoices: (params?: { Fromdate?: string; Todate?: string; Overall_GroupName?: string; Group_Name?: string; Voucher_Type?: string | number; Voucher_Type_Id?: number; VoucherId?: number; Emp_Id?: number; Emp_Id_Is_Unassigned?: number }) =>
     axios.get<{ success: boolean; data: any[] }>(
       `${getBaseURL()}api/reports/externalAPI/overallStaffCategorywise/invoices`,
+      { params }
+    ),
+
+  getEmployeeInvoicesWithItems: (params?: { Fromdate?: string; Todate?: string; Overall_GroupName?: string; Group_Name?: string; Voucher_Type?: string | number; Voucher_Type_Id?: number; VoucherId?: number; Emp_Id?: number; Emp_Id_Is_Unassigned?: number }) =>
+    axios.get<{ success: boolean; data: any[] }>(
+      `${getBaseURL()}api/reports/externalAPI/overallStaffCategorywise/invoicewithitems`,
       { params }
     ),
 };

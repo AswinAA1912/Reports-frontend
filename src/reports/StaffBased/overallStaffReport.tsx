@@ -42,7 +42,7 @@ import PersonIcon from "@mui/icons-material/Person";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 import PageHeader from "../../Layout/PageHeader";
 import AppLayout from "../../Layout/appLayout";
 import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
@@ -243,27 +243,29 @@ const getStaffCellValue = (
     }
     if (colKey === "Total_Qty") {
         if (roleColumns) {
-            let total = 0;
-            roleColumns
-                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "qty")
-                .forEach(c => {
+            const enabledQtyCols = roleColumns.filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "qty");
+            if (enabledQtyCols.length > 0) {
+                let total = 0;
+                enabledQtyCols.forEach(c => {
                     total += getStaffCellValue(sc, c.key, "qty", qtyType);
                 });
-            return total;
+                return total;
+            }
         }
-        return 0;
+        return qtyType === "Act_Qty" ? (sc.Total_Act_Qty || sc.Total_Qty || 0) : (sc.Total_Qty || 0);
     }
     if (colKey === "Total_Item_Count") {
         if (roleColumns) {
-            let total = 0;
-            roleColumns
-                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "item_count")
-                .forEach(c => {
+            const enabledItemCols = roleColumns.filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "item_count");
+            if (enabledItemCols.length > 0) {
+                let total = 0;
+                enabledItemCols.forEach(c => {
                     total += getStaffCellValue(sc, c.key, "item_count", qtyType);
                 });
-            return total;
+                return total;
+            }
         }
-        return 0;
+        return sc.Item_Count || 0;
     }
     if (sc.roleValues && colKey) {
         const directVal = sc.roleValues[colKey];
@@ -380,39 +382,57 @@ const getInvoiceCellValue = (
     }
     if (colKey === "Total_Qty") {
         if (roleColumns) {
-            let total = 0;
-            roleColumns
-                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "qty")
-                .forEach(c => {
+            const enabledQtyRoles = roleColumns.filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "qty");
+            if (enabledQtyRoles.length > 0) {
+                let total = 0;
+                enabledQtyRoles.forEach(c => {
                     total += getInvoiceCellValue(inv, c.key, "qty", qtyType);
                 });
-            return total;
+                return total;
+            }
         }
-        return 0;
-    }
-    if (colKey === "Total_Count") {
-        if (roleColumns) {
+        if (inv.items && inv.items.length > 0) {
+            return inv.items.reduce((sum: number, it: any) => sum + (qtyType === "Act_Qty" ? (Number(it.Act_Qty ?? it.Bill_Act_Qty ?? it.Bill_Qty) || 0) : (Number(it.Bill_Qty ?? it.Qty) || 0)), 0);
+        }
+        if (inv.roleValues) {
             let total = 0;
-            roleColumns
-                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "count")
-                .forEach(c => {
-                    total += getInvoiceCellValue(inv, c.key, "count", qtyType);
-                });
-            return total;
+            Object.values(inv.roleValues).forEach((val: any) => {
+                total += qtyType === "Act_Qty" ? (val.actQty || 0) : (val.qty || 0);
+            });
+            if (total > 0) return total;
         }
-        return 0;
+        return Number(inv.Bill_Qty) || 0;
+    }
+    if (colKey === "Total_Count" || colKey === "Invoice_Count") {
+        if (metric === "qty") return 0;
+        if (metric === "item_count") {
+            if (inv.items && inv.items.length > 0) return inv.items.length;
+            return Number(inv.Item_Count) || 1;
+        }
+        return 1;
     }
     if (colKey === "Total_Item_Count") {
         if (roleColumns) {
-            let total = 0;
-            roleColumns
-                .filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "item_count")
-                .forEach(c => {
+            const enabledItemCols = roleColumns.filter(c => c.enabled && c.key !== "Total_Tonnage" && c.key !== "Invoice_Count" && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count" && c.metric === "item_count");
+            if (enabledItemCols.length > 0) {
+                let total = 0;
+                enabledItemCols.forEach(c => {
                     total += getInvoiceCellValue(inv, c.key, "item_count", qtyType);
                 });
-            return total;
+                return total;
+            }
         }
-        return 0;
+        if (inv.items && inv.items.length > 0) {
+            return inv.items.length;
+        }
+        if (inv.roleValues) {
+            let total = 0;
+            Object.values(inv.roleValues).forEach((val: any) => {
+                total += val.itemCount || 0;
+            });
+            if (total > 0) return total;
+        }
+        return Number(inv.Item_Count) || 1;
     }
 
     // Look up role-specific value from aggregated roleValues
@@ -470,6 +490,44 @@ const getFilteredStaffList = (staffList: any[], selectedFilters: string[] | unde
         if (selectedFilters === undefined) return true;
         const name = (sc.Cost_Center_Name || "Unassigned").trim();
         return selectedFilters.includes(name);
+    });
+};
+
+// Helper to highlight only the Invoice No cells with a yellow background and bold text in Excel exports
+const highlightInvoiceCells = (worksheet: any, invoiceRowIndices: Set<number>) => {
+    if (!worksheet || !worksheet['!ref']) return;
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+
+    let staffInvColIdx = -1;
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+        const headerCell = worksheet[XLSX.utils.encode_cell({ r: 0, c: C })];
+        if (headerCell && String(headerCell.v || "").trim() === "Staff Name / Invoice No") {
+            staffInvColIdx = C;
+            break;
+        }
+    }
+
+    if (staffInvColIdx === -1) return;
+
+    const highlightStyle = {
+        fill: { fgColor: { rgb: "FFFF00" } }, // Highlight Yellow
+        font: { bold: true, color: { rgb: "000000" } },
+        alignment: { horizontal: "left", vertical: "center" },
+        border: {
+            top: { style: "thin", color: { rgb: "D1D5DB" } },
+            bottom: { style: "thin", color: { rgb: "D1D5DB" } },
+            left: { style: "thin", color: { rgb: "D1D5DB" } },
+            right: { style: "thin", color: { rgb: "D1D5DB" } }
+        }
+    };
+
+    invoiceRowIndices.forEach(idx => {
+        const R = idx + 1; // +1 to skip header row
+        const cellAddress = XLSX.utils.encode_cell({ r: R, c: staffInvColIdx });
+        const cell = worksheet[cellAddress];
+        if (cell) {
+            cell.s = highlightStyle;
+        }
     });
 };
 
@@ -1134,9 +1192,9 @@ const OverallStaffReport: React.FC = () => {
                     }
                 });
 
-                roleSums["Total_Qty"] = enabledQtySum;
-                roleSums["Total_Count"] = enabledCountSum;
-                roleSums["Total_Item_Count"] = enabledItemCountSum;
+                roleSums["Total_Qty"] = enabledQtySum > 0 ? enabledQtySum : (roleSums["Total_Tonnage"] || 0);
+                roleSums["Total_Count"] = enabledCountSum > 0 ? enabledCountSum : (roleSums["Invoice_Count"] || 0);
+                roleSums["Total_Item_Count"] = enabledItemCountSum > 0 ? enabledItemCountSum : (roleSums["Item_Count"] || 0);
 
                 roleSums["Total_Tonnage"] = qtyType === "Act_Qty"
                     ? (r.Total_Act_Tonnage ?? r.Act_Total_Tonnage ?? r.Total_Act_Qty ?? r.Total_Tonnage ?? 0)
@@ -1218,9 +1276,9 @@ const OverallStaffReport: React.FC = () => {
                         }
                     });
 
-                    roleSums["Total_Qty"] = enabledQtySum;
-                    roleSums["Total_Count"] = enabledCountSum;
-                    roleSums["Total_Item_Count"] = enabledItemCountSum;
+                    roleSums["Total_Qty"] = enabledQtySum > 0 ? enabledQtySum : (roleSums["Total_Tonnage"] || 0);
+                    roleSums["Total_Count"] = enabledCountSum > 0 ? enabledCountSum : (roleSums["Invoice_Count"] || 0);
+                    roleSums["Total_Item_Count"] = enabledItemCountSum > 0 ? enabledItemCountSum : (roleSums["Item_Count"] || 0);
 
                     roleSums["Total_Tonnage"] = qtyType === "Act_Qty"
                         ? (r.Total_Act_Tonnage ?? r.Act_Total_Tonnage ?? r.Total_Act_Qty ?? r.Total_Tonnage ?? 0)
@@ -1344,9 +1402,9 @@ const OverallStaffReport: React.FC = () => {
             }
         });
 
-        roleTotals["Total_Qty"] = enabledQtyGrandSum;
-        roleTotals["Total_Count"] = enabledCountGrandSum;
-        roleTotals["Total_Item_Count"] = enabledItemCountGrandSum;
+        roleTotals["Total_Qty"] = enabledQtyGrandSum > 0 ? enabledQtyGrandSum : (roleTotals["Total_Tonnage"] || totalKgs);
+        roleTotals["Total_Count"] = enabledCountGrandSum > 0 ? enabledCountGrandSum : (roleTotals["Invoice_Count"] || 0);
+        roleTotals["Total_Item_Count"] = enabledItemCountGrandSum > 0 ? enabledItemCountGrandSum : (roleTotals["Item_Count"] || 0);
 
         let dynamicQtyTotal = 0;
         let dynamicCountTotal = 0;
@@ -1396,7 +1454,7 @@ const OverallStaffReport: React.FC = () => {
                         : (matchedVoucher ? Number(matchedVoucher.Value) : undefined);
 
                     const promises = empIds.map(id =>
-                        employeeReportGroupService.getEmployeeInvoices({
+                        employeeReportGroupService.getEmployeeInvoicesWithItems({
                             Fromdate: fromDate,
                             Todate: toDate,
                             Overall_GroupName: parentCategory === "ADJUSTMENTS" ? "PROCESS" : parentCategory,
@@ -1410,7 +1468,7 @@ const OverallStaffReport: React.FC = () => {
                     const responses = await Promise.all(promises);
                     const rawInvoices: any[] = [];
                     responses.forEach(res => {
-                        if (res.data.success && res.data.data) {
+                        if (res.data?.success && res.data?.data) {
                             rawInvoices.push(...res.data.data);
                         }
                     });
@@ -1431,7 +1489,8 @@ const OverallStaffReport: React.FC = () => {
                                 Voucher_Date: row.Voucher_Date,
                                 Cost_Center_Id: row.Cost_Center_Id,
                                 Cost_Center_Name: row.Cost_Center_Name,
-                                roleValues: {}
+                                roleValues: {},
+                                items: []
                             };
                             groupedInvoices.push(groupMap[refId]);
                         }
@@ -1445,7 +1504,26 @@ const OverallStaffReport: React.FC = () => {
                             inv.roleValues[category].qty += Number(row.Bill_Qty) || 0;
                             inv.roleValues[category].actQty += Number(row.Bill_Act_Qty ?? row.Act_Qty ?? row.Bill_Qty ?? 0) || 0;
                             inv.roleValues[category].count = 1;
-                            inv.roleValues[category].itemCount += Number(row.Item_Count) || 0;
+                            inv.roleValues[category].itemCount += (row.Item_Count !== undefined && row.Item_Count !== null ? Number(row.Item_Count) : 1) || 1;
+                        }
+
+                        if (row.Stock_Item) {
+                            const stockItemName = String(row.Stock_Item || "-").trim();
+                            const existingItem = inv.items.find((it: any) =>
+                                String(it.Stock_Item).trim().toUpperCase() === stockItemName.toUpperCase() &&
+                                String(it.Cost_Category || "").trim().toUpperCase() === String(row.Cost_Category || "").trim().toUpperCase()
+                            );
+                            if (existingItem) {
+                                existingItem.Bill_Qty += Number(row.Bill_Qty) || 0;
+                                existingItem.Act_Qty += Number(row.Act_Qty ?? row.Bill_Act_Qty ?? row.Bill_Qty ?? 0) || 0;
+                            } else {
+                                inv.items.push({
+                                    Stock_Item: stockItemName,
+                                    Bill_Qty: Number(row.Bill_Qty) || 0,
+                                    Act_Qty: Number(row.Act_Qty ?? row.Bill_Act_Qty ?? row.Bill_Qty ?? 0) || 0,
+                                    Cost_Category: row.Cost_Category
+                                });
+                            }
                         }
                     });
 
@@ -1495,6 +1573,7 @@ const OverallStaffReport: React.FC = () => {
     const handleDefaultExportExcel = () => {
         const enabledRoles = roleColumns.filter(c => c.enabled && c.key !== "Total_Qty" && c.key !== "Total_Count" && c.key !== "Total_Item_Count").sort((a, b) => a.order - b.order);
         const rows: any[] = [];
+        const invoiceRowIndices = new Set<number>();
 
         tableCategories.forEach((category) => {
             category.groups.forEach((group) => {
@@ -1511,10 +1590,10 @@ const OverallStaffReport: React.FC = () => {
                     vtRow["Group Kgs"] = group.groupKgs;
                     vtRow["Voucher Type"] = vt.name;
                     vtRow["Voucher Kgs"] = vt.baseKgs;
+                    vtRow["Staff Name / Invoice No"] = "-";
                     vtRow["Total Qty"] = vt.roleSums["Total_Qty"] || 0;
                     vtRow["Total Inv Count"] = vt.roleSums["Total_Count"] || 0;
                     vtRow["Total Item Count"] = vt.roleSums["Total_Item_Count"] || 0;
-                    vtRow["Staff Name / Inv No"] = "-";
                     enabledRoles.forEach(col => {
                         const val = vt.roleSums[col.key] || 0;
                         vtRow[getColumnLabel(col)] = val;
@@ -1534,10 +1613,10 @@ const OverallStaffReport: React.FC = () => {
                             staffRow["Group Kgs"] = "";
                             staffRow["Voucher Type"] = "";
                             staffRow["Voucher Kgs"] = "";
+                            staffRow["Staff Name / Invoice No"] = sc.Cost_Center_Name || "Unassigned";
                             staffRow["Total Qty"] = getStaffCellValue(sc, "Total_Qty", "qty", qtyType, roleColumns);
                             staffRow["Total Inv Count"] = getStaffCellValue(sc, "Total_Count", "count", qtyType, roleColumns);
                             staffRow["Total Item Count"] = getStaffCellValue(sc, "Total_Item_Count", "item_count", qtyType, roleColumns);
-                            staffRow["Staff Name / Inv No"] = sc.Cost_Center_Name || "Unassigned";
                             enabledRoles.forEach(col => {
                                 const val = getStaffCellValue(sc, col.key, col.metric || "qty", qtyType, roleColumns);
                                 staffRow[getColumnLabel(col)] = val;
@@ -1547,21 +1626,57 @@ const OverallStaffReport: React.FC = () => {
                             // 3. Invoice Rows (if staff is expanded)
                             if (isStaffExpanded && hasInvoices) {
                                 invoicesList.forEach((inv: any) => {
+                                    const invItems = inv.items || [];
+                                    const invOverallQty = invItems.length > 0
+                                        ? invItems.reduce((sum: number, it: any) => sum + (qtyType === "Act_Qty" ? (Number(it.Act_Qty ?? it.Bill_Act_Qty ?? it.Bill_Qty) || 0) : (Number(it.Bill_Qty ?? it.Qty) || 0)), 0)
+                                        : (getInvoiceCellValue(inv, "Total_Qty", "qty", qtyType, roleColumns) || Number(inv.Bill_Qty) || 0);
+                                    const invItemCount = invItems.length > 0
+                                        ? invItems.length
+                                        : (getInvoiceCellValue(inv, "Total_Item_Count", "item_count", qtyType, roleColumns) || 1);
+
                                     const invRow: any = {};
                                     invRow["Category"] = "";
                                     invRow["Groups"] = "";
                                     invRow["Group Kgs"] = "";
                                     invRow["Voucher Type"] = "";
                                     invRow["Voucher Kgs"] = "";
-                                    invRow["Total Qty"] = getInvoiceCellValue(inv, "Total_Qty", "qty", qtyType, roleColumns);
-                                    invRow["Total Inv Count"] = getInvoiceCellValue(inv, "Total_Count", "count", qtyType, roleColumns);
-                                    invRow["Total Item Count"] = getInvoiceCellValue(inv, "Total_Item_Count", "item_count", qtyType, roleColumns);
-                                    invRow["Staff Name / Inv No"] = inv.Inv_No;
+                                    invRow["Staff Name / Invoice No"] = inv.Inv_No || "INV";
+                                    invRow["Total Qty"] = invOverallQty;
+                                    invRow["Total Inv Count"] = 1;
+                                    invRow["Total Item Count"] = invItemCount;
                                     enabledRoles.forEach(col => {
                                         const val = getInvoiceCellValue(inv, col.key, col.metric || "qty", qtyType, roleColumns);
                                         invRow[getColumnLabel(col)] = val;
                                     });
                                     rows.push(invRow);
+                                    invoiceRowIndices.add(rows.length - 1);
+
+                                    // Stock items breakdown below the invoice no (Excel only)
+                                    if (inv.items && inv.items.length > 0) {
+                                        inv.items.forEach((item: any) => {
+                                            const itemQty = qtyType === "Act_Qty" 
+                                                ? (Number(item.Act_Qty ?? item.Bill_Act_Qty ?? item.Bill_Qty) || 0) 
+                                                : (Number(item.Bill_Qty ?? item.Qty) || 0);
+                                            const itemRow: any = {};
+                                            itemRow["Category"] = "";
+                                            itemRow["Groups"] = "";
+                                            itemRow["Group Kgs"] = "";
+                                            itemRow["Voucher Type"] = "";
+                                            itemRow["Voucher Kgs"] = "";
+                                            itemRow["Staff Name / Invoice No"] = `   ${String(item.Stock_Item || "-").trim()}`;
+                                            itemRow["Total Qty"] = itemQty;
+                                            itemRow["Total Inv Count"] = "";
+                                            itemRow["Total Item Count"] = "";
+                                            enabledRoles.forEach(col => {
+                                                if (item.Cost_Category && String(item.Cost_Category).trim().toUpperCase() === String(col.key).trim().toUpperCase()) {
+                                                    itemRow[getColumnLabel(col)] = itemQty;
+                                                } else {
+                                                    itemRow[getColumnLabel(col)] = "";
+                                                }
+                                            });
+                                            rows.push(itemRow);
+                                        });
+                                    }
                                 });
                             }
                         });
@@ -1577,16 +1692,17 @@ const OverallStaffReport: React.FC = () => {
         grandRow["Group Kgs"] = grandTotals.totalKgs;
         grandRow["Voucher Type"] = "";
         grandRow["Voucher Kgs"] = "";
+        grandRow["Staff Name / Invoice No"] = "";
         grandRow["Total Qty"] = grandTotals.roleTotals["Total_Qty"] || 0;
         grandRow["Total Inv Count"] = grandTotals.roleTotals["Total_Count"] || 0;
         grandRow["Total Item Count"] = grandTotals.roleTotals["Total_Item_Count"] || 0;
-        grandRow["Staff Name / Inv No"] = "";
         enabledRoles.forEach(col => {
             grandRow[getColumnLabel(col)] = grandTotals.roleTotals[col.key] || 0;
         });
         rows.push(grandRow);
 
         const worksheet = XLSX.utils.json_to_sheet(rows);
+        highlightInvoiceCells(worksheet, invoiceRowIndices);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "Overall Staff Report");
         XLSX.writeFile(workbook, `Overall_Staff_Report_${dayjs().format("DDMMYYYY")}.xlsx`);
@@ -1814,7 +1930,7 @@ const OverallStaffReport: React.FC = () => {
                             const scName = sc.Cost_Center_Name || "Unassigned";
                             if (targetStaffList.some(tName => tName.toLowerCase() === scName.toLowerCase())) {
                                 const staffKey = `${vKey}_${sc.Emp_Id || 'unassigned'}`;
-                                if (!localInvoiceData[staffKey]) {
+                                if (!localInvoiceData[staffKey] || !localInvoiceData[staffKey].some((inv: any) => inv.items && inv.items.length > 0)) {
                                     const empIds = sc.allEmpIds && sc.allEmpIds.length > 0 ? sc.allEmpIds : [sc.Emp_Id];
                                     const matchedVoucher = voucherTypes.find((v: any) =>
                                         String(v.label).trim().toUpperCase() === String(vt.name).trim().toUpperCase() ||
@@ -1846,7 +1962,7 @@ const OverallStaffReport: React.FC = () => {
                 await Promise.all(chunk.map(async (job) => {
                     try {
                         const promises = job.empIds.map(id =>
-                            employeeReportGroupService.getEmployeeInvoices({
+                            employeeReportGroupService.getEmployeeInvoicesWithItems({
                                 Fromdate: fromDate,
                                 Todate: toDate,
                                 Overall_GroupName: job.parentCategory === "ADJUSTMENTS" ? "PROCESS" : job.parentCategory,
@@ -1879,7 +1995,8 @@ const OverallStaffReport: React.FC = () => {
                                     Voucher_Date: row.Voucher_Date,
                                     Cost_Center_Id: row.Cost_Center_Id,
                                     Cost_Center_Name: row.Cost_Center_Name,
-                                    roleValues: {}
+                                    roleValues: {},
+                                    items: []
                                 };
                                 groupedInvoices.push(groupMap[refId]);
                             }
@@ -1893,7 +2010,26 @@ const OverallStaffReport: React.FC = () => {
                                 inv.roleValues[category].qty += Number(row.Bill_Qty) || 0;
                                 inv.roleValues[category].actQty += Number(row.Bill_Act_Qty ?? row.Act_Qty ?? row.Bill_Qty ?? 0) || 0;
                                 inv.roleValues[category].count = 1;
-                                inv.roleValues[category].itemCount += Number(row.Item_Count) || 0;
+                                inv.roleValues[category].itemCount += (row.Item_Count !== undefined && row.Item_Count !== null ? Number(row.Item_Count) : 1) || 1;
+                            }
+
+                            if (row.Stock_Item) {
+                                const stockItemName = String(row.Stock_Item || "-").trim();
+                                const existingItem = inv.items.find((it: any) =>
+                                    String(it.Stock_Item).trim().toUpperCase() === stockItemName.toUpperCase() &&
+                                    String(it.Cost_Category || "").trim().toUpperCase() === String(row.Cost_Category || "").trim().toUpperCase()
+                                );
+                                if (existingItem) {
+                                    existingItem.Bill_Qty += Number(row.Bill_Qty) || 0;
+                                    existingItem.Act_Qty += Number(row.Act_Qty ?? row.Bill_Act_Qty ?? row.Bill_Qty ?? 0) || 0;
+                                } else {
+                                    inv.items.push({
+                                        Stock_Item: stockItemName,
+                                        Bill_Qty: Number(row.Bill_Qty) || 0,
+                                        Act_Qty: Number(row.Act_Qty ?? row.Bill_Act_Qty ?? row.Bill_Qty ?? 0) || 0,
+                                        Cost_Category: row.Cost_Category
+                                    });
+                                }
                             }
                         });
                         localInvoiceData[job.staffKey] = groupedInvoices;
@@ -1913,6 +2049,7 @@ const OverallStaffReport: React.FC = () => {
 
             targetStaffList.forEach((staffName, staffIdx) => {
                 const staffRows: any[] = [];
+                const invoiceRowIndices = new Set<number>();
                 let staffTotalQty = 0;
                 let staffTotalInvCount = 0;
                 let staffTotalItemCount = 0;
@@ -1931,9 +2068,31 @@ const OverallStaffReport: React.FC = () => {
                                 const rawInvoices = localInvoiceData[staffKey] || [];
                                 const invoicesList = getFilteredStaffByCategories(rawInvoices, roleColumns, qtyType);
 
-                                const scQty = getStaffCellValue(sc, "Total_Qty", "qty", qtyType, roleColumns);
-                                const scCount = getStaffCellValue(sc, "Total_Count", "count", qtyType, roleColumns);
-                                const scItemCount = getStaffCellValue(sc, "Total_Item_Count", "item_count", qtyType, roleColumns);
+                                const invListWithTotals = invoicesList.map((inv: any) => {
+                                    const invItems = inv.items || [];
+                                    const invOverallQty = invItems.length > 0
+                                        ? invItems.reduce((sum: number, it: any) => sum + (qtyType === "Act_Qty" ? (Number(it.Act_Qty ?? it.Bill_Act_Qty ?? it.Bill_Qty) || 0) : (Number(it.Bill_Qty ?? it.Qty) || 0)), 0)
+                                        : (getInvoiceCellValue(inv, "Total_Qty", "qty", qtyType, roleColumns) || Number(inv.Bill_Qty) || 0);
+                                    const invItemCount = invItems.length > 0
+                                        ? invItems.length
+                                        : (getInvoiceCellValue(inv, "Total_Item_Count", "item_count", qtyType, roleColumns) || 1);
+                                    return {
+                                        ...inv,
+                                        overallQty: invOverallQty,
+                                        overallItemCount: invItemCount,
+                                        invCount: 1
+                                    };
+                                });
+
+                                const scQty = invListWithTotals.length > 0
+                                    ? invListWithTotals.reduce((sum: number, inv: any) => sum + inv.overallQty, 0)
+                                    : getStaffCellValue(sc, "Total_Qty", "qty", qtyType, roleColumns);
+                                const scCount = invListWithTotals.length > 0
+                                    ? invListWithTotals.length
+                                    : getStaffCellValue(sc, "Total_Count", "count", qtyType, roleColumns);
+                                const scItemCount = invListWithTotals.length > 0
+                                    ? invListWithTotals.reduce((sum: number, inv: any) => sum + inv.overallItemCount, 0)
+                                    : getStaffCellValue(sc, "Total_Item_Count", "item_count", qtyType, roleColumns);
 
                                 staffTotalQty += scQty;
                                 staffTotalInvCount += scCount;
@@ -1946,7 +2105,9 @@ const OverallStaffReport: React.FC = () => {
                                 const voucherSummaryRow: any = {
                                     "Category": category.name,
                                     "Groups": group.groupName,
+                                    "Group Kgs": group.groupKgs,
                                     "Voucher Type": vt.name,
+                                    "Voucher Kgs": vt.baseKgs,
                                     "Staff Name / Invoice No": `${staffName} (Summary)`,
                                     "Total Qty": scQty,
                                     "Total Inv Count": scCount,
@@ -1958,21 +2119,52 @@ const OverallStaffReport: React.FC = () => {
                                 staffRows.push(voucherSummaryRow);
 
                                 // Expanded Invoices Breakdown for this Staff
-                                if (invoicesList.length > 0) {
-                                    invoicesList.forEach((inv: any) => {
+                                if (invListWithTotals.length > 0) {
+                                    invListWithTotals.forEach((inv: any) => {
                                         const invRow: any = {
                                             "Category": "",
                                             "Groups": "",
+                                            "Group Kgs": "",
                                             "Voucher Type": "",
+                                            "Voucher Kgs": "",
                                             "Staff Name / Invoice No": inv.Inv_No || "INV",
-                                            "Total Qty": getInvoiceCellValue(inv, "Total_Qty", "qty", qtyType, roleColumns),
-                                            "Total Inv Count": getInvoiceCellValue(inv, "Total_Count", "count", qtyType, roleColumns),
-                                            "Total Item Count": getInvoiceCellValue(inv, "Total_Item_Count", "item_count", qtyType, roleColumns),
+                                            "Total Qty": inv.overallQty,
+                                            "Total Inv Count": inv.invCount,
+                                            "Total Item Count": inv.overallItemCount,
                                         };
                                         enabledRoles.forEach(col => {
                                             invRow[getColumnLabel(col)] = getInvoiceCellValue(inv, col.key, col.metric || "qty", qtyType, roleColumns);
                                         });
                                         staffRows.push(invRow);
+                                        invoiceRowIndices.add(staffRows.length - 1);
+
+                                        // Stock items breakdown below the invoice no (Excel only)
+                                        if (inv.items && inv.items.length > 0) {
+                                            inv.items.forEach((item: any) => {
+                                                const itemQty = qtyType === "Act_Qty" 
+                                                    ? (Number(item.Act_Qty ?? item.Bill_Act_Qty ?? item.Bill_Qty) || 0) 
+                                                    : (Number(item.Bill_Qty ?? item.Qty) || 0);
+                                                const itemRow: any = {
+                                                    "Category": "",
+                                                    "Groups": "",
+                                                    "Group Kgs": "",
+                                                    "Voucher Type": "",
+                                                    "Voucher Kgs": "",
+                                                    "Staff Name / Invoice No": `   ${String(item.Stock_Item || "-").trim()}`,
+                                                    "Total Qty": itemQty,
+                                                    "Total Inv Count": "",
+                                                    "Total Item Count": "",
+                                                };
+                                                enabledRoles.forEach(col => {
+                                                    if (item.Cost_Category && String(item.Cost_Category).trim().toUpperCase() === String(col.key).trim().toUpperCase()) {
+                                                        itemRow[getColumnLabel(col)] = itemQty;
+                                                    } else {
+                                                        itemRow[getColumnLabel(col)] = "";
+                                                    }
+                                                });
+                                                staffRows.push(itemRow);
+                                            });
+                                        }
                                     });
                                 }
                             });
@@ -1985,7 +2177,9 @@ const OverallStaffReport: React.FC = () => {
                     const totalRow: any = {
                         "Category": "Total",
                         "Groups": `${staffName} Total`,
+                        "Group Kgs": "",
                         "Voucher Type": "",
+                        "Voucher Kgs": "",
                         "Staff Name / Invoice No": "",
                         "Total Qty": staffTotalQty,
                         "Total Inv Count": staffTotalInvCount,
@@ -1997,6 +2191,7 @@ const OverallStaffReport: React.FC = () => {
                     staffRows.push(totalRow);
 
                     const worksheet = XLSX.utils.json_to_sheet(staffRows);
+                    highlightInvoiceCells(worksheet, invoiceRowIndices);
 
                     // Sanitize sheet name for Excel (<= 31 characters, no invalid symbols)
                     let cleanSheetName = (staffName || "Staff").replace(/[\\/?*:[\]]/g, "_").trim().substring(0, 31);

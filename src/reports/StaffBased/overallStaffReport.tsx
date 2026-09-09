@@ -599,7 +599,7 @@ const OverallStaffReport: React.FC = () => {
     const [exportDialogOpen, setExportDialogOpen] = useState(false);
     const [exportingStaffWise, setExportingStaffWise] = useState(false);
     const [reportName, setReportName] = useState("");
-    const [parentReportName, setParentReportName] = useState("Overall Staff Report");
+    const [parentReportName, setParentReportName] = useState("OVERALL STAFF REPORT");
     const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
     const [isEditTemplate, setIsEditTemplate] = useState(false);
 
@@ -1654,8 +1654,8 @@ const OverallStaffReport: React.FC = () => {
                                     // Stock items breakdown below the invoice no (Excel only)
                                     if (inv.items && inv.items.length > 0) {
                                         inv.items.forEach((item: any) => {
-                                            const itemQty = qtyType === "Act_Qty" 
-                                                ? (Number(item.Act_Qty ?? item.Bill_Act_Qty ?? item.Bill_Qty) || 0) 
+                                            const itemQty = qtyType === "Act_Qty"
+                                                ? (Number(item.Act_Qty ?? item.Bill_Act_Qty ?? item.Bill_Qty) || 0)
                                                 : (Number(item.Bill_Qty ?? item.Qty) || 0);
                                             const itemRow: any = {};
                                             itemRow["Category"] = "";
@@ -2141,8 +2141,8 @@ const OverallStaffReport: React.FC = () => {
                                         // Stock items breakdown below the invoice no (Excel only)
                                         if (inv.items && inv.items.length > 0) {
                                             inv.items.forEach((item: any) => {
-                                                const itemQty = qtyType === "Act_Qty" 
-                                                    ? (Number(item.Act_Qty ?? item.Bill_Act_Qty ?? item.Bill_Qty) || 0) 
+                                                const itemQty = qtyType === "Act_Qty"
+                                                    ? (Number(item.Act_Qty ?? item.Bill_Act_Qty ?? item.Bill_Qty) || 0)
                                                     : (Number(item.Bill_Qty ?? item.Qty) || 0);
                                                 const itemRow: any = {
                                                     "Category": "",

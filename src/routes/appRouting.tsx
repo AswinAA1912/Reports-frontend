@@ -47,6 +47,7 @@ import RecievablePayableReport from "../reports/Expenses/recievablePayableReport
 import OverallStaffReport from "../reports/StaffBased/overallStaffReport";
 import SalesStockGodown from "../reports/Stock/SalesStockGodown";
 import UserRights from "../settings/UserRights";
+import OverallItemwise from "../reports/Stock/OverallItemwise";
 
 interface AppRoutingProps {
   setActiveCategory: (category: string) => void;
@@ -69,6 +70,7 @@ const URLSyncHandler: React.FC<{ setActiveCategory: (cat: string) => void }> = (
       "/salesreport": "Online Sales Report",
       "/uniteconomics": "Unit Economics Report",
       "/recievablePayable": "Receivable & Payable Report",
+      "/groupwiseItem": "Group Wise Item",
       "/": "Login",
     };
 
@@ -595,6 +597,17 @@ const AppRouting: React.FC<AppRoutingProps> = ({
           element={
             <RequireAuth>
               <RetailerLocations />
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/overallItemwise"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <OverallItemwise />
+              </AppLayout>
             </RequireAuth>
           }
         />

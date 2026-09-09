@@ -191,7 +191,7 @@ const formatINR = (value: number) =>
 
 const RateMasterAdminReport: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
-    const parentReportName = "Rate Master Admin";
+    const parentReportName = "RATE MASTER ADMIN";
 
     const [rawData1, setRawData1] = useState<any[]>([]);
     const [rawData2, setRawData2] = useState<any[]>([]);

@@ -42,12 +42,14 @@ import ChequeTransactionReport from "../reports/Abstract/ChequeTransactionReport
 import PendingSaleOrder from "../reports/Sales/PendingSaleOrderReport";
 import InStockReport from "../reports/Stock/InStockReport";
 import SalesDeliveryReport from "../reports/Sales/salesDeliveryReport";
+import PurchaseReport from "../reports/Purchase/PurchaseReport";
 import RetailerLocations from "./RetailerLocations";
 import RecievablePayableReport from "../reports/Expenses/recievablePayableReport";
 import OverallStaffReport from "../reports/StaffBased/overallStaffReport";
 import SalesStockGodown from "../reports/Stock/SalesStockGodown";
 import UserRights from "../settings/UserRights";
 import OverallItemwise from "../reports/Stock/OverallItemwise";
+import PurchaseDelivery from "../reports/Purchase/PurchaseDelivery";
 
 interface AppRoutingProps {
   setActiveCategory: (category: string) => void;
@@ -70,6 +72,8 @@ const URLSyncHandler: React.FC<{ setActiveCategory: (cat: string) => void }> = (
       "/salesreport": "Online Sales Report",
       "/uniteconomics": "Unit Economics Report",
       "/recievablePayable": "Receivable & Payable Report",
+      "/purchasedelivery": "Purchase Delivery Funnel Report",
+      "/purchaseDelivery": "Purchase Delivery Funnel Report",
       "/groupwiseItem": "Group Wise Item",
       "/": "Login",
     };
@@ -554,6 +558,39 @@ const AppRouting: React.FC<AppRoutingProps> = ({
             <RequireAuth>
               <AppLayout fullWidth>
                 <SalesDeliveryReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/purchaseDetailed"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <PurchaseReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/purchasedelivery"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <PurchaseDelivery />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/purchaseDelivery"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <PurchaseDelivery />
               </AppLayout>
             </RequireAuth>
           }

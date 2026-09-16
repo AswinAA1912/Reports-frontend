@@ -22,6 +22,7 @@ import {
     FormControl,
     Menu,
     CircularProgress,
+    LinearProgress,
     RadioGroup,
     Radio,
     FormLabel,
@@ -57,25 +58,24 @@ export interface ColumnConfig {
 }
 
 // Default columns for the 2nd API (invoicewithitems)
-// Brand and Item_Name_Modified are enabled by default as requested
+// Brand, Item_Name_Modified, and Inv_No are enabled by default as requested
 const DEFAULT_ITEM_COLUMNS: ColumnConfig[] = [
     { key: "Brand", label: "Brand", enabled: true, order: 0 },
     { key: "Item_Name_Modified", label: "Item_Name_Modified", enabled: true, order: 1 },
-    { key: "Stock_Item", label: "Stock_Item", enabled: false, order: 2 },
-    { key: "Group_ST", label: "Group_ST", enabled: false, order: 3 },
-    { key: "Bag", label: "Bag", enabled: false, order: 4 },
-    { key: "Stock_Group", label: "Stock_Group", enabled: false, order: 5 },
-    { key: "S_Sub_Group_1", label: "S_Sub_Group_1", enabled: false, order: 6 },
-    { key: "Grade_Item_Group", label: "Grade_Item_Group", enabled: false, order: 7 },
-    { key: "POS_Group", label: "POS_Group", enabled: false, order: 8 },
-    { key: "POS_Item_Name", label: "POS_Item_Name", enabled: false, order: 9 },
-    { key: "Inv_No", label: "Inv_No", enabled: false, order: 10 },
-    { key: "Voucher_Date", label: "Voucher_Date", enabled: false, order: 11 },
-    { key: "Cost_Center_Name", label: "Cost_Center_Name", enabled: false, order: 12 },
-    { key: "Cost_Category", label: "Cost_Category", enabled: false, order: 13 },
-    { key: "Brokerage", label: "Brokerage", enabled: false, order: 14 },
-    { key: "Coolie", label: "Coolie", enabled: false, order: 15 },
-    { key: "Stock_Date_Added", label: "Stock_Date_Added", enabled: false, order: 16 },
+    { key: "Inv_No", label: "Inv_No", enabled: true, order: 2 },
+    { key: "Stock_Item", label: "Stock_Item", enabled: false, order: 3 },
+    { key: "Group_ST", label: "Group_ST", enabled: false, order: 4 },
+    { key: "Bag", label: "Bag", enabled: false, order: 5 },
+    { key: "Stock_Group", label: "Stock_Group", enabled: false, order: 6 },
+    { key: "S_Sub_Group_1", label: "S_Sub_Group_1", enabled: false, order: 7 },
+    { key: "Grade_Item_Group", label: "Grade_Item_Group", enabled: false, order: 8 },
+    { key: "POS_Group", label: "POS_Group", enabled: false, order: 9 },
+    { key: "Voucher_Date", label: "Voucher_Date", enabled: false, order: 10 },
+    { key: "Cost_Center_Name", label: "Cost_Center_Name", enabled: false, order: 11 },
+    { key: "Cost_Category", label: "Cost_Category", enabled: false, order: 12 },
+    { key: "Brokerage", label: "Brokerage", enabled: false, order: 13 },
+    { key: "Coolie", label: "Coolie", enabled: false, order: 14 },
+    { key: "Stock_Date_Added", label: "Stock_Date_Added", enabled: false, order: 15 },
 ];
 
 const EXCLUDED_ITEM_KEYS = new Set([
@@ -202,6 +202,1711 @@ interface GroupConfig {
     voucherTypes: string[];
 }
 
+interface ApiMasterData {
+    invoice_no?: string;
+    Ledger_Date?: string;
+    Month_No?: number;
+    Invoice_Month?: string;
+    Invoice_Year?: number;
+    Month_Year?: string;
+    Trans_Id?: string | number;
+    voucher_name?: string;
+    Retailer_Name?: string;
+    Cancel_status?: string | number;
+    Total_Invoice_value?: number;
+    Retailer_Id?: number;
+    Contact_Person?: string;
+    Reatailer_Address?: string;
+    Reatailer_City?: string;
+    Mobile_No?: string;
+    Narration?: string;
+    Created_on?: string;
+    Created_By?: string;
+    creditLimit?: number;
+    creditDays?: number;
+    Cancel_status_Type?: string;
+    Godown_Name?: string;
+    [key: string]: any;
+}
+
+interface ApiItemData {
+    Product_Id?: number;
+    Product_Name?: string;
+    GoDown_Id?: string | number;
+    S_No?: number;
+    Item_Id?: number;
+    Bill_Qty?: number;
+    Act_Qty?: number;
+    Alt_Act_Qty?: number | null;
+    Taxable_Rate?: number;
+    Item_Rate?: number;
+    Amount?: number;
+    Free_Qty?: number;
+    Total_Qty?: number;
+    Taxble?: number;
+    HSN_Code?: string;
+    Unit_Id?: number;
+    Unit_Name?: string;
+    Act_unit_Id?: number;
+    Alt_Act_Unit_Id?: number;
+    Taxable_Amount?: number;
+    Tax_Rate?: number;
+    Cgst?: number;
+    Cgst_Amo?: number;
+    Sgst?: number;
+    Sgst_Amo?: number;
+    Igst?: number;
+    Igst_Amo?: number;
+    Final_Amo?: number;
+    Created_on?: string;
+    Batch_Name?: string;
+    Alt_Bill_Qty?: number | null;
+    COGS_Rate?: number;
+    Min_Rate?: number;
+    itemReadyForDelivery?: any;
+    Godown_Name?: string;
+    Trans_Id?: string;
+    [key: string]: any;
+}
+
+interface ApiCostCenterData {
+    Do_Id?: string | number;
+    Emp_Type_Id?: number;
+    Emp_Id?: number;
+    Cost_Center_Name?: string;
+    Allias_Name?: string;
+    Cost_Category?: string;
+    Cost_Category_Alias?: string;
+    [key: string]: any;
+}
+
+interface ApiExpenseData {
+    Do_Id?: string | number;
+    Expense_Id?: number;
+    Expence_Value_DR?: number;
+    Expence_Value_CR?: number;
+    Account_name?: string;
+    Account_Alias_name?: string;
+    Expense_Value_DR?: number;
+    Expense_Value_CR?: number;
+    [key: string]: any;
+}
+
+interface ApiDetailedData {
+    Masters: ApiMasterData[];
+    Items: ApiItemData[];
+    CostCenter: ApiCostCenterData[];
+    Expenses: ApiExpenseData[];
+}
+
+interface DialogItemRow {
+    id: number;
+    item: string;
+    qty: number;
+    bags: string | number | null;
+    batch: string;
+    rate: number | null;
+    amt: number | null;
+    godown: string;
+    raw: any;
+}
+
+interface InvoiceDetailsDialogProps {
+    open: boolean;
+    onClose: () => void;
+    invoiceData: {
+        invoiceNo: string;
+        voucherKey: string;
+        parentCategory: string;
+        groupName: string;
+        voucherName: string;
+        clickedItem: any;
+        transType?: string;
+        refId?: string;
+    } | null;
+    rawItems: any[];
+}
+
+// Helper to extract a valid numeric Transaction ID (Ref_Id) from an item row
+// Note: Voucher_Ref_Id is a voucher type master ID (e.g. 39, 21), NEVER the transaction Ref_Id!
+const extractValidRefId = (item?: any): string => {
+    if (!item) return "";
+    const candidates = [
+        item.Ref_Id,
+        item.ref_id,
+        item.Trans_Id,
+        item.trans_id,
+        item.Delivery_Id,
+        item.Trip_Id,
+        item.Process_Id,
+        item.Purchase_Id,
+        item.Credit_Note_Id,
+        item.Debit_Note_Id,
+        item.PR_Id,
+        item.CR_Id,
+        item.DB_Id,
+        item.PIN_Id,
+        item.Do_Id,
+        item.ST_Inv_Id,
+        item.Invoice_Id,
+        item.Id
+    ];
+
+    for (const c of candidates) {
+        if (c !== undefined && c !== null) {
+            const s = String(c).trim().replace(/^["']+|["']+$/g, "").trim();
+            if (s !== "" && s !== "-" && !isNaN(Number(s)) && Number(s) > 0) {
+                return s;
+            }
+        }
+    }
+    return "";
+};
+
+// Normalize Trans_Type string to match one of the stored procedure's supported branches
+const normalizeTransType = (val?: any): string => {
+    if (!val) return "";
+    const raw = String(val).trim().replace(/^["']+|["']+$/g, "").trim();
+    const upper = raw.toUpperCase().replace(/\s+/g, "_");
+
+    // Exact matches to the 9 supported stored procedure branches
+    if (upper === "SALES") return "SALES";
+    if (upper === "SALES_TRIP") return "SALES_TRIP";
+    if (upper === "PURCHASE") return "PURCHASE";
+    if (upper === "PROCESSING" || upper === "PROCESS") return "PROCESSING";
+    if (upper === "ARRIVAL_TRIP" || upper === "ARRIVAL") return "ARRIVAL_TRIP";
+    if (upper === "CREDIT_NOTE") return "CREDIT_NOTE";
+    if (upper === "CREDIT_NOTE_TRIP") return "CREDIT_NOTE_TRIP";
+    if (upper === "DEBIT_NOTE") return "DEBIT_NOTE";
+    if (upper === "DEBIT_NOTE_TRIP") return "DEBIT_NOTE_TRIP";
+
+    // Keyword matching
+    if (upper.includes("CREDIT") && upper.includes("TRIP")) return "CREDIT_NOTE_TRIP";
+    if (upper.includes("CREDIT")) return "CREDIT_NOTE";
+    if (upper.includes("DEBIT") && upper.includes("TRIP")) return "DEBIT_NOTE_TRIP";
+    if (upper.includes("DEBIT")) return "DEBIT_NOTE";
+    if (upper.includes("PURCHASE")) return "PURCHASE";
+    if (upper.includes("PROCESS") || upper.includes("PRODUCTION") || upper.includes("CONSUMPTION") || upper.includes("JOURNAL")) return "PROCESSING";
+    if (upper.includes("SALE") && upper.includes("TRIP")) return "SALES_TRIP";
+    if (upper.includes("SALE")) return "SALES";
+    if (upper.includes("ARRIVAL") || upper.includes("TRIP") || upper.includes("INW") || upper.includes("TRANSFER") || upper.includes("INTRF") || upper.includes("OUTWARD")) return "ARRIVAL_TRIP";
+
+    return raw;
+};
+
+// Infer Trans_Type from parent category, group name, voucher name, and raw item fields
+const inferTransType = (
+    parentCategory?: string,
+    groupName?: string,
+    voucherName?: string,
+    rawItem?: any
+): string => {
+    // 1. Direct Trans_Type from item
+    const direct = rawItem?.Trans_Type ?? rawItem?.trans_type ?? rawItem?.Transaction_Type ?? rawItem?.Bill_type;
+    if (direct) {
+        const norm = normalizeTransType(direct);
+        if (norm) return norm;
+    }
+
+    const pCat = String(parentCategory || "").trim().toUpperCase();
+    const gName = String(groupName || "").trim().toUpperCase();
+    const vName = String(voucherName || "").trim().toUpperCase();
+
+    // 2. Adjustments / Process
+    if (
+        pCat === "ADJUSTMENTS" ||
+        pCat === "PROCESS" ||
+        gName.includes("PROCESS") ||
+        gName === "ADJ" ||
+        gName === "CLEANING" ||
+        gName === "ATTY" ||
+        gName === "WT.CHECK" ||
+        gName === "DIFFERENCE"
+    ) {
+        return "PROCESSING";
+    }
+
+    // 3. Outward transfers / Trips in OUTWARDS
+    if (
+        gName.includes("OUTWARDS/INT TRF") ||
+        gName.includes("OUTWARD") ||
+        vName.includes("OUTWARDS") ||
+        vName.includes("INTRF") ||
+        vName.includes("TRANSFER")
+    ) {
+        return "ARRIVAL_TRIP";
+    }
+
+    // 4. Sales in OUTWARDS
+    if (
+        pCat === "OUTWARDS" ||
+        gName.includes("SALE") ||
+        vName.includes("SALE") ||
+        vName.includes("BILL") ||
+        vName.includes("CASH")
+    ) {
+        if (vName.includes("TRIP") || gName.includes("TRIP")) return "SALES_TRIP";
+        return "SALES";
+    }
+
+    // 5. Inwards / Purchase / Material Inward / Returns / Internal Transfers
+    if (
+        pCat === "INWARDS" ||
+        gName.includes("INWARD") ||
+        gName.includes("PUR") ||
+        gName.includes("INT TRF")
+    ) {
+        if (vName.includes("PURCHASE") || gName.includes("PURCHASE")) return "PURCHASE";
+        return "ARRIVAL_TRIP";
+    }
+
+    // 6. Credit / Debit Note
+    if (gName.includes("CREDIT") || vName.includes("CR")) {
+        if (vName.includes("TRIP")) return "CREDIT_NOTE_TRIP";
+        return "CREDIT_NOTE";
+    }
+    if (gName.includes("DEBIT") || vName.includes("DB")) {
+        if (vName.includes("TRIP")) return "DEBIT_NOTE_TRIP";
+        return "DEBIT_NOTE";
+    }
+
+    return "SALES";
+};
+
+const InvoiceDetailsDialog: React.FC<InvoiceDetailsDialogProps> = ({
+    open,
+    onClose,
+    invoiceData,
+    rawItems
+}) => {
+    const [apiData, setApiData] = useState<ApiDetailedData | null>(null);
+    const [apiLoading, setApiLoading] = useState<boolean>(false);
+
+    // Resolve Ref_Id (Trans_Id) for the reportingDetailedList API
+    const refId = useMemo(() => {
+        if (!invoiceData) return "";
+        const inv = String(invoiceData.invoiceNo || "").trim().toUpperCase();
+
+        const matched = (rawItems || []).find((r: any) => {
+            const itemInv = String(r.Inv_No || r.Invoice_no || r.Journal_no || "").trim().toUpperCase();
+            return itemInv && itemInv === inv;
+        });
+
+        // 1. Explicitly passed refId (validated numeric ID)
+        if (invoiceData.refId && !isNaN(Number(invoiceData.refId)) && Number(invoiceData.refId) > 0) {
+            return String(invoiceData.refId).trim();
+        }
+
+        // 2. Check clickedItem
+        const clickedRef = extractValidRefId(invoiceData.clickedItem);
+        if (clickedRef) return clickedRef;
+
+        // 3. Check matched row from 2nd API list
+        const matchedRef = extractValidRefId(matched);
+        if (matchedRef) return matchedRef;
+
+        // 4. Fallback: Numeric invoice number itself
+        if (inv && !isNaN(Number(inv)) && Number(inv) > 0) {
+            return inv;
+        }
+
+        return "";
+    }, [invoiceData, rawItems]);
+
+    // Resolve Trans_Type for the reportingDetailedList API
+    const transType = useMemo(() => {
+        if (!invoiceData) return "";
+        const inv = String(invoiceData.invoiceNo || "").trim().toUpperCase();
+        const matched = (rawItems || []).find((r: any) => {
+            const itemInv = String(r.Inv_No || r.Invoice_no || r.Journal_no || "").trim().toUpperCase();
+            return itemInv && itemInv === inv;
+        });
+
+        // 1. Explicitly passed transType
+        if (invoiceData.transType) {
+            const norm = normalizeTransType(invoiceData.transType);
+            if (norm) return norm;
+        }
+
+        // 2. Infer from category, group, voucher, and raw item
+        return inferTransType(
+            invoiceData.parentCategory,
+            invoiceData.groupName,
+            invoiceData.voucherName,
+            invoiceData.clickedItem || matched
+        );
+    }, [invoiceData, rawItems]);
+
+    // Fetch reporting detailed list on modal open
+    useEffect(() => {
+        if (!open || !refId || !transType) {
+            setApiData(null);
+            setApiLoading(false);
+            return;
+        }
+
+        let isMounted = true;
+        setApiLoading(true);
+
+        employeeReportGroupService.getReportingDetailedList({
+            Ref_Id: refId,
+            Trans_Type: transType
+        })
+        .then(res => {
+            if (!isMounted) return;
+            if (res.data?.success && res.data?.data) {
+                setApiData(res.data.data);
+            } else {
+                setApiData(null);
+            }
+        })
+        .catch(err => {
+            if (!isMounted) return;
+            console.error("Error fetching detailed reporting list:", err);
+            setApiData(null);
+        })
+        .finally(() => {
+            if (isMounted) {
+                setApiLoading(false);
+            }
+        });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [open, refId, transType]);
+
+    // 1. Masters Dataset Mapping for 2nd Grid (Party, Voucher Type, Date, Godown) & Narration - strictly from 3rd API
+    const apiMaster = apiData?.Masters?.[0];
+
+    // Check if voucher represents a true Process Journal (Production & Consumption) strictly from 3rd API
+    const isProcessing = useMemo(() => {
+        if (!apiData) return false;
+        const hasPRStatus = apiData.Masters?.[0]?.PR_Status !== undefined && apiData.Masters?.[0]?.PR_Status !== null && String(apiData.Masters?.[0]?.PR_Status).trim() !== "";
+        const hasSourQty = Boolean(apiData.Items && apiData.Items.length > 0 && apiData.Items[0].Sour_Qty !== undefined);
+        const hasDestQty = Boolean(apiData.CostCenter && apiData.CostCenter.length > 0 && apiData.CostCenter[0].Dest_Qty !== undefined);
+        const isProcessBillType = String(apiData.Masters?.[0]?.BillType || "").toUpperCase() === "PROCESSING" || String(apiData.Masters?.[0]?.BillType || "").toUpperCase() === "PROCESS";
+
+        return hasPRStatus || hasSourQty || hasDestQty || isProcessBillType;
+    }, [apiData]);
+
+    const partyName = useMemo(() => {
+        if (!apiMaster && !apiData) return "-";
+        if (isProcessing) {
+            return apiMaster?.Party_Name || apiMaster?.Party || (apiMaster?.PR_Status ? `Process (${apiMaster.PR_Status})` : "Internal Process");
+        }
+        return (
+            apiMaster?.Retailer_Name ||
+            apiMaster?.Party_Name ||
+            apiMaster?.Supplier_Name ||
+            apiMaster?.Customer_Name ||
+            apiMaster?.Ledger_Name ||
+            apiMaster?.Contact_Person ||
+            (apiMaster?.Narration && apiMaster.Narration.includes("(") ? apiMaster.Narration.split("(")[0].trim() : "") ||
+            (apiMaster?.Vehicle_No ? `${apiMaster.Vehicle_No}${apiMaster.BillType ? ` (${apiMaster.BillType})` : ""}` : "") ||
+            apiMaster?.BillType ||
+            apiData?.Items?.[0]?.Party_Name ||
+            apiData?.Items?.[0]?.Party ||
+            apiData?.Items?.[0]?.Supplier_Name ||
+            apiData?.Items?.[0]?.Customer_Name ||
+            "-"
+        );
+    }, [apiMaster, apiData, isProcessing]);
+
+    const voucherTypeName =
+        apiMaster?.voucher_name ||
+        apiMaster?.Voucher_Type ||
+        apiMaster?.Voucher_Name ||
+        "-";
+
+    const voucherDate = apiMaster?.Ledger_Date
+        ? dayjs(apiMaster.Ledger_Date).format("DD-MM-YY")
+        : apiMaster?.Voucher_Date
+            ? dayjs(apiMaster.Voucher_Date).format("DD-MM-YY")
+            : apiMaster?.Date
+                ? dayjs(apiMaster.Date).format("DD-MM-YY")
+                : "-";
+
+    const narrationText = String(
+        apiMaster?.Narration !== undefined && apiMaster?.Narration !== null
+            ? apiMaster.Narration
+            : ""
+    ).trim();
+
+    const hasNarration = Boolean(
+        narrationText &&
+        narrationText !== "-" &&
+        narrationText !== "null" &&
+        narrationText !== "undefined"
+    );
+
+    // 2. CostCenter / Staff Dataset Mapping for 1st Grid (Staff Grid) - strictly from 3rd API
+    const staffRows = useMemo(() => {
+        const rows: { staffName: string; category: string }[] = [];
+        const seen = new Set<string>();
+
+        const addRow = (staff?: any, cat?: any) => {
+            const s = String(staff || "").trim();
+            const c = String(cat || "").trim();
+            if (s && s !== "-" && s !== "null" && s !== "undefined") {
+                const key = `${s.toUpperCase()}___${c.toUpperCase()}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    rows.push({ staffName: s, category: c || "Staff" });
+                }
+            }
+        };
+
+        // 1. Created_By from 3rd API Masters[0]
+        if (apiData?.Masters?.[0]?.Created_By) {
+            addRow(apiData.Masters[0].Created_By, "Created_By");
+        }
+
+        // 2. Staff from 3rd API CostCenter (dataset 2)
+        if (apiData?.CostCenter && apiData.CostCenter.length > 0) {
+            apiData.CostCenter.forEach(cc => {
+                if (isProcessing && (cc.Dest_Qty !== undefined || cc.Product_Id !== undefined)) {
+                    return;
+                }
+                const sName = cc.Cost_Center_Name || cc.Allias_Name || cc.Staff_Name || cc.Employee_Name;
+                const sCat = cc.Cost_Category || cc.Cost_Category_Alias || cc.Category || "Staff";
+                if (sName) {
+                    addRow(sName, sCat);
+                }
+            });
+        }
+
+        // 3. Staff from 3rd API Expenses (dataset 3 for processing)
+        if (apiData?.Expenses && apiData.Expenses.length > 0) {
+            apiData.Expenses.forEach((exp: any) => {
+                const sName = exp.Cost_Center_Name || exp.Allias_Name || exp.Staff_Name || exp.Employee_Name;
+                const sCat = exp.Cost_Category || exp.Cost_Category_Alias || exp.Category;
+                if (sName && sCat) {
+                    addRow(sName, sCat);
+                }
+            });
+        }
+
+        // 4. Broker / Transport from 3rd API Masters[0] if present
+        if (apiMaster?.Broker || apiMaster?.Broker_Name || apiMaster?.Brokerage) {
+            addRow(apiMaster.Broker || apiMaster.Broker_Name || `Brokerage: ${apiMaster.Brokerage}`, "Broker");
+        }
+        if (apiMaster?.Transport || apiMaster?.Transporter_Name || apiMaster?.Coolie) {
+            addRow(apiMaster.Transport || apiMaster.Transporter_Name || `Coolie: ${apiMaster.Coolie}`, "Transport");
+        }
+
+        if (rows.length === 0) {
+            rows.push({ staffName: "-", category: "-" });
+        }
+
+        return rows;
+    }, [apiData, apiMaster, isProcessing]);
+
+    // Check if the transaction is a Godown-to-Godown transfer or adjustment - strictly from 3rd API
+    const isGodownToGodown = useMemo(() => {
+        if (isProcessing) return true;
+
+        const hasFrom =
+            apiData?.Items?.some((x: any) => (x.From_Godown && x.From_Godown !== "-") || (x.FromGodown && x.FromGodown !== "-") || (x.Sour_Godown && x.Sour_Godown !== "-") || (x.Godown_Out && x.Godown_Out !== "-")) ||
+            Boolean(apiMaster?.From_Godown && apiMaster.From_Godown !== "-") ||
+            Boolean(apiMaster?.Sour_Godown && apiMaster.Sour_Godown !== "-") ||
+            Boolean(apiMaster?.Godown_Out && apiMaster.Godown_Out !== "-");
+
+        const hasTo =
+            apiData?.Items?.some((x: any) => (x.To_Godown && x.To_Godown !== "-") || (x.ToGodown && x.ToGodown !== "-") || (x.Dest_Godown && x.Dest_Godown !== "-") || (x.Godown_In && x.Godown_In !== "-")) ||
+            Boolean(apiMaster?.To_Godown && apiMaster.To_Godown !== "-") ||
+            Boolean(apiMaster?.Dest_Godown && apiMaster.Dest_Godown !== "-") ||
+            Boolean(apiMaster?.Godown_In && apiMaster.Godown_In !== "-");
+
+        if (hasFrom && hasTo) return true;
+
+        const vName = String(apiMaster?.voucher_name || apiMaster?.Voucher_Type || "").trim().toUpperCase();
+        if (
+            vName.includes("TRANSFER") ||
+            vName.includes("INTRF") ||
+            vName.includes("G.INTRF") ||
+            vName.includes("G2G") ||
+            vName.includes("GODOWN TO GODOWN") ||
+            vName.includes("ADJ")
+        ) {
+            return true;
+        }
+
+        const billType = String(apiMaster?.BillType || "").trim().toUpperCase();
+        if (billType.includes("TRANSFER") || billType.includes("ADJ")) {
+            return true;
+        }
+
+        return false;
+    }, [apiData, apiMaster, isProcessing]);
+
+    // Godown In: The destination godown where stock is received (strictly from 3rd API)
+    const rawGodownIn = useMemo(() => {
+        const itemWithTo = apiData?.Items?.find((x: any) => x.To_Godown || x.ToGodown || x.Dest_Godown || x.Godown_In || x.GodownIn);
+        if (itemWithTo) {
+            const val = itemWithTo.To_Godown || itemWithTo.ToGodown || itemWithTo.Dest_Godown || itemWithTo.Godown_In || itemWithTo.GodownIn;
+            if (val && val !== "-") return val;
+        }
+
+        if (isProcessing) {
+            const ccWithTo = apiData?.CostCenter?.find((x: any) => x.Dest_Godown || x.To_Godown || x.Godown_Name);
+            if (ccWithTo) {
+                const val = ccWithTo.Dest_Godown || ccWithTo.To_Godown || ccWithTo.Godown_Name;
+                if (val && val !== "-") return val;
+            }
+        }
+
+        const mVal = apiMaster?.To_Godown || apiMaster?.Dest_Godown || apiMaster?.Godown_In;
+        if (mVal && mVal !== "-") return mVal;
+
+        const fallback =
+            (apiMaster?.Godown_Name && apiMaster.Godown_Name !== "-" ? apiMaster.Godown_Name : "") ||
+            (apiData?.Items?.[0]?.Godown_Name && apiData.Items[0].Godown_Name !== "-" ? apiData.Items[0].Godown_Name : "") ||
+            "-";
+
+        return fallback;
+    }, [apiData, apiMaster, isProcessing]);
+
+    // Godown Out: The source godown where stock is issued from (strictly from 3rd API)
+    const rawGodownOut = useMemo(() => {
+        const itemWithFrom = apiData?.Items?.find((x: any) => x.From_Godown || x.FromGodown || x.Sour_Godown || x.Godown_Out || x.GodownOut);
+        if (itemWithFrom) {
+            const val = itemWithFrom.From_Godown || itemWithFrom.FromGodown || itemWithFrom.Sour_Godown || itemWithFrom.Godown_Out || itemWithFrom.GodownOut;
+            if (val && val !== "-") return val;
+        }
+
+        if (isProcessing) {
+            const ccWithFrom = apiData?.CostCenter?.find((x: any) => x.Sour_Godown || x.From_Godown);
+            if (ccWithFrom) {
+                const val = ccWithFrom.Sour_Godown || ccWithFrom.From_Godown;
+                if (val && val !== "-") return val;
+            }
+        }
+
+        const mVal = apiMaster?.From_Godown || apiMaster?.Sour_Godown || apiMaster?.Godown_Out;
+        if (mVal && mVal !== "-") return mVal;
+
+        const fallback =
+            (apiMaster?.Godown_Name && apiMaster.Godown_Name !== "-" ? apiMaster.Godown_Name : "") ||
+            "-";
+
+        return fallback;
+    }, [apiData, apiMaster, isProcessing]);
+
+    const godownIn = rawGodownIn || "-";
+    const godownOut = rawGodownOut || "-";
+
+    // Standard Godown for Sales / single-godown transactions (strictly from 3rd API)
+    const rawGodown =
+        apiData?.Items?.[0]?.Godown_Name ||
+        apiMaster?.Godown_Name ||
+        apiMaster?.Godown ||
+        "-";
+
+    const godownName = rawGodown;
+
+    // 3. Items Dataset Mapping for 3rd Grid (Item Details Grid) - strictly from 3rd API (apiData.Items)
+    const itemRows = useMemo<DialogItemRow[]>(() => {
+        if (!apiData?.Items || apiData.Items.length === 0) {
+            return [];
+        }
+
+        return apiData.Items.map((it, idx) => {
+            const name = it.Product_Name || it.Item_Name_Modified || it.Stock_Item || it.Item_Name || `Item ${idx + 1}`;
+            const qty = Number(it.KGS ?? it.QTY ?? it.Total_Qty ?? it.Bill_Qty ?? it.Act_Qty ?? it.Sour_Qty ?? it.Dest_Qty ?? 0);
+
+            // Extract bags strictly from 3rd API item data or product name
+            let bags: string | number | null = null;
+            if (it.Alt_Act_Qty !== undefined && it.Alt_Act_Qty !== null && !isNaN(Number(it.Alt_Act_Qty))) {
+                bags = Number(it.Alt_Act_Qty);
+            } else if (it.Alt_Bill_Qty !== undefined && it.Alt_Bill_Qty !== null && !isNaN(Number(it.Alt_Bill_Qty))) {
+                bags = Number(it.Alt_Bill_Qty);
+            } else if (it.Bag !== undefined && it.Bag !== null && String(it.Bag).trim() !== "" && String(it.Bag).trim() !== "-") {
+                bags = !isNaN(Number(it.Bag)) ? Number(it.Bag) : String(it.Bag).trim();
+            } else if (it.Bags !== undefined && it.Bags !== null && String(it.Bags).trim() !== "" && String(it.Bags).trim() !== "-") {
+                bags = !isNaN(Number(it.Bags)) ? Number(it.Bags) : String(it.Bags).trim();
+            } else {
+                const match = String(name).match(/(\d+(?:\.\d+)?)\s*KG/i);
+                if (match) {
+                    bags = `${match[1]}KG`;
+                }
+            }
+
+            const batch = it.Batch_Name || it.Batch || it.Batch_No || "-";
+            const rate =
+                it.Gst_Rate !== undefined && it.Gst_Rate !== null && !isNaN(Number(it.Gst_Rate))
+                    ? Number(it.Gst_Rate)
+                    : it.Item_Rate !== undefined && it.Item_Rate !== null && !isNaN(Number(it.Item_Rate))
+                        ? Number(it.Item_Rate)
+                        : it.Taxable_Rate !== undefined && it.Taxable_Rate !== null && !isNaN(Number(it.Taxable_Rate))
+                            ? Number(it.Taxable_Rate)
+                            : it.Sour_Rate !== undefined && it.Sour_Rate !== null && !isNaN(Number(it.Sour_Rate)) && Number(it.Sour_Rate) > 0
+                                ? Number(it.Sour_Rate)
+                                : it.Dest_Rate !== undefined && it.Dest_Rate !== null && !isNaN(Number(it.Dest_Rate)) && Number(it.Dest_Rate) > 0
+                                    ? Number(it.Dest_Rate)
+                                    : null;
+            const amt =
+                it.Taxable_Value !== undefined && it.Taxable_Value !== null && !isNaN(Number(it.Taxable_Value)) && Number(it.Taxable_Value) > 0
+                    ? Number(it.Taxable_Value)
+                    : it.Final_Amo !== undefined && it.Final_Amo !== null && !isNaN(Number(it.Final_Amo)) && Number(it.Final_Amo) > 0
+                        ? Number(it.Final_Amo)
+                        : it.Amount !== undefined && it.Amount !== null && !isNaN(Number(it.Amount)) && Number(it.Amount) > 0
+                            ? Number(it.Amount)
+                            : it.Taxable_Amount !== undefined && it.Taxable_Amount !== null && !isNaN(Number(it.Taxable_Amount)) && Number(it.Taxable_Amount) > 0
+                                ? Number(it.Taxable_Amount)
+                                : it.Total_Value !== undefined && it.Total_Value !== null && !isNaN(Number(it.Total_Value)) && Number(it.Total_Value) > 0
+                                    ? Number(it.Total_Value)
+                                    : it.Sour_Amt !== undefined && it.Sour_Amt !== null && !isNaN(Number(it.Sour_Amt)) && Number(it.Sour_Amt) > 0
+                                        ? Number(it.Sour_Amt)
+                                        : it.Dest_Amt !== undefined && it.Dest_Amt !== null && !isNaN(Number(it.Dest_Amt)) && Number(it.Dest_Amt) > 0
+                                            ? Number(it.Dest_Amt)
+                                            : rate && qty
+                                                ? rate * qty
+                                                : null;
+
+            return {
+                id: idx,
+                item: name,
+                qty,
+                bags,
+                batch,
+                rate,
+                amt,
+                godown: it.Godown_Name || it.To_Godown || it.From_Godown || "-",
+                raw: it
+            };
+        });
+    }, [apiData]);
+
+    // 4. Expenses Dataset Mapping for 4th Grid (Expense Grid at Bottom)
+    const expenseRows = useMemo(() => {
+        // Processing transactions do not have an Expenses dataset (their 4th dataset is Staff)
+        if (isProcessing) {
+            return [];
+        }
+
+        if (!apiData?.Expenses || apiData.Expenses.length === 0) {
+            return [];
+        }
+
+        return apiData.Expenses.map((exp, idx) => {
+            const expenseName = exp.Account_name || exp.Account_Alias_name || `Expense ${idx + 1}`;
+            const cr = exp.Expence_Value_CR !== undefined && exp.Expence_Value_CR !== null && !isNaN(Number(exp.Expence_Value_CR))
+                ? Number(exp.Expence_Value_CR)
+                : exp.Expense_Value_CR !== undefined && exp.Expense_Value_CR !== null && !isNaN(Number(exp.Expense_Value_CR))
+                    ? Number(exp.Expense_Value_CR)
+                    : 0;
+            const dr = exp.Expence_Value_DR !== undefined && exp.Expence_Value_DR !== null && !isNaN(Number(exp.Expence_Value_DR))
+                ? Number(exp.Expence_Value_DR)
+                : exp.Expense_Value_DR !== undefined && exp.Expense_Value_DR !== null && !isNaN(Number(exp.Expense_Value_DR))
+                    ? Number(exp.Expense_Value_DR)
+                    : 0;
+
+            let valueStr = "-";
+            if (cr > 0 && dr > 0) {
+                valueStr = `${cr} CR / ${dr} DR`;
+            } else if (cr > 0) {
+                valueStr = `${cr} CR`;
+            } else if (dr > 0) {
+                valueStr = `${dr} DR`;
+            } else if (cr !== 0) {
+                valueStr = `${cr} CR`;
+            } else if (dr !== 0) {
+                valueStr = `${dr} DR`;
+            } else {
+                valueStr = "0";
+            }
+
+            return {
+                id: idx,
+                sNo: idx + 1,
+                expenseName,
+                valueStr,
+                cr,
+                dr,
+                raw: exp
+            };
+        });
+    }, [isProcessing, apiData]);
+
+    // Split for Process Journal: Production vs Consumption
+    const { productionItems, consumptionItems } = useMemo<{
+        productionItems: DialogItemRow[];
+        consumptionItems: DialogItemRow[];
+    }>(() => {
+        if (isProcessing) {
+            const hasApiProduction = Boolean(
+                apiData?.CostCenter &&
+                apiData.CostCenter.length > 0 &&
+                (apiData.CostCenter[0].Dest_Qty !== undefined || (apiData.CostCenter[0].Product_Name && !apiData.CostCenter[0].Cost_Center_Name))
+            );
+            const hasApiConsumption = Boolean(
+                apiData?.Items &&
+                apiData.Items.length > 0 &&
+                (apiData.Items[0].Sour_Qty !== undefined || (apiData.Items[0].Product_Name && isProcessing))
+            );
+
+            if (hasApiProduction || hasApiConsumption) {
+                // 1. Production (Destination) Items from apiData.CostCenter
+                const prod = hasApiProduction
+                    ? (apiData?.CostCenter || []).map((it: any, idx: number) => {
+                        const name = it.Product_Name || it.Item_Name_Modified || it.Stock_Item || `Production Item ${idx + 1}`;
+                        const qty = Number(it.Dest_Qty ?? it.Qty ?? it.QTY ?? it.KGS ?? 0);
+                        const bagVal = it.Bag ?? it.Dest_Bag ?? it.Alt_Qty ?? it.Alt_Bill_Qty;
+                        const match = String(name).match(/(\d+(?:\.\d+)?)\s*KG/i);
+                        const bags = bagVal !== undefined && bagVal !== null && String(bagVal).trim() !== "" && String(bagVal).trim() !== "-"
+                            ? (!isNaN(Number(bagVal)) ? Number(bagVal) : String(bagVal).trim())
+                            : (match ? `${match[1]}KG` : null);
+                        const batch = it.Batch_Name || it.Batch || it.Batch_No || "-";
+                        const rate = it.Dest_Rate !== undefined && it.Dest_Rate !== null && !isNaN(Number(it.Dest_Rate)) && Number(it.Dest_Rate) > 0
+                            ? Number(it.Dest_Rate)
+                            : null;
+                        const amt = it.Dest_Amt !== undefined && it.Dest_Amt !== null && !isNaN(Number(it.Dest_Amt)) && Number(it.Dest_Amt) > 0
+                            ? Number(it.Dest_Amt)
+                            : (rate && qty ? rate * qty : null);
+
+                        return {
+                            id: idx,
+                            item: name,
+                            qty,
+                            bags,
+                            batch,
+                            rate,
+                            amt,
+                            godown: it.Godown_Name || it.Dest_Godown || "-",
+                            raw: it
+                        };
+                    })
+                    : [];
+
+                // 2. Consumption (Source) Items from apiData.Items
+                const cons = hasApiConsumption
+                    ? (apiData?.Items || []).map((it: any, idx: number) => {
+                        const name = it.Product_Name || it.Item_Name_Modified || it.Stock_Item || `Consumption Item ${idx + 1}`;
+                        const qty = Number(it.Sour_Qty ?? it.Qty ?? it.QTY ?? it.KGS ?? 0);
+                        const bagVal = it.Bag ?? it.Sour_Bag ?? it.Alt_Qty ?? it.Alt_Bill_Qty;
+                        const match = String(name).match(/(\d+(?:\.\d+)?)\s*KG/i);
+                        const bags = bagVal !== undefined && bagVal !== null && String(bagVal).trim() !== "" && String(bagVal).trim() !== "-"
+                            ? (!isNaN(Number(bagVal)) ? Number(bagVal) : String(bagVal).trim())
+                            : (match ? `${match[1]}KG` : null);
+                        const batch = it.Batch_Name || it.Batch || it.Batch_No || "-";
+                        const rate = it.Sour_Rate !== undefined && it.Sour_Rate !== null && !isNaN(Number(it.Sour_Rate)) && Number(it.Sour_Rate) > 0
+                            ? Number(it.Sour_Rate)
+                            : (it.Gst_Rate !== undefined && it.Gst_Rate !== null && !isNaN(Number(it.Gst_Rate)) && Number(it.Gst_Rate) > 0
+                                ? Number(it.Gst_Rate)
+                                : (it.Item_Rate ? Number(it.Item_Rate) : null));
+                        const amt = it.Sour_Amt !== undefined && it.Sour_Amt !== null && !isNaN(Number(it.Sour_Amt)) && Number(it.Sour_Amt) > 0
+                            ? Number(it.Sour_Amt)
+                            : (it.Taxable_Value !== undefined && it.Taxable_Value !== null && !isNaN(Number(it.Taxable_Value)) && Number(it.Taxable_Value) > 0
+                                ? Number(it.Taxable_Value)
+                                : (it.Total_Value && Number(it.Total_Value) > 0 ? Number(it.Total_Value) : (rate && qty ? rate * qty : null)));
+
+                        return {
+                            id: idx,
+                            item: name,
+                            qty,
+                            bags,
+                            batch,
+                            rate,
+                            amt,
+                            godown: it.Godown_Name || it.Sour_Godown || "-",
+                            raw: it
+                        };
+                    })
+                    : [];
+
+                return { productionItems: prod, consumptionItems: cons };
+            }
+        }
+
+        // Fallback or non-API: Split itemRows based on type keywords or positive/negative qty
+        const prod: typeof itemRows = [];
+        const cons: typeof itemRows = [];
+
+        itemRows.forEach(it => {
+            const raw = it.raw || {};
+            const typeStr = String(
+                raw.Type ||
+                raw.Item_Type ||
+                raw.Transaction_Type ||
+                raw.Process_Type ||
+                raw.Nature ||
+                raw.Category ||
+                raw.Cost_Category ||
+                ""
+            ).toUpperCase();
+
+            if (
+                typeStr.includes("CONSUM") ||
+                typeStr.includes("RAW") ||
+                typeStr.includes("INPUT") ||
+                typeStr.includes("RM") ||
+                typeStr.includes("ISSUE") ||
+                typeStr.includes("SOUR")
+            ) {
+                cons.push(it);
+            } else if (
+                typeStr.includes("PRODUC") ||
+                typeStr.includes("OUTPUT") ||
+                typeStr.includes("FG") ||
+                typeStr.includes("FINISHED") ||
+                typeStr.includes("RECEIPT") ||
+                typeStr.includes("DEST")
+            ) {
+                prod.push(it);
+            } else if (it.qty < 0) {
+                cons.push({ ...it, qty: Math.abs(it.qty) });
+            } else {
+                prod.push(it);
+            }
+        });
+
+        return { productionItems: prod, consumptionItems: cons };
+    }, [isProcessing, apiData, itemRows]);
+
+    const renderItemTable = (
+        items: DialogItemRow[],
+        title?: string,
+        badgeColor?: "success" | "warning" | "primary"
+    ) => {
+        const totalQty = items.reduce((sum, it) => sum + (it.qty || 0), 0);
+        const hasBags = items.some(it => it.bags !== null && it.bags !== undefined && String(it.bags).trim() !== "");
+        const totalBags = items.reduce((sum, it) => {
+            const b = it.bags;
+            if (typeof b === "number") return sum + b;
+            if (typeof b === "string") {
+                const num = Number(b.replace(/[^0-9.]/g, ""));
+                return sum + (isNaN(num) ? 0 : num);
+            }
+            return sum;
+        }, 0);
+        const totalAmt = items.reduce((sum, it) => sum + (it.amt || 0), 0);
+
+        return (
+            <Box sx={{ mb: title ? 1.5 : 0 }}>
+                {title && (
+                    <Box display="flex" alignItems="center" gap={1} mb={0.75}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#1e3a8a", fontSize: "0.825rem" }}>
+                            {title}
+                        </Typography>
+                        <Chip
+                            size="small"
+                            label={`${items.length} ${items.length === 1 ? "item" : "items"}`}
+                            color={badgeColor || "primary"}
+                            variant="outlined"
+                            sx={{ height: 18, fontSize: "0.675rem", fontWeight: 600 }}
+                        />
+                    </Box>
+                )}
+                <TableContainer
+                    component={Paper}
+                    variant="outlined"
+                    sx={{
+                        borderColor: "#cbd5e1",
+                        borderRadius: "6px",
+                        overflowX: "hidden",
+                        overflowY: "auto",
+                        maxHeight: title ? "165px" : (!isProcessing && expenseRows.length > 0 ? "260px" : "360px")
+                    }}
+                >
+                    <Table size="small" stickyHeader sx={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse" }}>
+                        <TableHead>
+                            {/* Fixed Header Row */}
+                            <TableRow
+                                sx={{
+                                    bgcolor: "#f8fafc",
+                                    borderBottom: "1px solid #cbd5e1",
+                                    "& .MuiTableCell-root": {
+                                        position: "sticky",
+                                        top: 0,
+                                        zIndex: 6,
+                                        bgcolor: "#f8fafc",
+                                        py: 0.5,
+                                        px: 1,
+                                        height: "30px",
+                                        boxSizing: "border-box",
+                                        borderRight: "1px solid #cbd5e1",
+                                        borderBottom: "1px solid #cbd5e1",
+                                        fontWeight: 700,
+                                        fontSize: "0.785rem",
+                                        color: "#334155",
+                                        whiteSpace: "nowrap"
+                                    }
+                                }}
+                            >
+                                <TableCell sx={{ width: "8%" }} align="center">
+                                    S.No
+                                </TableCell>
+                                <TableCell sx={{ width: "28%", px: 1.5 }}>
+                                    Item
+                                </TableCell>
+                                <TableCell sx={{ width: "13%" }} align="center">
+                                    Qty
+                                </TableCell>
+                                <TableCell sx={{ width: "11%" }} align="center">
+                                    Bag
+                                </TableCell>
+                                <TableCell sx={{ width: "13%" }} align="center">
+                                    Batch
+                                </TableCell>
+                                <TableCell sx={{ width: "12%" }} align="right">
+                                    Rate
+                                </TableCell>
+                                <TableCell sx={{ width: "15%", px: 1.5, borderRight: "none" }} align="right">
+                                    Amt
+                                </TableCell>
+                            </TableRow>
+
+                            {/* Fixed Summary / Total Row directly under header */}
+                            <TableRow
+                                sx={{
+                                    bgcolor: "#f1f5f9",
+                                    "& .MuiTableCell-root": {
+                                        position: "sticky",
+                                        top: "30px",
+                                        zIndex: 5,
+                                        bgcolor: "#f1f5f9",
+                                        py: 0.5,
+                                        px: 1,
+                                        height: "30px",
+                                        boxSizing: "border-box",
+                                        borderRight: "1px solid #cbd5e1",
+                                        borderBottom: "2px solid #cbd5e1",
+                                        fontWeight: 700,
+                                        fontSize: "0.785rem",
+                                        color: "#0f172a",
+                                        whiteSpace: "nowrap"
+                                    }
+                                }}
+                            >
+                                <TableCell align="center" sx={{ color: "#64748b" }}>
+                                    -
+                                </TableCell>
+                                <TableCell sx={{ px: 1.5 }}>
+                                    Total
+                                </TableCell>
+                                <TableCell align="center">
+                                    {totalQty ? `${totalQty.toLocaleString()} kg` : "-"}
+                                </TableCell>
+                                <TableCell align="center">
+                                    {hasBags || totalBags > 0 ? totalBags.toLocaleString() : "-"}
+                                </TableCell>
+                                <TableCell align="center" />
+                                <TableCell align="right" />
+                                <TableCell sx={{ px: 1.5, borderRight: "none" }} align="right">
+                                    {totalAmt > 0 ? `Rs. ${totalAmt.toLocaleString()}` : "-"}
+                                </TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {/* Item rows */}
+                            {items.length > 0 ? (
+                                items.map((it, idx) => (
+                                    <TableRow
+                                        key={idx}
+                                        sx={{
+                                            borderBottom: idx === items.length - 1 ? "none" : "1px solid #e2e8f0",
+                                            "&:hover": { bgcolor: "#f8fafc" }
+                                        }}
+                                    >
+                                        <TableCell
+                                            sx={{
+                                                fontSize: "0.785rem",
+                                                color: "#64748b",
+                                                fontWeight: 600,
+                                                borderRight: "1px solid #cbd5e1",
+                                                py: 0.5,
+                                                px: 1
+                                            }}
+                                            align="center"
+                                        >
+                                            {idx + 1}
+                                        </TableCell>
+                                        <TableCell
+                                            sx={{
+                                                fontSize: "0.785rem",
+                                                color: "#1e293b",
+                                                fontWeight: 500,
+                                                borderRight: "1px solid #cbd5e1",
+                                                py: 0.5,
+                                                px: 1.5
+                                            }}
+                                        >
+                                            {it.item}
+                                        </TableCell>
+                                        <TableCell
+                                            sx={{
+                                                fontSize: "0.785rem",
+                                                color: "#334155",
+                                                borderRight: "1px solid #cbd5e1",
+                                                py: 0.5,
+                                                px: 1
+                                            }}
+                                            align="center"
+                                        >
+                                            {it.qty ? `${it.qty.toLocaleString()} kg` : "-"}
+                                        </TableCell>
+                                        <TableCell
+                                            sx={{
+                                                fontSize: "0.785rem",
+                                                color: "#334155",
+                                                borderRight: "1px solid #cbd5e1",
+                                                py: 0.5,
+                                                px: 1
+                                            }}
+                                            align="center"
+                                        >
+                                            {it.bags !== null ? it.bags : "-"}
+                                        </TableCell>
+                                        <TableCell
+                                            sx={{
+                                                fontSize: "0.785rem",
+                                                color: "#334155",
+                                                borderRight: "1px solid #cbd5e1",
+                                                py: 0.5,
+                                                px: 1
+                                            }}
+                                            align="center"
+                                        >
+                                            {it.batch}
+                                        </TableCell>
+                                        <TableCell
+                                            sx={{
+                                                fontSize: "0.785rem",
+                                                color: "#334155",
+                                                borderRight: "1px solid #cbd5e1",
+                                                py: 0.5,
+                                                px: 1
+                                            }}
+                                            align="right"
+                                        >
+                                            {it.rate !== null ? it.rate.toLocaleString() : "-"}
+                                        </TableCell>
+                                        <TableCell sx={{ fontSize: "0.785rem", color: "#334155", py: 0.5, px: 1.5, borderRight: "none" }} align="right">
+                                            {it.amt !== null ? it.amt.toLocaleString() : "-"}
+                                        </TableCell>
+                                    </TableRow>
+                                ))
+                            ) : (
+                                <TableRow>
+                                    <TableCell
+                                        colSpan={7}
+                                        align="center"
+                                        sx={{ py: 1.5, color: "#94a3b8", fontStyle: "italic", fontSize: "0.785rem" }}
+                                    >
+                                        {apiLoading ? "Loading items..." : "No items recorded"}
+                                    </TableCell>
+                                </TableRow>
+                            )}
+                        </TableBody>
+                    </Table>
+                </TableContainer>
+            </Box>
+        );
+    };
+
+    // Render Bottom Expense Grid with S.No, Expense, Expense Value
+    const renderExpenseTable = () => {
+        if (!expenseRows || expenseRows.length === 0) {
+            return null;
+        }
+
+        const totalDR = expenseRows.reduce((sum, e) => sum + e.dr, 0);
+        const totalCR = expenseRows.reduce((sum, e) => sum + e.cr, 0);
+        let totalExpenseDisplay = "-";
+        if (totalCR > 0 && totalDR > 0) {
+            totalExpenseDisplay = `${totalCR.toLocaleString()} CR / ${totalDR.toLocaleString()} DR`;
+        } else if (totalCR > 0) {
+            totalExpenseDisplay = `${totalCR.toLocaleString()} CR`;
+        } else if (totalDR > 0) {
+            totalExpenseDisplay = `${totalDR.toLocaleString()} DR`;
+        }
+
+        return (
+            <Box sx={{ mt: 1 }}>
+                <TableContainer
+                    component={Paper}
+                    variant="outlined"
+                    sx={{
+                        borderColor: "#cbd5e1",
+                        borderRadius: "6px",
+                        overflowX: "hidden",
+                        overflowY: "auto",
+                        maxHeight: "140px"
+                    }}
+                >
+                    <Table size="small" stickyHeader sx={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse" }}>
+                        <TableHead>
+                            {/* Fixed Header Row */}
+                            <TableRow
+                                sx={{
+                                    bgcolor: "#f8fafc",
+                                    borderBottom: "1px solid #cbd5e1",
+                                    "& .MuiTableCell-root": {
+                                        position: "sticky",
+                                        top: 0,
+                                        zIndex: 6,
+                                        bgcolor: "#f8fafc",
+                                        py: 0.5,
+                                        px: 1,
+                                        height: "30px",
+                                        boxSizing: "border-box",
+                                        borderRight: "1px solid #cbd5e1",
+                                        borderBottom: "1px solid #cbd5e1",
+                                        fontWeight: 700,
+                                        fontSize: "0.785rem",
+                                        color: "#334155",
+                                        whiteSpace: "nowrap"
+                                    }
+                                }}
+                            >
+                                <TableCell sx={{ width: "8%" }} align="center">
+                                    S.No
+                                </TableCell>
+                                <TableCell sx={{ width: "52%", px: 1.5 }}>
+                                    Expense
+                                </TableCell>
+                                <TableCell sx={{ width: "40%", px: 1.5, borderRight: "none" }} align="right">
+                                    Expense Value
+                                </TableCell>
+                            </TableRow>
+
+                            {/* Fixed Summary / Total Row directly under header */}
+                            <TableRow
+                                sx={{
+                                    bgcolor: "#f1f5f9",
+                                    "& .MuiTableCell-root": {
+                                        position: "sticky",
+                                        top: "30px",
+                                        zIndex: 5,
+                                        bgcolor: "#f1f5f9",
+                                        py: 0.5,
+                                        px: 1,
+                                        height: "30px",
+                                        boxSizing: "border-box",
+                                        borderRight: "1px solid #cbd5e1",
+                                        borderBottom: "2px solid #cbd5e1",
+                                        fontWeight: 700,
+                                        fontSize: "0.785rem",
+                                        color: "#0f172a",
+                                        whiteSpace: "nowrap"
+                                    }
+                                }}
+                            >
+                                <TableCell align="center" sx={{ color: "#64748b" }}>
+                                    -
+                                </TableCell>
+                                <TableCell sx={{ px: 1.5 }}>
+                                    Total
+                                </TableCell>
+                                <TableCell sx={{ px: 1.5, borderRight: "none" }} align="right">
+                                    {totalExpenseDisplay}
+                                </TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {expenseRows.map((exp, idx) => (
+                                <TableRow
+                                    key={idx}
+                                    sx={{
+                                        borderBottom: idx === expenseRows.length - 1 ? "none" : "1px solid #e2e8f0",
+                                        "&:hover": { bgcolor: "#f8fafc" }
+                                    }}
+                                >
+                                    <TableCell
+                                        sx={{
+                                            fontSize: "0.785rem",
+                                            color: "#64748b",
+                                            fontWeight: 600,
+                                            borderRight: "1px solid #cbd5e1",
+                                            py: 0.5,
+                                            px: 1
+                                        }}
+                                        align="center"
+                                    >
+                                        {exp.sNo}
+                                    </TableCell>
+                                    <TableCell
+                                        sx={{
+                                            fontSize: "0.785rem",
+                                            color: "#1e293b",
+                                            fontWeight: 500,
+                                            borderRight: "1px solid #cbd5e1",
+                                            py: 0.5,
+                                            px: 1.5
+                                        }}
+                                    >
+                                        {exp.expenseName}
+                                    </TableCell>
+                                    <TableCell
+                                        sx={{
+                                            fontSize: "0.785rem",
+                                            color: "#0f766e",
+                                            fontWeight: 700,
+                                            py: 0.5,
+                                            px: 1.5,
+                                            borderRight: "none"
+                                        }}
+                                        align="right"
+                                    >
+                                        {exp.valueStr}
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </TableContainer>
+            </Box>
+        );
+    };
+
+    return (
+        <Dialog
+            open={open}
+            onClose={onClose}
+            maxWidth="xl"
+            fullWidth
+            PaperProps={{
+                sx: {
+                    width: "96vw",
+                    maxWidth: "1280px",
+                    maxHeight: "92vh",
+                    borderRadius: "10px",
+                    overflow: "hidden",
+                    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+                    m: "auto"
+                }
+            }}
+        >
+            {/* Header / Title */}
+            <DialogTitle
+                sx={{
+                    m: 0,
+                    py: 1,
+                    px: 2.5,
+                    bgcolor: "#1E3A8A",
+                    color: "#ffffff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between"
+                }}
+            >
+                <Typography variant="subtitle1" component="div" sx={{ fontWeight: 700, fontSize: "0.95rem", letterSpacing: 0.3 }}>
+                    Invoice Details of {apiMaster?.invoice_no || invoiceData?.invoiceNo}
+                </Typography>
+                <IconButton
+                    aria-label="close"
+                    onClick={onClose}
+                    size="small"
+                    sx={{
+                        color: "#ffffff",
+                        p: 0.5,
+                        "&:hover": { bgcolor: "rgba(255, 255, 255, 0.15)" }
+                    }}
+                >
+                    <CloseIcon fontSize="small" />
+                </IconButton>
+            </DialogTitle>
+
+            <DialogContent
+                sx={{
+                    p: 1.5,
+                    mt: 1.5,
+                    bgcolor: "#ffffff",
+                    overflowY: "auto",
+                    overflowX: "hidden"
+                }}
+            >
+                {apiLoading && (
+                    <LinearProgress
+                        sx={{
+                            height: 2,
+                            borderRadius: 1,
+                            mb: 1,
+                            bgcolor: "#e2e8f0",
+                            "& .MuiLinearProgress-bar": { bgcolor: "#1e3a8a" }
+                        }}
+                    />
+                )}
+                {apiLoading && !apiData ? (
+                    <Box sx={{ py: 8, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                        <CircularProgress size={32} sx={{ color: "#1e3a8a", mb: 2 }} />
+                        <Typography variant="body2" sx={{ color: "#64748b", fontWeight: 600, fontSize: "0.85rem" }}>
+                            Loading invoice details from server...
+                        </Typography>
+                    </Box>
+                ) : !apiData ? (
+                    <Box sx={{ py: 8, textAlign: "center" }}>
+                        <Typography variant="body1" sx={{ color: "#475569", fontWeight: 600, mb: 0.5 }}>
+                            No transaction details found for invoice {invoiceData?.invoiceNo}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: "#94a3b8", display: "block" }}>
+                            Trans_Id: {refId || "-"} | Trans_Type: {transType || "-"}
+                        </Typography>
+                    </Box>
+                ) : (
+                    <Box
+                        sx={{
+                            display: "flex",
+                            flexDirection: { xs: "column", md: "row" },
+                            gap: 1.5,
+                            alignItems: "flex-start",
+                            width: "100%"
+                        }}
+                    >
+                        {/* LEFT COLUMN: Staff & Category Table */}
+                        <Box sx={{ width: { xs: "100%", md: "280px" }, flexShrink: 0 }}>
+                            <TableContainer
+                                component={Paper}
+                                variant="outlined"
+                                sx={{
+                                    borderColor: "#cbd5e1",
+                                    borderRadius: "6px",
+                                    overflowX: "hidden",
+                                    overflowY: "auto",
+                                    maxHeight: "360px"
+                                }}
+                            >
+                                <Table size="small" stickyHeader sx={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse" }}>
+                                    <TableHead>
+                                        <TableRow
+                                            sx={{
+                                                bgcolor: "#f8fafc",
+                                                borderBottom: "1px solid #cbd5e1",
+                                                "& .MuiTableCell-root": {
+                                                    position: "sticky",
+                                                    top: 0,
+                                                    zIndex: 6,
+                                                    bgcolor: "#f8fafc",
+                                                    py: 0.5,
+                                                    px: 1,
+                                                    height: "30px",
+                                                    boxSizing: "border-box",
+                                                    borderRight: "1px solid #cbd5e1",
+                                                    borderBottom: "1px solid #cbd5e1",
+                                                    fontWeight: 700,
+                                                    fontSize: "0.785rem",
+                                                    color: "#334155",
+                                                    whiteSpace: "nowrap"
+                                                }
+                                            }}
+                                        >
+                                            <TableCell sx={{ width: "16%" }} align="center">
+                                                S.No
+                                            </TableCell>
+                                            <TableCell sx={{ width: "42%" }}>
+                                                Staff
+                                            </TableCell>
+                                            <TableCell sx={{ width: "42%", borderRight: "none" }}>
+                                                Category
+                                            </TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {staffRows.map((sr, idx) => (
+                                            <TableRow
+                                                key={idx}
+                                                sx={{
+                                                    borderBottom: idx === staffRows.length - 1 ? "none" : "1px solid #e2e8f0",
+                                                    "&:hover": { bgcolor: "#f8fafc" }
+                                                }}
+                                            >
+                                                <TableCell
+                                                    sx={{
+                                                        fontSize: "0.785rem",
+                                                        color: "#64748b",
+                                                        fontWeight: 600,
+                                                        borderRight: "1px solid #cbd5e1",
+                                                        py: 0.5,
+                                                        px: 1
+                                                    }}
+                                                    align="center"
+                                                >
+                                                    {idx + 1}
+                                                </TableCell>
+                                                <TableCell
+                                                    sx={{
+                                                        fontSize: "0.785rem",
+                                                        color: "#1e293b",
+                                                        fontWeight: 500,
+                                                        borderRight: "1px solid #cbd5e1",
+                                                        py: 0.5,
+                                                        px: 1,
+                                                        wordBreak: "break-word"
+                                                    }}
+                                                >
+                                                    {sr.staffName}
+                                                </TableCell>
+                                                <TableCell
+                                                    sx={{
+                                                        fontSize: "0.785rem",
+                                                        color: "#475569",
+                                                        py: 0.5,
+                                                        px: 1,
+                                                        wordBreak: "break-word",
+                                                        borderRight: "none"
+                                                    }}
+                                                >
+                                                    {sr.category}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        </Box>
+
+                        {/* RIGHT COLUMN: Party details, Narration, Item Grid, Expense Grid */}
+                        <Box sx={{ flex: 1, minWidth: 0, width: { xs: "100%", md: "auto" } }}>
+                            {/* 1. Party, Voucher Type, Date, Godown (Single Line) */}
+                            <TableContainer
+                                component={Paper}
+                                variant="outlined"
+                                sx={{
+                                    borderColor: "#cbd5e1",
+                                    borderRadius: "6px",
+                                    overflowX: "hidden",
+                                    mb: 1
+                                }}
+                            >
+                                <Table size="small" sx={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse" }}>
+                                    <TableHead>
+                                        <TableRow sx={{ bgcolor: "#f8fafc", borderBottom: "1px solid #cbd5e1" }}>
+                                            <TableCell
+                                                sx={{
+                                                    fontWeight: 700,
+                                                    fontSize: "0.785rem",
+                                                    color: "#334155",
+                                                    borderRight: "1px solid #cbd5e1",
+                                                    py: 0.6,
+                                                    px: 1.2,
+                                                    width: isGodownToGodown ? "28%" : "38%"
+                                                }}
+                                            >
+                                                Party
+                                            </TableCell>
+                                            <TableCell
+                                                sx={{
+                                                    fontWeight: 700,
+                                                    fontSize: "0.785rem",
+                                                    color: "#334155",
+                                                    borderRight: "1px solid #cbd5e1",
+                                                    py: 0.6,
+                                                    px: 1.2,
+                                                    width: isGodownToGodown ? "20%" : "24%"
+                                                }}
+                                            >
+                                                Voucher Type
+                                            </TableCell>
+                                            <TableCell
+                                                sx={{
+                                                    fontWeight: 700,
+                                                    fontSize: "0.785rem",
+                                                    color: "#334155",
+                                                    borderRight: "1px solid #cbd5e1",
+                                                    py: 0.6,
+                                                    px: 1.2,
+                                                    width: isGodownToGodown ? "14%" : "16%"
+                                                }}
+                                            >
+                                                Date
+                                            </TableCell>
+                                            {isGodownToGodown ? (
+                                                <>
+                                                    <TableCell
+                                                        sx={{
+                                                            fontWeight: 700,
+                                                            fontSize: "0.785rem",
+                                                            color: "#334155",
+                                                            borderRight: "1px solid #cbd5e1",
+                                                            py: 0.6,
+                                                            px: 1.2,
+                                                            width: "19%"
+                                                        }}
+                                                    >
+                                                        Godown In
+                                                    </TableCell>
+                                                    <TableCell
+                                                        sx={{
+                                                            fontWeight: 700,
+                                                            fontSize: "0.785rem",
+                                                            color: "#334155",
+                                                            borderRight: "none",
+                                                            py: 0.6,
+                                                            px: 1.2,
+                                                            width: "19%"
+                                                        }}
+                                                    >
+                                                        Godown Out
+                                                    </TableCell>
+                                                </>
+                                            ) : (
+                                                <TableCell
+                                                    sx={{
+                                                        fontWeight: 700,
+                                                        fontSize: "0.785rem",
+                                                        color: "#334155",
+                                                        borderRight: "none",
+                                                        py: 0.6,
+                                                        px: 1.2,
+                                                        width: "22%"
+                                                    }}
+                                                >
+                                                    Godown
+                                                </TableCell>
+                                            )}
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        <TableRow sx={{ "&:hover": { bgcolor: "#f8fafc" } }}>
+                                            <TableCell
+                                                sx={{
+                                                    py: 0.6,
+                                                    px: 1.2,
+                                                    fontSize: "0.785rem",
+                                                    fontWeight: 600,
+                                                    color: "#1e293b",
+                                                    borderRight: "1px solid #cbd5e1",
+                                                    overflow: "hidden",
+                                                    textOverflow: "ellipsis",
+                                                    whiteSpace: "nowrap"
+                                                }}
+                                                title={partyName}
+                                            >
+                                                {partyName}
+                                            </TableCell>
+                                            <TableCell
+                                                sx={{
+                                                    py: 0.6,
+                                                    px: 1.2,
+                                                    fontSize: "0.785rem",
+                                                    color: "#334155",
+                                                    borderRight: "1px solid #cbd5e1",
+                                                    overflow: "hidden",
+                                                    textOverflow: "ellipsis",
+                                                    whiteSpace: "nowrap"
+                                                }}
+                                                title={voucherTypeName}
+                                            >
+                                                {voucherTypeName}
+                                            </TableCell>
+                                            <TableCell
+                                                sx={{
+                                                    py: 0.6,
+                                                    px: 1.2,
+                                                    fontSize: "0.785rem",
+                                                    color: "#334155",
+                                                    borderRight: "1px solid #cbd5e1"
+                                                }}
+                                            >
+                                                {voucherDate}
+                                            </TableCell>
+                                            {isGodownToGodown ? (
+                                                <>
+                                                    <TableCell
+                                                        sx={{
+                                                            py: 0.6,
+                                                            px: 1.2,
+                                                            fontSize: "0.785rem",
+                                                            color: "#334155",
+                                                            borderRight: "1px solid #cbd5e1",
+                                                            overflow: "hidden",
+                                                            textOverflow: "ellipsis",
+                                                            whiteSpace: "nowrap"
+                                                        }}
+                                                        title={godownIn}
+                                                    >
+                                                        {godownIn}
+                                                    </TableCell>
+                                                    <TableCell
+                                                        sx={{
+                                                            py: 0.6,
+                                                            px: 1.2,
+                                                            fontSize: "0.785rem",
+                                                            color: "#334155",
+                                                            borderRight: "none",
+                                                            overflow: "hidden",
+                                                            textOverflow: "ellipsis",
+                                                            whiteSpace: "nowrap"
+                                                        }}
+                                                        title={godownOut}
+                                                    >
+                                                        {godownOut}
+                                                    </TableCell>
+                                                </>
+                                            ) : (
+                                                <TableCell
+                                                    sx={{
+                                                        py: 0.6,
+                                                        px: 1.2,
+                                                        fontSize: "0.785rem",
+                                                        color: "#334155",
+                                                        borderRight: "none",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        whiteSpace: "nowrap"
+                                                    }}
+                                                    title={godownName}
+                                                >
+                                                    {godownName}
+                                                </TableCell>
+                                            )}
+                                        </TableRow>
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+
+                            {/* 2. Narration Line */}
+                            {hasNarration && (
+                                <Box sx={{ mb: 1, px: 0.5, display: "flex", alignItems: "baseline", gap: 0.75 }}>
+                                    <Typography
+                                        component="span"
+                                        sx={{
+                                            fontWeight: 700,
+                                            fontSize: "0.785rem",
+                                            color: "#1e3a8a",
+                                            flexShrink: 0
+                                        }}
+                                    >
+                                        Narration :
+                                    </Typography>
+                                    <Typography
+                                        component="span"
+                                        sx={{
+                                            fontSize: "0.785rem",
+                                            color: "#334155",
+                                            fontStyle: "italic",
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                            whiteSpace: "nowrap"
+                                        }}
+                                        title={narrationText}
+                                    >
+                                        {narrationText}
+                                    </Typography>
+                                </Box>
+                            )}
+
+                            {/* 3. Item Details Grid */}
+                            {isProcessing ? (
+                                <Box>
+                                    {renderItemTable(productionItems, "Production Details", "success")}
+                                    {renderItemTable(consumptionItems, "Consumption Details", "warning")}
+                                </Box>
+                            ) : (
+                                renderItemTable(itemRows)
+                            )}
+
+                            {/* 4. Expense Details Grid */}
+                            {!isProcessing && renderExpenseTable()}
+                        </Box>
+                    </Box>
+                )}
+            </DialogContent>
+        </Dialog>
+    );
+};
+
 const OverallItemwise: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
     const { user } = useAuth();
@@ -268,6 +1973,64 @@ const OverallItemwise: React.FC = () => {
     const [reportName, setReportName] = useState("");
     const parentReportName = "GROUP WISE ITEM";
     const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+
+    // Invoice Details Modal state
+    const [selectedInvoice, setSelectedInvoice] = useState<{
+        invoiceNo: string;
+        voucherKey: string;
+        parentCategory: string;
+        groupName: string;
+        voucherName: string;
+        clickedItem: any;
+        transType?: string;
+        refId?: string;
+    } | null>(null);
+
+    const handleOpenInvoiceModal = (
+        invoiceNo: string,
+        voucherKey: string,
+        parentCategory: string,
+        groupName: string,
+        voucherName: string,
+        clickedItem: any
+    ) => {
+        const rawList = itemData[voucherKey] || [];
+        const invUpper = String(invoiceNo).trim().toUpperCase();
+        const matched = rawList.find((r: any) => {
+            const itemInv = String(r.Inv_No || r.Invoice_no || r.Journal_no || "").trim().toUpperCase();
+            return itemInv && itemInv === invUpper;
+        });
+
+        const resolvedTransType = inferTransType(
+            parentCategory,
+            groupName,
+            voucherName,
+            clickedItem || matched
+        );
+
+        let resolvedRefId = extractValidRefId(clickedItem);
+        if (!resolvedRefId && matched) {
+            resolvedRefId = extractValidRefId(matched);
+        }
+        if (!resolvedRefId && invoiceNo && !isNaN(Number(invoiceNo)) && Number(invoiceNo) > 0) {
+            resolvedRefId = String(invoiceNo).trim();
+        }
+
+        setSelectedInvoice({
+            invoiceNo,
+            voucherKey,
+            parentCategory,
+            groupName,
+            voucherName,
+            clickedItem,
+            transType: resolvedTransType || undefined,
+            refId: resolvedRefId || undefined
+        });
+    };
+
+    const handleCloseInvoiceModal = () => {
+        setSelectedInvoice(null);
+    };
 
     // 2nd API Column Filters & Header Filter Menu
     const [columnFilters, setColumnFilters] = useState<Record<string, string[] | undefined>>({});
@@ -430,20 +2193,46 @@ const OverallItemwise: React.FC = () => {
     };
 
     // Process & Aggregate raw 2nd API items for a voucher
-    // Deduplicates rows across multiple cost centers for the same invoice item, then applies columnFilters and groups by Brand + Item_Name_Modified + enabled columns
     const processVoucherItems = (rawItems: any[], enabledCols: ColumnConfig[]) => {
         if (!rawItems || rawItems.length === 0) return [];
 
-        // 1. Deduplicate by unique invoice item: (Inv_No or Voucher_Ref_Id, Ref_Id, Stock_Item)
+        // 1. Deduplicate by unique invoice item: (Inv_No, Item, Batch) so cost center allocations do not multiply item Kgs
         const uniqueItemMap = new Map<string, any>();
 
         rawItems.forEach(row => {
             const invRef = row.Inv_No ? String(row.Inv_No).trim().toUpperCase() : String(row.Voucher_Ref_Id || "");
-            const refId = String(row.Ref_Id || row.Stock_Item || "");
-            const uniqueKey = `${invRef}___${refId}___${String(row.Stock_Item || "").trim().toUpperCase()}`;
+            const itemName = String(row.Item_Name_Modified || row.Stock_Item || row.Item_Name || row.Item || row.POS_Item_Name || "").trim();
+            const stockItem = String(row.Stock_Item || row.Product_Name || itemName).trim().toUpperCase();
+            const bag = String(row.Bag || row.Bags || "").trim().toUpperCase();
+            const batch = String(row.Batch || row.Batch_Name || row.Batch_No || "").trim().toUpperCase();
+
+            const uniqueKey = `${invRef}___${stockItem}___${bag}___${batch}`;
 
             if (!uniqueItemMap.has(uniqueKey)) {
-                uniqueItemMap.set(uniqueKey, { ...row });
+                // Ensure Cost_Center_Name is populated with Staff Name (from Cost_Center_Name, Cost_Center, or Godown_Name)
+                const staff =
+                    (row.Cost_Center_Name && row.Cost_Center_Name !== "-" ? row.Cost_Center_Name : "") ||
+                    (row.Cost_Center && row.Cost_Center !== "-" ? row.Cost_Center : "") ||
+                    (row.Staff_Name && row.Staff_Name !== "-" ? row.Staff_Name : "") ||
+                    (row.Staff && row.Staff !== "-" ? row.Staff : "") ||
+                    (row.Godown_Name && row.Godown_Name !== "-" && row.Godown_Name !== "Default" ? row.Godown_Name : "");
+
+                uniqueItemMap.set(uniqueKey, {
+                    ...row,
+                    Item_Name_Modified: row.Item_Name_Modified || itemName || row.Stock_Item || row.Item_Name || "",
+                    Cost_Center_Name: staff || row.Cost_Center_Name || "-"
+                });
+            } else {
+                const existing = uniqueItemMap.get(uniqueKey);
+                const newStaff =
+                    (row.Cost_Center_Name && row.Cost_Center_Name !== "-" ? row.Cost_Center_Name : "") ||
+                    (row.Cost_Center && row.Cost_Center !== "-" ? row.Cost_Center : "") ||
+                    (row.Staff_Name && row.Staff_Name !== "-" ? row.Staff_Name : "") ||
+                    (row.Godown_Name && row.Godown_Name !== "-" && row.Godown_Name !== "Default" ? row.Godown_Name : "");
+                const oldStaff = existing.Cost_Center_Name;
+                if (newStaff && oldStaff && oldStaff !== "-" && !String(oldStaff).includes(String(newStaff))) {
+                    existing.Cost_Center_Name = `${oldStaff}, ${newStaff}`;
+                }
             }
         });
 
@@ -475,16 +2264,12 @@ const OverallItemwise: React.FC = () => {
 
             if (!groupMap.has(compositeKey)) {
                 const entry: Record<string, any> = {
+                    ...item,
                     Bill_Qty: 0,
                     Act_Qty: 0,
                     itemCount: 0,
                     invoices: new Set<string>()
                 };
-
-                // Copy all available fields from first encounter
-                Object.keys(item).forEach(k => {
-                    entry[k] = item[k];
-                });
 
                 // Ensure all enabled column values are explicitly captured
                 enabledCols.forEach(c => {
@@ -495,8 +2280,10 @@ const OverallItemwise: React.FC = () => {
             }
 
             const target = groupMap.get(compositeKey);
-            target.Bill_Qty += Number(item.Bill_Qty) || 0;
-            target.Act_Qty += Number(item.Act_Qty ?? item.Bill_Qty) || 0;
+            const rowQty = Number(item.splitKgs ?? item.Bill_Qty ?? item.Kgs ?? item.Qty ?? 0) || 0;
+            const rowActQty = Number(item.Act_Qty ?? item.Bill_Qty ?? item.Kgs ?? item.Qty ?? 0) || 0;
+            target.Bill_Qty += rowQty;
+            target.Act_Qty += rowActQty;
             target.itemCount += 1;
             if (item.Inv_No) {
                 target.invoices.add(String(item.Inv_No).trim());
@@ -1601,6 +3388,60 @@ const OverallItemwise: React.FC = () => {
                                                                 {enabledItemColumns.map((col) => {
                                                                     const val = item[col.key];
                                                                     const isNumeric = col.key === "Brokerage" || col.key === "Coolie";
+
+                                                                    if (col.key === "Inv_No") {
+                                                                        const hasInv = val !== undefined && val !== null && val !== "" && String(val).trim() !== "-";
+                                                                        return (
+                                                                            <TableCell
+                                                                                key={col.key}
+                                                                                sx={{
+                                                                                    color: hasInv ? "#1d4ed8" : "#94a3b8",
+                                                                                    fontWeight: 600,
+                                                                                    borderRight: "1px solid #cbd5e1",
+                                                                                    py: 0.5,
+                                                                                    fontSize: "0.775rem",
+                                                                                    cursor: hasInv ? "pointer" : "default"
+                                                                                }}
+                                                                                align="left"
+                                                                            >
+                                                                                {hasInv ? (
+                                                                                    <Tooltip title="Click to view invoice details" arrow>
+                                                                                        <Box
+                                                                                            component="span"
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                handleOpenInvoiceModal(
+                                                                                                    String(val).trim(),
+                                                                                                    vKey,
+                                                                                                    category.name,
+                                                                                                    group.groupName,
+                                                                                                    vt.name,
+                                                                                                    item
+                                                                                                );
+                                                                                            }}
+                                                                                            sx={{
+                                                                                                color: "#1d4ed8",
+                                                                                                textDecoration: "underline",
+                                                                                                textUnderlineOffset: "2px",
+                                                                                                fontWeight: 600,
+                                                                                                display: "inline-block",
+                                                                                                transition: "all 0.15s ease",
+                                                                                                "&:hover": {
+                                                                                                    color: "#2563eb",
+                                                                                                    fontWeight: 700
+                                                                                                }
+                                                                                            }}
+                                                                                        >
+                                                                                            {String(val)}
+                                                                                        </Box>
+                                                                                    </Tooltip>
+                                                                                ) : (
+                                                                                    "-"
+                                                                                )}
+                                                                            </TableCell>
+                                                                        );
+                                                                    }
+
                                                                     return (
                                                                         <TableCell
                                                                             key={col.key}
@@ -1957,6 +3798,14 @@ const OverallItemwise: React.FC = () => {
                         });
                     }
                 }}
+            />
+
+            {/* ******* INVOICE DETAILS VERIFICATION MODAL ******* */}
+            <InvoiceDetailsDialog
+                open={Boolean(selectedInvoice)}
+                onClose={handleCloseInvoiceModal}
+                invoiceData={selectedInvoice}
+                rawItems={itemData[selectedInvoice?.voucherKey || ""] || []}
             />
         </Box>
     );

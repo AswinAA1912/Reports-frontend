@@ -80,6 +80,18 @@ interface ReportFilterDrawerProps {
     showProductionDisplayMode?: boolean;
     productionDisplayModeValue?: "tonnage" | "count";
     onProductionDisplayModeChange?: (value: "tonnage" | "count") => void;
+
+    // PURCHASE REPORT RADIO FILTER
+    showPurchaseFilter?: boolean;
+    purchaseFilterValue?: "today_arrival" | "pending_orders" | "pending_payments" | "completed";
+    onPurchaseFilterChange?: (value: "today_arrival" | "pending_orders" | "pending_payments" | "completed") => void;
+    purchaseFilterCounts?: {
+        today_arrival?: number;
+        pending_orders?: number;
+        pending_payments?: number;
+        completed?: number;
+    };
+
     children?: React.ReactNode;
 }
 
@@ -137,6 +149,13 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
     showProductionDisplayMode,
     productionDisplayModeValue,
     onProductionDisplayModeChange,
+
+    // PURCHASE REPORT RADIO FILTER
+    showPurchaseFilter,
+    purchaseFilterValue,
+    onPurchaseFilterChange,
+    purchaseFilterCounts,
+
     children,
 }) => {
     return (
@@ -203,6 +222,123 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                             onChange={(e) => onToDateChange(e.target.value)}
                             sx={{ mb: 2 }}
                         />
+                    )}
+
+                    {/* PURCHASE REPORT FILTER (RADIO TYPE) */}
+                    {showPurchaseFilter && onPurchaseFilterChange && (
+                        <FormControl sx={{ mb: 2.5, display: "block" }}>
+                            <FormLabel sx={{ fontWeight: 700, color: "#1E3A8A", fontSize: "0.875rem", display: "block", mb: 1 }}>
+                                Purchase Filter
+                            </FormLabel>
+                            <RadioGroup
+                                value={purchaseFilterValue || "today_arrival"}
+                                onChange={(e) =>
+                                    onPurchaseFilterChange(
+                                        e.target.value as "today_arrival" | "pending_orders" | "pending_payments" | "completed"
+                                    )
+                                }
+                                sx={{ display: "flex", flexDirection: "column", gap: 0.8 }}
+                            >
+                                {[
+                                    {
+                                        value: "today_arrival",
+                                        label: "Today's Arrival",
+                                        count: purchaseFilterCounts?.today_arrival,
+                                        isDefault: true,
+                                    },
+                                    {
+                                        value: "pending_orders",
+                                        label: "Pending Orders",
+                                        count: purchaseFilterCounts?.pending_orders,
+                                    },
+                                    {
+                                        value: "pending_payments",
+                                        label: "Pending Payments",
+                                        count: purchaseFilterCounts?.pending_payments,
+                                    },
+                                    {
+                                        value: "completed",
+                                        label: "Completed",
+                                        count: purchaseFilterCounts?.completed,
+                                    },
+                                ].map((opt) => {
+                                    const isSelected = (purchaseFilterValue || "today_arrival") === opt.value;
+                                    return (
+                                        <Box
+                                            key={opt.value}
+                                            onClick={() =>
+                                                onPurchaseFilterChange(
+                                                    opt.value as "today_arrival" | "pending_orders" | "pending_payments" | "completed"
+                                                )
+                                            }
+                                            sx={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "space-between",
+                                                px: 1.5,
+                                                py: 0.8,
+                                                borderRadius: 1.5,
+                                                cursor: "pointer",
+                                                bgcolor: isSelected ? "#eff6ff" : "#ffffff",
+                                                border: "1.5px solid",
+                                                borderColor: isSelected ? "#1E3A8A" : "#e2e8f0",
+                                                boxShadow: isSelected ? "0 1px 3px rgba(30, 58, 138, 0.12)" : "none",
+                                                transition: "all 0.15s ease",
+                                                "&:hover": {
+                                                    borderColor: isSelected ? "#1E3A8A" : "#cbd5e1",
+                                                    bgcolor: isSelected ? "#eff6ff" : "#f8fafc",
+                                                },
+                                            }}
+                                        >
+                                            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                                <Radio
+                                                    size="small"
+                                                    checked={isSelected}
+                                                    value={opt.value}
+                                                    sx={{
+                                                        p: 0,
+                                                        color: "#64748b",
+                                                        "&.Mui-checked": { color: "#1E3A8A" },
+                                                    }}
+                                                />
+                                                <Box>
+                                                    <Typography
+                                                        sx={{
+                                                            fontSize: "0.82rem",
+                                                            fontWeight: isSelected ? 700 : 600,
+                                                            color: isSelected ? "#1E3A8A" : "#1e293b",
+                                                        }}
+                                                    >
+                                                        {opt.label}
+                                                    </Typography>
+                                                    {opt.isDefault && (
+                                                        <Typography sx={{ fontSize: "0.68rem", color: "#64748b" }}>
+                                                            Default
+                                                        </Typography>
+                                                    )}
+                                                </Box>
+                                            </Box>
+                                            {opt.count !== undefined && (
+                                                <Box
+                                                    component="span"
+                                                    sx={{
+                                                        fontSize: "0.72rem",
+                                                        fontWeight: 700,
+                                                        px: 1,
+                                                        py: "2px",
+                                                        borderRadius: "12px",
+                                                        bgcolor: isSelected ? "#1E3A8A" : "#e2e8f0",
+                                                        color: isSelected ? "#ffffff" : "#475569",
+                                                    }}
+                                                >
+                                                    {opt.count}
+                                                </Box>
+                                            )}
+                                        </Box>
+                                    );
+                                })}
+                            </RadioGroup>
+                        </FormControl>
                     )}
 
                     {/* SALE ORDER STATUS FILTER FOR PENDING SALE ORDER REPORT */}

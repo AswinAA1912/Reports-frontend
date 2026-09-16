@@ -60,6 +60,9 @@ const CommonPagination: React.FC<CommonPaginationProps> = ({
               onPageChange(1);
             }}
           >
+            <MenuItem value={10}>10</MenuItem>
+            <MenuItem value={25}>25</MenuItem>
+            <MenuItem value={50}>50</MenuItem>
             <MenuItem value={100}>100</MenuItem>
             <MenuItem value={200}>200</MenuItem>
             <MenuItem value={500}>500</MenuItem>

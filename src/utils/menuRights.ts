@@ -74,7 +74,7 @@ export const fetchAndFilterMenus = async (user: any): Promise<MenuItem[]> => {
         }
 
         return subMenus
-          .filter((sub) => 
+          .filter((sub) =>
             allowedMenuIds.includes(sub.id) ||
             allowedParentReports.has(sub.name.toUpperCase())
           )

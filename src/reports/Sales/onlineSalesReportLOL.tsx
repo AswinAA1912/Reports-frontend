@@ -85,6 +85,13 @@ const NUMERIC_KEYS = [
     "Amount",
 ];
 
+const SUMMABLE_KEYS = new Set([
+    "Total_Invoice_value",
+    "Item_Count",
+    "Bill_Qty",
+    "Amount",
+]);
+
 const ABSTRACT_DEFAULT_KEYS = [
     "Ledger_Date",
     "invoice_no",
@@ -522,7 +529,24 @@ const OnlineSalesReportLOL: React.FC = () => {
         setFilterAnchor(null);
     };
 
-    /* ================= FILTERING ================= */
+    /* ================= COLUMNS & FILTERING ================= */
+
+    const sortedColumns = useMemo(() => {
+        return [...columns].sort((a, b) => {
+            // enabled columns first
+            if (a.enabled !== b.enabled) {
+                return a.enabled ? -1 : 1;
+            }
+            // then by order
+            return a.order - b.order;
+        });
+    }, [columns]);
+
+    const enabledColumns = useMemo(() => sortedColumns.filter(c => c.enabled), [sortedColumns]);
+
+    const dimensionCols = useMemo(() => {
+        return enabledColumns.filter(c => !SUMMABLE_KEYS.has(c.key));
+    }, [enabledColumns]);
 
     const filteredRows = useMemo(() => {
         return rawRows.filter(row => {
@@ -559,6 +583,85 @@ const OnlineSalesReportLOL: React.FC = () => {
         });
     }, [rawRows, filters]);
 
+    /* ================= DYNAMIC AGGREGATION BASED ON ENABLED COLUMNS ================= */
+
+    const aggregatedRows = useMemo(() => {
+        if (!filteredRows.length) return [];
+        if (!enabledColumns.length) return [];
+
+        const map = new Map<string, any>();
+
+        for (const row of filteredRows) {
+            const compositeKey = dimensionCols.length > 0
+                ? dimensionCols.map(c => {
+                    const rawVal = row[c.key];
+                    if (c.key === "Created_on") return `Created_on:${formatCreatedOn(rawVal)}`;
+                    if (c.key === "Ledger_Date") return `Ledger_Date:${rawVal ? dayjs(rawVal).format("YYYY-MM-DD") : "-"}`;
+                    return `${c.key}:${String(rawVal ?? "").trim().toLowerCase()}`;
+                }).join(":::")
+                : "__ALL__";
+
+            if (!map.has(compositeKey)) {
+                const entry: Record<string, any> = { ...row };
+                const seenInvoices = new Set<string>();
+                if (row.invoice_no) {
+                    seenInvoices.add(String(row.invoice_no).trim());
+                }
+                entry.__seenInvoices = seenInvoices;
+
+                SUMMABLE_KEYS.forEach(k => {
+                    if (entry[k] !== undefined && entry[k] !== null) {
+                        entry[k] = Number(entry[k]) || 0;
+                    }
+                });
+
+                map.set(compositeKey, entry);
+            } else {
+                const entry = map.get(compositeKey);
+                const invNo = row.invoice_no ? String(row.invoice_no).trim() : null;
+                const isNewInvoice = !invNo || !entry.__seenInvoices.has(invNo);
+
+                if (row.Total_Invoice_value !== undefined && row.Total_Invoice_value !== null) {
+                    if (isNewInvoice) {
+                        entry.Total_Invoice_value = Number(((Number(entry.Total_Invoice_value) || 0) + (Number(row.Total_Invoice_value) || 0)).toFixed(2));
+                    }
+                }
+
+                if (row.Item_Count !== undefined && row.Item_Count !== null) {
+                    if (isNewInvoice) {
+                        entry.Item_Count = Number(((Number(entry.Item_Count) || 0) + (Number(row.Item_Count) || 0)).toFixed(0));
+                    }
+                }
+
+                if (row.Bill_Qty !== undefined && row.Bill_Qty !== null) {
+                    entry.Bill_Qty = Number(((Number(entry.Bill_Qty) || 0) + (Number(row.Bill_Qty) || 0)).toFixed(3));
+                }
+
+                if (row.Amount !== undefined && row.Amount !== null) {
+                    entry.Amount = Number(((Number(entry.Amount) || 0) + (Number(row.Amount) || 0)).toFixed(2));
+                }
+
+                if (invNo) {
+                    entry.__seenInvoices.add(invNo);
+                }
+
+                dimensionCols.forEach(c => {
+                    if ((entry[c.key] === null || entry[c.key] === undefined || entry[c.key] === "") && row[c.key]) {
+                        entry[c.key] = row[c.key];
+                    }
+                });
+
+                if (!dimensionCols.some(c => c.key === "Rate") && entry.Bill_Qty && entry.Amount) {
+                    entry.Rate = Number(entry.Bill_Qty) > 0
+                        ? Number((Number(entry.Amount) / Number(entry.Bill_Qty)).toFixed(2))
+                        : entry.Rate;
+                }
+            }
+        }
+
+        return Array.from(map.values());
+    }, [filteredRows, enabledColumns, dimensionCols]);
+
     const {
         sortConfig: numSortConfig,
         rangeFilter: numRangeFilter,
@@ -571,7 +674,7 @@ const OnlineSalesReportLOL: React.FC = () => {
         filteredAndSortedData: numFilteredAndSortedRows,
         getMinMax,
         clearRangeFilter,
-    } = useNumericalFilter(filteredRows, NUMERIC_KEYS);
+    } = useNumericalFilter(aggregatedRows, NUMERIC_KEYS);
 
     const sortedRows = useMemo(() => {
         if (numSortConfig) {
@@ -733,6 +836,12 @@ const OnlineSalesReportLOL: React.FC = () => {
         return paginatedSourceRows.slice(start, end);
     }, [paginatedSourceRows, page, rowsPerPage]);
 
+    useEffect(() => {
+        if (page > 1 && (page - 1) * rowsPerPage >= paginatedSourceRows.length) {
+            setPage(1);
+        }
+    }, [paginatedSourceRows.length, page, rowsPerPage]);
+
     /* ================= PAGINATION ================= */
 
     const sensors = useSensors(
@@ -767,25 +876,18 @@ const OnlineSalesReportLOL: React.FC = () => {
         });
     };
 
-    const sortedColumns = useMemo(() => {
-        return [...columns].sort((a, b) => {
-            // enabled columns first
-            if (a.enabled !== b.enabled) {
-                return a.enabled ? -1 : 1;
-            }
-            // then by order
-            return a.order - b.order;
-        });
-    }, [columns]);
-
-    const enabledColumns = sortedColumns.filter(c => c.enabled);
-
     const baseRows = sortedRows;
 
-    const getTotal = (key: string) =>
-        Number(
+    const getTotal = (key: string) => {
+        if (key === "Rate") {
+            const totalQty = baseRows.reduce((s, r) => s + Number(r["Bill_Qty"] || 0), 0);
+            const totalAmt = baseRows.reduce((s, r) => s + Number(r["Amount"] || 0), 0);
+            return totalQty > 0 ? Number((totalAmt / totalQty).toFixed(2)) : 0;
+        }
+        return Number(
             baseRows.reduce((s, r) => s + Number(r[key] || 0), 0).toFixed(2)
         );
+    };
 
     const handleHeaderClick = (
         e: React.MouseEvent<HTMLElement>,
@@ -796,16 +898,23 @@ const OnlineSalesReportLOL: React.FC = () => {
     };
 
     useEffect(() => {
-        if (sortConfig.key) return;
+        if (!enabledColumns.length) return;
 
-        const hasLedgerDate = enabledColumns.some(c => c.key === "Ledger_Date");
-        const hasInvoiceNo = enabledColumns.some(c => c.key === "invoice_no");
+        const isCurrentSortKeyEnabled = sortConfig.key
+            ? enabledColumns.some(c => c.key === sortConfig.key)
+            : false;
 
-        if (!hasLedgerDate && !hasInvoiceNo && enabledColumns.length > 0) {
-            setSortConfig({
-                key: enabledColumns[0].key,
-                order: "asc",
-            });
+        if (!isCurrentSortKeyEnabled) {
+            const hasLedgerDate = enabledColumns.some(c => c.key === "Ledger_Date");
+            const hasInvoiceNo = enabledColumns.some(c => c.key === "invoice_no");
+
+            if (hasInvoiceNo) {
+                setSortConfig({ key: "invoice_no", order: "asc" });
+            } else if (hasLedgerDate) {
+                setSortConfig({ key: "Ledger_Date", order: "asc" });
+            } else {
+                setSortConfig({ key: enabledColumns[0].key, order: "asc" });
+            }
         }
     }, [enabledColumns, sortConfig.key]);
 

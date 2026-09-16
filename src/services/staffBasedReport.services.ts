@@ -223,4 +223,20 @@ export const employeeReportGroupService = {
       `${getBaseURL()}api/reports/externalAPI/overallStaffCategorywise/invoicewithitems`,
       { params }
     ),
+
+  getReportingDetailedList: (params: { Ref_Id?: number | string; Trans_Id?: number | string; Trans_Type: string }) =>
+    axios.get<{
+      success: boolean;
+      data: {
+        Masters: any[];
+        Items: any[];
+        CostCenter: any[];
+        Expenses: any[];
+      };
+      message: string;
+      others?: any;
+    }>(
+      `${getBaseURL()}api/reports/externalAPI/reportingDetailedList`,
+      { params }
+    ),
 };

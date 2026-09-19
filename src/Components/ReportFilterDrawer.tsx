@@ -30,6 +30,8 @@ interface ReportFilterDrawerProps {
     fromDate?: string;
     onFromDateChange?: (value: string) => void;
     hideFromDate?: boolean;
+    fromDateLabel?: string;
+    toDateLabel?: string;
 
     // OLD (keep for compatibility)
     dropdownLabel?: string;
@@ -104,6 +106,8 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
     onFromDateChange,
     onToDateChange,
     hideFromDate = false,
+    fromDateLabel = "From Date",
+    toDateLabel = "To Date",
 
     // OLD
     dropdownLabel,
@@ -203,7 +207,7 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                     {!hideFromDate && fromDate !== undefined && onFromDateChange && (
                         <TextField
                             type="date"
-                            label="From Date"
+                            label={fromDateLabel}
                             fullWidth
                             InputLabelProps={{ shrink: true }}
                             value={fromDate}
@@ -215,7 +219,7 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                     {toDate !== undefined && onToDateChange && (
                         <TextField
                             type="date"
-                            label="To Date"
+                            label={toDateLabel}
                             fullWidth
                             InputLabelProps={{ shrink: true }}
                             value={toDate}

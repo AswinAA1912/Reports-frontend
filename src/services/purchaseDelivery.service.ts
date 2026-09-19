@@ -1,3 +1,5 @@
+import dayjs from "dayjs";
+
 export interface FunnelOrderItem {
   itemId: string;
   itemName: string;
@@ -60,6 +62,140 @@ export interface PurchaseDeliveryFunnelItem {
   remarks?: string;
 }
 
+export interface PurchaseDeliveryItem {
+  id: string;
+  sNo: number;
+  stockGroup: string;
+  inwardBatchWithItemName: string;
+  purOrderNo: string;
+  inwardJouNo: string | number;
+  purInvNo: string;
+  paymentNo: string;
+  paymentAmt: number | string;
+  status: "COMPLETED" | "NOT COMPLETED" | "PENDING";
+  orderDate: string;
+}
+
+export const PURCHASE_DELIVERY_DATA: PurchaseDeliveryItem[] = [
+  {
+    id: "pd-1",
+    sNo: 1,
+    stockGroup: "2.Desi cp",
+    inwardBatchWithItemName: "011-260901 (DD MALDA 50KG)",
+    purOrderNo: "OS/00001-26-27",
+    inwardJouNo: 1,
+    purInvNo: "PS/00001/26-27",
+    paymentNo: "PO/00001/26-27",
+    paymentAmt: "",
+    status: "COMPLETED",
+    orderDate: dayjs().format("YYYY-MM-DD"),
+  },
+  {
+    id: "pd-2",
+    sNo: 2,
+    stockGroup: "2.Desi cp",
+    inwardBatchWithItemName: "011-260901 (SMT MALDA 50KG)",
+    purOrderNo: "OS/00001-26-27",
+    inwardJouNo: 1,
+    purInvNo: "PS/00002/26-27",
+    paymentNo: "PO/00010/26-27",
+    paymentAmt: "",
+    status: "COMPLETED",
+    orderDate: dayjs().format("YYYY-MM-DD"),
+  },
+  {
+    id: "pd-3",
+    sNo: 3,
+    stockGroup: "2.Desi cp",
+    inwardBatchWithItemName: "012-260902 (CHANA DAL 30KG)",
+    purOrderNo: "OS/00002-26-27",
+    inwardJouNo: 2,
+    purInvNo: "PS/00003/26-27",
+    paymentNo: "PO/00015/26-27",
+    paymentAmt: "1,45,000.00",
+    status: "COMPLETED",
+    orderDate: dayjs().format("YYYY-MM-DD"),
+  },
+  {
+    id: "pd-4",
+    sNo: 4,
+    stockGroup: "1.Beans",
+    inwardBatchWithItemName: "013-260903 (SMT-RAJMA BEANS 30KG)",
+    purOrderNo: "OS/00003-26-27",
+    inwardJouNo: 2,
+    purInvNo: "PS/00004/26-27",
+    paymentNo: "-",
+    paymentAmt: "",
+    status: "NOT COMPLETED",
+    orderDate: dayjs().format("YYYY-MM-DD"),
+  },
+  {
+    id: "pd-5",
+    sNo: 5,
+    stockGroup: "1.Beans",
+    inwardBatchWithItemName: "014-260904 (VARI BEANS 30KG)",
+    purOrderNo: "OS/00004-26-27",
+    inwardJouNo: 3,
+    purInvNo: "PS/00005/26-27",
+    paymentNo: "PO/00022/26-27",
+    paymentAmt: "88,000.00",
+    status: "COMPLETED",
+    orderDate: dayjs().format("YYYY-MM-DD"),
+  },
+  {
+    id: "pd-6",
+    sNo: 6,
+    stockGroup: "3.Dhall",
+    inwardBatchWithItemName: "015-260905 (TOOR DHAL PREMIUM 50KG)",
+    purOrderNo: "OS/00005-26-27",
+    inwardJouNo: 3,
+    purInvNo: "PS/00006/26-27",
+    paymentNo: "-",
+    paymentAmt: "",
+    status: "NOT COMPLETED",
+    orderDate: dayjs().format("YYYY-MM-DD"),
+  },
+  {
+    id: "pd-7",
+    sNo: 7,
+    stockGroup: "3.Dhall",
+    inwardBatchWithItemName: "016-260906 (MOONG WHOLE 25KG)",
+    purOrderNo: "OS/00006-26-27",
+    inwardJouNo: 4,
+    purInvNo: "PS/00007/26-27",
+    paymentNo: "PO/00030/26-27",
+    paymentAmt: "2,10,000.00",
+    status: "COMPLETED",
+    orderDate: dayjs().format("YYYY-MM-DD"),
+  },
+  {
+    id: "pd-8",
+    sNo: 8,
+    stockGroup: "4.II Item",
+    inwardBatchWithItemName: "017-260907 (II MALDA-DHALL 50KG)",
+    purOrderNo: "OS/00007-26-27",
+    inwardJouNo: 5,
+    purInvNo: "PS/00008/26-27",
+    paymentNo: "PO/00035/26-27",
+    paymentAmt: "1,65,000.00",
+    status: "COMPLETED",
+    orderDate: dayjs().format("YYYY-MM-DD"),
+  },
+  {
+    id: "pd-9",
+    sNo: 9,
+    stockGroup: "	4.II Item",
+    inwardBatchWithItemName: "018-260908 (DD THOLI-DHALL 30KG)",
+    purOrderNo: "OS/00008-26-27",
+    inwardJouNo: 5,
+    purInvNo: "PS/00009/26-27",
+    paymentNo: "-",
+    paymentAmt: "",
+    status: "NOT COMPLETED",
+    orderDate: dayjs().format("YYYY-MM-DD"),
+  },
+];
+
 /**
  * Computes status strictly based on column completeness:
  * If order has assigned trip(s) (count > 0),
@@ -98,13 +234,18 @@ export const computeItemStatus = (
 
 /* ================= COMPREHENSIVE DUMMY DATASET ================= */
 
+const todayStr = dayjs().format("DD/MM/YYYY");
+const yesterdayStr = dayjs().subtract(1, "day").format("DD/MM/YYYY");
+const twoDaysAgoStr = dayjs().subtract(2, "day").format("DD/MM/YYYY");
+const threeDaysAgoStr = dayjs().subtract(3, "day").format("DD/MM/YYYY");
+
 export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
   // 1. Matches Excel Row 1: Trips 'xy' & 'tr2' (2 trips), Invoice 'tr1', payment pending, Not Completed
   {
     id: "pd-1",
     sNo: 1,
     orderId: "ORD-2026-901",
-    orderDate: "10/09/2026",
+    orderDate: todayStr,
     retailerName: "AMMAN TRADERS",
     city: "MADURAI",
     state: "TAMIL NADU",
@@ -194,7 +335,7 @@ export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
     id: "pd-2",
     sNo: 2,
     orderId: "zz",
-    orderDate: "08/09/2026",
+    orderDate: todayStr,
     retailerName: "VENKATESHWARA AGRO",
     city: "SALEM",
     state: "TAMIL NADU",
@@ -269,7 +410,7 @@ export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
     id: "pd-3",
     sNo: 3,
     orderId: "sss",
-    orderDate: "14/09/2026",
+    orderDate: todayStr,
     retailerName: "MAHALAKSHMI ENTERPRISES",
     city: "COIMBATORE",
     state: "TAMIL NADU",
@@ -367,8 +508,8 @@ export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
   {
     id: "pd-4",
     sNo: 4,
-    orderId: "ORD-2026-1044",
-    orderDate: "15/09/2026",
+    orderId: "ORD-2026-880",
+    orderDate: todayStr,
     retailerName: "KAVERI GRAIN TRADERS",
     city: "ERODE",
     state: "TAMIL NADU",
@@ -413,7 +554,7 @@ export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
     id: "pd-5",
     sNo: 5,
     orderId: "PO-AGRO-208",
-    orderDate: "06/09/2026",
+    orderDate: todayStr,
     retailerName: "SRI KRISHNA TRADING CO",
     city: "CHENNAI",
     state: "TAMIL NADU",
@@ -509,8 +650,8 @@ export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
   {
     id: "pd-6",
     sNo: 6,
-    orderId: "ORD-2026-1180",
-    orderDate: "11/09/2026",
+    orderId: "ORD-2026-619",
+    orderDate: todayStr,
     retailerName: "ANNAPOORNA STORES",
     city: "TIRUCHIRAPPALLI",
     state: "TAMIL NADU",
@@ -597,8 +738,8 @@ export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
   {
     id: "pd-8",
     sNo: 8,
-    orderId: "ORD-2026-1299",
-    orderDate: "13/09/2026",
+    orderId: "ORD-2026-421",
+    orderDate: yesterdayStr,
     retailerName: "PADMAVATHI WHOLESALE",
     city: "TIRUPUR",
     state: "TAMIL NADU",
@@ -689,8 +830,8 @@ export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
   {
     id: "pd-10",
     sNo: 10,
-    orderId: "ORD-2026-0810",
-    orderDate: "02/09/2026",
+    orderId: "ORD-2026-205",
+    orderDate: twoDaysAgoStr,
     retailerName: "BHARATHI AGRO COMMODITIES",
     city: "THANJAVUR",
     state: "TAMIL NADU",
@@ -849,8 +990,8 @@ export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
   {
     id: "pd-12",
     sNo: 12,
-    orderId: "ORD-2026-1502",
-    orderDate: "12/09/2026",
+    orderId: "ORD-2026-102",
+    orderDate: threeDaysAgoStr,
     retailerName: "SHANMUGA TRADERS",
     city: "CUDDALORE",
     state: "TAMIL NADU",
@@ -976,8 +1117,8 @@ export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
   {
     id: "pd-14",
     sNo: 14,
-    orderId: "ORD-2026-1601",
-    orderDate: "15/09/2026",
+    orderId: "ORD-2026-081",
+    orderDate: threeDaysAgoStr,
     retailerName: "VASANTHAM ENTERPRISES",
     city: "KANCHEEPURAM",
     state: "TAMIL NADU",
@@ -1041,8 +1182,8 @@ export const DUMMY_PURCHASE_DELIVERY_DATA: PurchaseDeliveryFunnelItem[] = [
   {
     id: "pd-16",
     sNo: 16,
-    orderId: "ORD-2026-1770",
-    orderDate: "13/09/2026",
+    orderId: "ORD-2026-059",
+    orderDate: threeDaysAgoStr,
     retailerName: "KRISHNA PULSES & SPICES",
     city: "KARUR",
     state: "TAMIL NADU",

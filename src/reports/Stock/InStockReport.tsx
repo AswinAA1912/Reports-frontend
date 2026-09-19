@@ -51,7 +51,8 @@ import CommonPagination from "../../Components/CommonPagination";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import {
     StockAbstractReportService,
-    StockAbstractData4
+    StockAbstractData4,
+    mergeGodownSummaryDatasets
 } from "../../services/dayStockAbstract.service";
 import {
     godownwisestockreportservice,
@@ -362,11 +363,13 @@ const InStockReport: React.FC = () => {
             if (qtyMode === "actQty") {
                 return Number(g.ACt_OB_Qty || 0) !== 0 ||
                     Number(g.ACt_In_Qty || 0) !== 0 ||
+                    Number(g.Process_Act_IN_OUT_Qty || 0) !== 0 ||
                     Number(g.ACt_Out_Qty || 0) !== 0 ||
                     Number(g.CL_ACt_QTY || 0) !== 0;
             }
             return Number(g.OB_Qty || 0) !== 0 ||
                 Number(g.IN_Qty || 0) !== 0 ||
+                Number(g.Process_IN_OUT_Qty || 0) !== 0 ||
                 Number(g.Out_Qty || 0) !== 0 ||
                 Number(g.CL_QTY || 0) !== 0;
         });
@@ -382,11 +385,13 @@ const InStockReport: React.FC = () => {
             if (qtyMode === "actQty") {
                 return Number(g.ACt_OB_Qty || 0) !== 0 ||
                     Number(g.ACt_In_Qty || 0) !== 0 ||
+                    Number(g.Process_Act_IN_OUT_Qty || 0) !== 0 ||
                     Number(g.ACt_Out_Qty || 0) !== 0 ||
                     Number(g.CL_ACt_QTY || 0) !== 0;
             }
             return Number(g.OB_Qty || 0) !== 0 ||
                 Number(g.IN_Qty || 0) !== 0 ||
+                Number(g.Process_IN_OUT_Qty || 0) !== 0 ||
                 Number(g.Out_Qty || 0) !== 0 ||
                 Number(g.CL_QTY || 0) !== 0;
         });
@@ -791,7 +796,8 @@ const InStockReport: React.FC = () => {
                 Todate: dayjs(toDate).format("YYYY-MM-DD"),
             });
             if (reqId === latestGodownsReq.current) {
-                setGodownListData(res || []);
+                const finalData = Array.isArray(res) ? res : mergeGodownSummaryDatasets(res);
+                setGodownListData(finalData || []);
             }
         } catch (err) {
             console.error("Failed to load godown list:", err);

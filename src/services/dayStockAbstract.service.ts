@@ -266,7 +266,7 @@ export function mergeGodownSummaryDatasets(apiResponseData: any): StockAbstractD
 
     // Determine which list contains OB and which contains Data (In/Out/Process)
     const isListA_OB = listA.some((item: any) => (item.OB_Qty !== undefined || item.ACt_OB_Qty !== undefined) && item.IN_Qty === undefined);
-    const isListB_Data = listB.some((item: any) => item.IN_Qty !== undefined || item.Out_Qty !== undefined || item.Process_IN_OUT_Qty !== undefined);
+    const isListB_Data = listB.some((item: any) => item.IN_Qty !== undefined || item.Out_Qty !== undefined || item.Process_IN_OUT_Qty !== undefined || item.SOU_In_Qty !== undefined);
 
     let obList: any[] = [];
     let dataList: any[] = [];
@@ -343,10 +343,14 @@ function calculateGodownItem(dataItem: any, obItem: any): StockAbstractData4 {
     const SOU_Out_Qty = Number(dataItem?.SOU_Out_Qty ?? obItem?.SOU_Out_Qty ?? 0);
     const SOU_ACt_Out_Qty = Number(dataItem?.SOU_ACt_Out_Qty ?? obItem?.SOU_ACt_Out_Qty ?? 0);
 
-    // Closing calculated in frontend:
-    // Closing = Opening + Inward + Process - Outward
-    const CL_QTY = (OB_Qty + IN_Qty + Process_IN_OUT_Qty) - Out_Qty;
-    const CL_ACt_QTY = (ACt_OB_Qty + ACt_In_Qty + Process_Act_IN_OUT_Qty) - ACt_Out_Qty;
+    // Closing calculation aligned with SP1 and SP2:
+    // Bal_Qty = (OB_Qty + IN_Qty + SOU_In_Qty) - (Out_Qty + SOU_Out_Qty)
+    const CL_QTY = (dataItem?.CL_QTY !== undefined && dataItem?.CL_QTY !== null)
+        ? Number(dataItem.CL_QTY)
+        : ((OB_Qty + IN_Qty + SOU_In_Qty) - (Out_Qty + SOU_Out_Qty));
+    const CL_ACt_QTY = (dataItem?.CL_ACt_QTY !== undefined && dataItem?.CL_ACt_QTY !== null)
+        ? Number(dataItem.CL_ACt_QTY)
+        : ((ACt_OB_Qty + ACt_In_Qty + SOU_ACt_In_Qty) - (ACt_Out_Qty + SOU_ACt_Out_Qty));
 
     return {
         godown_id,

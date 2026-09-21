@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -159,7 +158,6 @@
       border-color: #bbf7d0;
       background: #f0fdf4;
     }
-
     .btn-excel:hover {
       background: #dcfce7;
       border-color: #86efac;
@@ -170,7 +168,6 @@
       border-color: #fecaca;
       background: #fef2f2;
     }
-
     .btn-pdf:hover {
       background: #fee2e2;
       border-color: #fca5a5;
@@ -202,7 +199,7 @@
       padding: 8px 12px;
       display: flex;
       flex-direction: column;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.02);
       transition: border-color 0.15s ease;
     }
 
@@ -405,13 +402,8 @@
       white-space: nowrap;
     }
 
-    table.funnel-table thead th.cell-center {
-      text-align: center;
-    }
-
-    table.funnel-table thead th.cell-right {
-      text-align: right;
-    }
+    table.funnel-table thead th.cell-center { text-align: center; }
+    table.funnel-table thead th.cell-right { text-align: right; }
 
     /* STICKY GRAND TOTALS ROW */
     table.funnel-table thead tr.totals-row th,
@@ -439,7 +431,6 @@
     table.funnel-table tbody tr.main-row:nth-child(4n+1) {
       background-color: #ffffff;
     }
-
     table.funnel-table tbody tr.main-row:nth-child(4n+3) {
       background-color: var(--row-zebra);
     }
@@ -462,13 +453,8 @@
       white-space: nowrap;
     }
 
-    table.funnel-table tbody td.cell-center {
-      text-align: center;
-    }
-
-    table.funnel-table tbody td.cell-right {
-      text-align: right;
-    }
+    table.funnel-table tbody td.cell-center { text-align: center; }
+    table.funnel-table tbody td.cell-right { text-align: right; }
 
     /* CHEVRON ICON */
     .btn-toggle-row {
@@ -543,15 +529,8 @@
     }
 
     @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(-4px);
-      }
-
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     /* DRILLDOWN SUMMARY BAR */
@@ -745,7 +724,7 @@
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+      box-shadow: -2px 0 8px rgba(0,0,0,0.15);
       z-index: 1000;
       transition: background 0.15s ease, transform 0.2s ease;
     }
@@ -993,24 +972,18 @@
       border-radius: 6px;
       font-size: 0.80rem;
       font-weight: 600;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
       opacity: 0;
       transform: translateY(10px);
       animation: toastIn 0.25s forwards, toastOut 0.25s 2.75s forwards;
     }
 
     @keyframes toastIn {
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     @keyframes toastOut {
-      to {
-        opacity: 0;
-        transform: translateY(-10px);
-      }
+      to { opacity: 0; transform: translateY(-10px); }
     }
 
     /* PRINT / PDF STYLING */
@@ -1020,24 +993,16 @@
         height: auto !important;
         background: #ffffff !important;
       }
-
-      .top-header,
-      .funnel-metrics-bar,
-      .controls-bar,
-      .fixed-drawer-toggle,
-      .pagination-bar {
+      .top-header, .funnel-metrics-bar, .controls-bar, .fixed-drawer-toggle, .pagination-bar {
         display: none !important;
       }
-
       .table-card {
         border: none !important;
         box-shadow: none !important;
       }
-
       table.funnel-table {
         min-width: 100% !important;
       }
-
       table.funnel-table thead th {
         background-color: #1e3a8a !important;
         -webkit-print-color-adjust: exact;
@@ -1046,7 +1011,6 @@
     }
   </style>
 </head>
-
 <body>
 
   <!-- TOP HEADER -->
@@ -1066,18 +1030,12 @@
       </div>
 
       <button class="btn-action btn-excel" onclick="exportToExcel()">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-          <path
-            d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14H6v-2h6v2zm6-4H6v-2h12v2zm0-4H6V7h12v2z" />
-        </svg>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14H6v-2h6v2zm6-4H6v-2h12v2zm0-4H6V7h12v2z"/></svg>
         Export Excel
       </button>
 
       <button class="btn-action btn-pdf" onclick="window.print()">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-          <path
-            d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-4 11H9v-5h6v5zm4-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z" />
-        </svg>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-4 11H9v-5h6v5zm4-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
         Export PDF
       </button>
     </div>
@@ -1089,12 +1047,8 @@
     <!-- 2. CONTROLS BAR: SEARCH & QUICK CHIPS -->
     <div class="controls-bar">
       <div class="search-input-wrapper">
-        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <path
-            d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-        </svg>
-        <input type="text" id="searchInput" placeholder="Search Order, Batch, Group, Invoice..."
-          oninput="handleSearch(this.value)" />
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <input type="text" id="searchInput" placeholder="Search Order, Batch, Group, Invoice..." oninput="handleSearch(this.value)" />
         <button class="clear-search-btn" id="clearSearchBtn" onclick="clearSearch()">&times;</button>
       </div>
 
@@ -1109,6 +1063,11 @@
           Not Completed <span class="chip-count" id="countNotCompleted">0</span>
         </button>
       </div>
+
+      <button class="btn-filter-trigger" onclick="openDrawer()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+        Date Filters
+      </button>
     </div>
 
     <!-- 3. MAIN DATA TABLE -->
@@ -1152,13 +1111,11 @@
       <!-- 4. PINNED PAGINATION FOOTER -->
       <div class="pagination-bar">
         <div>
-          <span>Showing <strong id="pageStart">0</strong>–<strong id="pageEnd">0</strong> of <strong
-              id="pageTotal">0</strong> orders</span>
+          <span>Showing <strong id="pageStart">0</strong>–<strong id="pageEnd">0</strong> of <strong id="pageTotal">0</strong> orders</span>
         </div>
         <div class="pagination-controls">
           <span>Rows per page:</span>
-          <select id="rowsPerPageSelect" onchange="changeRowsPerPage(this.value)"
-            style="padding: 2px 6px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.76rem; background: #ffffff;">
+          <select id="rowsPerPageSelect" onchange="changeRowsPerPage(this.value)" style="padding: 2px 6px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.76rem; background: #ffffff;">
             <option value="25">25</option>
             <option value="50">50</option>
             <option value="100" selected>100</option>
@@ -1173,9 +1130,7 @@
 
   <!-- FIXED DRAWER TOGGLE TAB ON RIGHT SCREEN EDGE -->
   <button class="fixed-drawer-toggle" onclick="toggleDrawer()" title="Open Filters Drawer">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
-    </svg>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
   </button>
 
   <!-- REPORT FILTER DRAWER (SHOWS ONLY FROM DATE & TO DATE CHANGING OPTION) -->
@@ -1706,5 +1661,4 @@
     };
   </script>
 </body>
-
 </html>

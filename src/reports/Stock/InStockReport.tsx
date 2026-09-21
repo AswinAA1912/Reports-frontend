@@ -364,12 +364,14 @@ const InStockReport: React.FC = () => {
                 return Number(g.ACt_OB_Qty || 0) !== 0 ||
                     Number(g.ACt_In_Qty || 0) !== 0 ||
                     Number(g.Process_Act_IN_OUT_Qty || 0) !== 0 ||
+                    Number(g.SOU_ACt_In_Qty || 0) !== 0 ||
                     Number(g.ACt_Out_Qty || 0) !== 0 ||
                     Number(g.CL_ACt_QTY || 0) !== 0;
             }
             return Number(g.OB_Qty || 0) !== 0 ||
                 Number(g.IN_Qty || 0) !== 0 ||
                 Number(g.Process_IN_OUT_Qty || 0) !== 0 ||
+                Number(g.SOU_In_Qty || 0) !== 0 ||
                 Number(g.Out_Qty || 0) !== 0 ||
                 Number(g.CL_QTY || 0) !== 0;
         });
@@ -386,12 +388,14 @@ const InStockReport: React.FC = () => {
                 return Number(g.ACt_OB_Qty || 0) !== 0 ||
                     Number(g.ACt_In_Qty || 0) !== 0 ||
                     Number(g.Process_Act_IN_OUT_Qty || 0) !== 0 ||
+                    Number(g.SOU_ACt_In_Qty || 0) !== 0 ||
                     Number(g.ACt_Out_Qty || 0) !== 0 ||
                     Number(g.CL_ACt_QTY || 0) !== 0;
             }
             return Number(g.OB_Qty || 0) !== 0 ||
                 Number(g.IN_Qty || 0) !== 0 ||
                 Number(g.Process_IN_OUT_Qty || 0) !== 0 ||
+                Number(g.SOU_In_Qty || 0) !== 0 ||
                 Number(g.Out_Qty || 0) !== 0 ||
                 Number(g.CL_QTY || 0) !== 0;
         });
@@ -870,7 +874,11 @@ const InStockReport: React.FC = () => {
                             Process_Act_IN_OUT_Qty: 0,
                             ACt_Out_Qty: 0,
                             CL_ACt_QTY: 0,
-                            Process_IN_OUT_Qty: 0
+                            Process_IN_OUT_Qty: 0,
+                            SOU_In_Qty: 0,
+                            SOU_ACt_In_Qty: 0,
+                            SOU_Out_Qty: 0,
+                            SOU_ACt_Out_Qty: 0
                         } as any);
                     }
                 }
@@ -1236,7 +1244,7 @@ const InStockReport: React.FC = () => {
                     "OB_Act_Qty", "Pur_Act_Qty", "Sal_Act_Qty", "Bal_Act_Qty",
                     "OB_Qty", "IN_Qty", "Out_Qty", "CL_QTY",
                     "ACt_OB_Qty", "ACt_In_Qty", "Process_Act_IN_OUT_Qty", "ACt_Out_Qty", "CL_ACt_QTY",
-                    "Process_IN_OUT_Qty"
+                    "Process_IN_OUT_Qty", "SOU_In_Qty", "SOU_ACt_In_Qty", "SOU_Out_Qty", "SOU_ACt_Out_Qty"
                 ];
                 numericKeys.forEach(k => {
                     groupedItem[k] = 0;
@@ -1256,7 +1264,7 @@ const InStockReport: React.FC = () => {
                 "OB_Act_Qty", "Pur_Act_Qty", "Sal_Act_Qty", "Bal_Act_Qty",
                 "OB_Qty", "IN_Qty", "Out_Qty", "CL_QTY",
                 "ACt_OB_Qty", "ACt_In_Qty", "Process_Act_IN_OUT_Qty", "ACt_Out_Qty", "CL_ACt_QTY",
-                "Process_IN_OUT_Qty"
+                "Process_IN_OUT_Qty", "SOU_In_Qty", "SOU_ACt_In_Qty", "SOU_Out_Qty", "SOU_ACt_Out_Qty"
             ];
             numericKeys.forEach(k => {
                 g[k] = Number(g[k]) + Number(item[k] || 0);

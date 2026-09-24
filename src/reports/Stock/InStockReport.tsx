@@ -1813,21 +1813,16 @@ const InStockReport: React.FC = () => {
     // Recalculated row-level Process Quantity summing only visible columns
     const getRecalculatedProcessQty = React.useCallback((item: stockWiseReport) => {
         const visibleCount = visibleProcessColumns.length;
-        if (visibleCount === allProcessOptions.length) {
-            return getProcIn(item) - getProcOut(item);
-        }
         if (visibleCount === 0) {
             return 0;
         }
 
         const { procInQty, procOutQty } = getProductDetails(item);
         const weight = getItemWeight(item);
-        let pIn = procInQty > 0
-            ? (qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty)
-            : getProcIn(item);
-        let pOut = procOutQty > 0
-            ? (qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty)
-            : getProcOut(item);
+        const itemProcIn = qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty;
+        const itemProcOut = qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty;
+        const pIn = itemProcIn > 0 ? itemProcIn : getProcIn(item);
+        const pOut = itemProcOut > 0 ? itemProcOut : getProcOut(item);
 
         let sum = 0;
         if (!hiddenProcessColumns.includes("PROCESS IN")) {
@@ -1837,7 +1832,7 @@ const InStockReport: React.FC = () => {
             sum -= pOut;
         }
         return sum;
-    }, [getProductDetails, hiddenProcessColumns, getProcIn, getProcOut, qtyMode, visibleProcessColumns, allProcessOptions]);
+    }, [getProductDetails, hiddenProcessColumns, getProcIn, getProcOut, qtyMode, visibleProcessColumns]);
 
     // Recalculated row-level Closing Stock Quantity
     const getRecalculatedClosingStock = React.useCallback((item: stockWiseReport) => {
@@ -2040,11 +2035,13 @@ const InStockReport: React.FC = () => {
                         const weight = getItemWeight(item);
                         const displayProcIn = qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty;
                         const displayProcOut = qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty;
+                        const rowProcIn = displayProcIn > 0 ? displayProcIn : getProcIn(item);
+                        const rowProcOut = displayProcOut > 0 ? displayProcOut : getProcOut(item);
                         const row: any[] = [idx + 1];
                         enabledConfigColumns.forEach(c => row.push(item[c.key] ?? "-"));
 
-                        if (isProcessInVisible) row.push(fmt(displayProcIn));
-                        if (isProcessOutVisible) row.push(fmt(displayProcOut));
+                        if (isProcessInVisible) row.push(fmt(rowProcIn));
+                        if (isProcessOutVisible) row.push(fmt(rowProcOut));
                         row.push(fmt(getRecalculatedProcessQty(item)));
                         excelData.push(row);
                     });
@@ -2205,9 +2202,11 @@ const InStockReport: React.FC = () => {
                         const weight = getItemWeight(item);
                         const displayProcIn = qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty;
                         const displayProcOut = qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty;
+                        const rowProcIn = displayProcIn > 0 ? displayProcIn : getProcIn(item);
+                        const rowProcOut = displayProcOut > 0 ? displayProcOut : getProcOut(item);
 
-                        if (isProcessInVisible) row.push(fmtStr(displayProcIn));
-                        if (isProcessOutVisible) row.push(fmtStr(displayProcOut));
+                        if (isProcessInVisible) row.push(fmtStr(rowProcIn));
+                        if (isProcessOutVisible) row.push(fmtStr(rowProcOut));
                         row.push(fmtStr(getRecalculatedProcessQty(item)));
                         body.push(row);
                     });
@@ -3230,7 +3229,7 @@ const InStockReport: React.FC = () => {
                                         {/* Normal Mode: Process */}
                                         {!inwardMode && !outwardMode && !processMode && (
                                             <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", borderRight: "1px solid #cbd5e1", fontWeight: 800, pr: 2, width: 120, minWidth: 120 }}>
-                                                {formatQtyVal(recalculatedTotals.processTotal)}
+                                                {recalculatedTotals.processTotal === 0 ? "0" : formatQtyVal(recalculatedTotals.processTotal)}
                                             </TableCell>
                                         )}
 
@@ -3248,7 +3247,7 @@ const InStockReport: React.FC = () => {
                                                     </TableCell>
                                                 )}
                                                 <TableCell align="right" sx={{ position: "sticky", top: headerHeight, zIndex: 10, backgroundColor: "#f1f5f9", fontWeight: 800, pr: 2, color: "#1e40af", width: 140, minWidth: 140 }}>
-                                                    {formatQtyVal(recalculatedTotals.processTotal)}
+                                                    {recalculatedTotals.processTotal === 0 ? "0" : formatQtyVal(recalculatedTotals.processTotal)}
                                                 </TableCell>
                                             </>
                                         )}
@@ -3312,6 +3311,11 @@ const InStockReport: React.FC = () => {
                                         const sNo = (page - 1) * rowsPerPage + idx + 1;
                                         const openingStock = getOpeningStock(item);
                                         const { trips, returnQty, procInQty, procOutQty } = getProductDetails(item);
+                                        const weight = getItemWeight(item);
+                                        const itemProcIn = qtyMode === "bags" ? Math.round(procInQty / weight) : procInQty;
+                                        const itemProcOut = qtyMode === "bags" ? Math.round(procOutQty / weight) : procOutQty;
+                                        const rowProcIn = itemProcIn > 0 ? itemProcIn : getProcIn(item);
+                                        const rowProcOut = itemProcOut > 0 ? itemProcOut : getProcOut(item);
 
                                         return (
                                             <React.Fragment key={idx}>
@@ -3529,7 +3533,7 @@ const InStockReport: React.FC = () => {
                                                                 <TableCell
                                                                     align="right"
                                                                     onClick={() => {
-                                                                        if (procInQty !== 0) {
+                                                                        if (rowProcIn !== 0) {
                                                                             handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'PROCESS_IN');
                                                                         }
                                                                     }}
@@ -3537,22 +3541,22 @@ const InStockReport: React.FC = () => {
                                                                         borderRight: "1px solid #e2e8f0",
                                                                         fontWeight: 600,
                                                                         pr: 2,
-                                                                        color: procInQty > 0 ? "#2563eb" : "#475569",
-                                                                        cursor: procInQty !== 0 ? "pointer" : "default",
-                                                                        textDecoration: procInQty !== 0 ? "underline" : "none",
+                                                                        color: rowProcIn > 0 ? "#2563eb" : "#475569",
+                                                                        cursor: rowProcIn !== 0 ? "pointer" : "default",
+                                                                        textDecoration: rowProcIn !== 0 ? "underline" : "none",
                                                                         width: 120,
                                                                         minWidth: 120,
-                                                                        "&:hover": procInQty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                        "&:hover": rowProcIn !== 0 ? { color: "#1d4ed8" } : {}
                                                                     }}
                                                                 >
-                                                                    {formatQtyVal(qtyMode === "bags" ? Math.round(procInQty / getItemWeight(item)) : procInQty)}
+                                                                    {formatQtyVal(rowProcIn)}
                                                                 </TableCell>
                                                             )}
                                                             {!hiddenProcessColumns.includes("PROCESS OUT") && (
                                                                 <TableCell
                                                                     align="right"
                                                                     onClick={() => {
-                                                                        if (procOutQty !== 0) {
+                                                                        if (rowProcOut !== 0) {
                                                                             handleQuantityClick(item.Product_Id || (item as any).Product_Ids?.[0], item.stock_item_name || item.Stock_Item, 'PROCESS_OUT');
                                                                         }
                                                                     }}
@@ -3560,15 +3564,15 @@ const InStockReport: React.FC = () => {
                                                                         borderRight: "1px solid #e2e8f0",
                                                                         fontWeight: 600,
                                                                         pr: 2,
-                                                                        color: procOutQty > 0 ? "#2563eb" : "#475569",
-                                                                        cursor: procOutQty !== 0 ? "pointer" : "default",
-                                                                        textDecoration: procOutQty !== 0 ? "underline" : "none",
+                                                                        color: rowProcOut > 0 ? "#2563eb" : "#475569",
+                                                                        cursor: rowProcOut !== 0 ? "pointer" : "default",
+                                                                        textDecoration: rowProcOut !== 0 ? "underline" : "none",
                                                                         width: 120,
                                                                         minWidth: 120,
-                                                                        "&:hover": procOutQty !== 0 ? { color: "#1d4ed8" } : {}
+                                                                        "&:hover": rowProcOut !== 0 ? { color: "#1d4ed8" } : {}
                                                                     }}
                                                                 >
-                                                                    {formatQtyVal(qtyMode === "bags" ? Math.round(procOutQty / getItemWeight(item)) : procOutQty)}
+                                                                    {formatQtyVal(rowProcOut)}
                                                                 </TableCell>
                                                             )}                                                            <TableCell
                                                                 align="right"

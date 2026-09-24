@@ -44,6 +44,7 @@ interface ReportFilterDrawerProps {
     filterLevels?: Record<number, any[]>;
     selectedFilters?: Record<string, any>;
     onFilterChange?: (column: string, value: any) => void;
+    level1Multiple?: boolean;
 
     stockFilter?: "hasValues" | "zero" | "all";
     onStockFilterChange?: (val: "hasValues" | "zero" | "all") => void;
@@ -120,6 +121,7 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
     filterLevels,
     selectedFilters,
     onFilterChange,
+    level1Multiple = true,
 
     stockFilter,
     onStockFilterChange,
@@ -194,11 +196,44 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
             </IconButton>
 
             {/* DRAWER */}
-            <Drawer anchor="right" open={open} onClose={onClose}>
+            <Drawer
+                anchor="right"
+                open={open}
+                onClose={onClose}
+                PaperProps={{
+                    sx: {
+                        backgroundColor: "#F1F5F9",
+                        width: 320,
+                        maxWidth: "100vw",
+                        overflowX: "hidden",
+                        overflowY: "auto",
+                        "&::-webkit-scrollbar": {
+                            width: "6px",
+                        },
+                        "&::-webkit-scrollbar-track": {
+                            backgroundColor: "#F1F5F9",
+                        },
+                        "&::-webkit-scrollbar-thumb": {
+                            backgroundColor: "#CBD5E1",
+                            borderRadius: "3px",
+                        },
+                        "&::-webkit-scrollbar-thumb:hover": {
+                            backgroundColor: "#94A3B8",
+                        },
+                    },
+                }}
+            >
                 <Box
-                    width={320}
                     p={2}
-                    sx={{ backgroundColor: "#F1F5F9", height: "100%" }}
+                    sx={{
+                        width: "100%",
+                        backgroundColor: "#F1F5F9",
+                        minHeight: "100%",
+                        display: "flex",
+                        flexDirection: "column",
+                        boxSizing: "border-box",
+                        overflowX: "hidden",
+                    }}
                 >
                     <Typography variant="h6" mb={2} fontWeight={700}>
                         Filters
@@ -379,52 +414,99 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                                 Filter Level-1
                             </Typography>
 
-                            {filterLevels[1].map((filter: any) => (
-                                <Autocomplete
-                                    multiple
-                                    options={filter.options || []}
-                                    getOptionLabel={(option: any) => option.label}
+                            {filterLevels[1].map((filter: any) => {
+                                if (!level1Multiple) {
+                                    const rawVal = selectedFilters?.[filter.columnName];
+                                    const currentVal = Array.isArray(rawVal) ? rawVal[0] : rawVal;
+                                    const selectedOption =
+                                        filter.options?.find(
+                                            (opt: any) => String(opt.value) === String(currentVal)
+                                        ) || null;
 
-                                    filterOptions={(options, { inputValue }) => {
-                                        const search = inputValue
-                                            .toLowerCase()
-                                            .replace(/\s+/g, "")
-                                            .replace(/[^a-z0-9]/gi, "");
+                                    return (
+                                        <Autocomplete
+                                            key={filter.columnName || filter.filterType}
+                                            options={filter.options || []}
+                                            getOptionLabel={(option: any) => option?.label || ""}
+                                            isOptionEqualToValue={(option: any, val: any) =>
+                                                val != null && String(option?.value) === String(val?.value)
+                                            }
+                                            filterOptions={(options, { inputValue }) => {
+                                                const search = inputValue
+                                                    .toLowerCase()
+                                                    .replace(/\s+/g, "")
+                                                    .replace(/[^a-z0-9]/gi, "");
 
-                                        return options.filter((option: any) => {
-                                            const label = option.label
+                                                return options.filter((option: any) => {
+                                                    const label = (option?.label || "")
+                                                        .toLowerCase()
+                                                        .replace(/\s+/g, "")
+                                                        .replace(/[^a-z0-9]/gi, "");
+
+                                                    return label.includes(search);
+                                                });
+                                            }}
+                                            value={selectedOption}
+                                            onChange={(_, newValue: any) => {
+                                                onFilterChange?.(
+                                                    filter.columnName,
+                                                    newValue != null ? newValue.value : undefined
+                                                );
+                                            }}
+                                            renderInput={(params) => (
+                                                <TextField
+                                                    {...params}
+                                                    label={filter.columnName}
+                                                    placeholder="Search..."
+                                                />
+                                            )}
+                                            sx={{ mb: 2 }}
+                                        />
+                                    );
+                                }
+
+                                return (
+                                    <Autocomplete
+                                        key={filter.columnName || filter.filterType}
+                                        multiple
+                                        options={filter.options || []}
+                                        getOptionLabel={(option: any) => option?.label || ""}
+                                        filterOptions={(options, { inputValue }) => {
+                                            const search = inputValue
                                                 .toLowerCase()
                                                 .replace(/\s+/g, "")
                                                 .replace(/[^a-z0-9]/gi, "");
 
-                                            return label.includes(search);
-                                        });
-                                    }}
+                                            return options.filter((option: any) => {
+                                                const label = (option?.label || "")
+                                                    .toLowerCase()
+                                                    .replace(/\s+/g, "")
+                                                    .replace(/[^a-z0-9]/gi, "");
 
-                                    value={
-                                        filter.options?.filter((opt: any) =>
-                                            (selectedFilters?.[filter.columnName] || []).includes(opt.value)
-                                        ) || []
-                                    }
-
-                                    onChange={(_, newValue) => {
-                                        const values = newValue.map((opt: any) => opt.value);
-                                        onFilterChange?.(filter.columnName, values);
-                                    }}
-
-                                    disableCloseOnSelect
-
-                                    renderInput={(params) => (
-                                        <TextField
-                                            {...params}
-                                            label={filter.columnName}
-                                            placeholder="Search..."
-                                        />
-                                    )}
-
-                                    sx={{ mb: 2 }}
-                                />
-                            ))}
+                                                return label.includes(search);
+                                            });
+                                        }}
+                                        value={
+                                            filter.options?.filter((opt: any) =>
+                                                (selectedFilters?.[filter.columnName] || []).includes(opt.value)
+                                            ) || []
+                                        }
+                                        onChange={(_, newValue) => {
+                                            const values = newValue.map((opt: any) => opt.value);
+                                            onFilterChange?.(filter.columnName, values);
+                                        }}
+                                        disableCloseOnSelect
+                                        renderInput={(params) => (
+                                            <TextField
+                                                {...params}
+                                                label={filter.columnName}
+                                                placeholder="Search..."
+                                            />
+                                        )}
+                                        sx={{ mb: 2 }}
+                                    />
+                                );
+                            })}
                         </Box>
                     )}
 
@@ -661,6 +743,8 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                             backgroundColor: "#1E3A8A",
                             color: "#fff",
                             fontWeight: 600,
+                            mt: 1,
+                            mb: 2,
                             "&:hover": { backgroundColor: "#162E6E" },
                         }}
                         onClick={() => {

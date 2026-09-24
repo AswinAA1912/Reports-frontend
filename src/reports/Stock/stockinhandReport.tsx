@@ -12,10 +12,18 @@ import {
     TableHead,
     TableRow,
     Paper,
-    CircularProgress
+    CircularProgress,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    Typography,
+    Tooltip,
+    Chip,
 } from "@mui/material";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
+import LayersIcon from "@mui/icons-material/Layers";
+import CloseIcon from "@mui/icons-material/Close";
 import dayjs from "dayjs";
 import AppLayout, { useToggleMode } from "../../Layout/appLayout";
 import PageHeader from "../../Layout/PageHeader";
@@ -30,6 +38,10 @@ import {
     stockGroupingService,
     StockGroupConfig,
     stockWiseReport,
+    godownStockBadgeService,
+    GodownStockBadgeItem,
+    itemwiseStockBadgeService,
+    ItemwiseStockBadgeItem,
 } from "../../services/stockWiseReport.service";
 
 
@@ -54,6 +66,12 @@ const StockInHandReport: React.FC = () => {
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
     const [page, setPage] = useState(1);
     const [rowsPerPage, setRowsPerPage] = useState(100);
+
+    /* ===== BATCH MODAL STATES ===== */
+    const [batchModalOpen, setBatchModalOpen] = useState(false);
+    const [batchLoading, setBatchLoading] = useState(false);
+    const [batchData, setBatchData] = useState<(GodownStockBadgeItem | ItemwiseStockBadgeItem)[]>([]);
+    const [selectedBatchItem, setSelectedBatchItem] = useState<stockWiseReport | null>(null);
 
     /* ===== FILTER STATES ===== */
 
@@ -248,7 +266,9 @@ const StockInHandReport: React.FC = () => {
             ========================= */
             if (!isExpanded) {
                 Object.keys(selectedFilters).forEach((col) => {
-                    const value = selectedFilters[col];
+                    const rawValue = selectedFilters[col];
+                    const value = Array.isArray(rawValue) ? rawValue[0] : rawValue;
+                    if (value === undefined || value === null || value === "") return;
 
                     const filter = Object.values(filterLevels)
                         .flat()
@@ -355,7 +375,7 @@ const StockInHandReport: React.FC = () => {
         if (!saved) return;
         const state = JSON.parse(saved);
 
-        setRawData(state.rawData || []); 
+        setRawData(state.rawData || []);
         setExpanded(state.expanded || {});
         setPage(state.page || 1);
         setSelectedFilters(state.selectedFilters || {});
@@ -377,16 +397,16 @@ const StockInHandReport: React.FC = () => {
         // LEVEL 1 FILTER
         // ✅ DYNAMIC FILTERS
         Object.keys(selectedFilters).forEach((col) => {
-            const value = selectedFilters[col];
+            const rawValue = selectedFilters[col];
             if (col === "Godown_Id" || col === "Godown_Name") return;
 
             const filter = Object.values(filterLevels)
                 .flat()
                 .find((f: any) => f.columnName === col);
 
-            if (Array.isArray(value)) {
-                if (value.length > 0) {
-                    const labels = value.map(val => {
+            if (Array.isArray(rawValue)) {
+                if (rawValue.length > 0) {
+                    const labels = rawValue.map(val => {
                         const opt = filter?.options?.find((o: any) => String(o.value) === String(val));
                         return opt ? opt.label : String(val);
                     });
@@ -394,14 +414,16 @@ const StockInHandReport: React.FC = () => {
                         (r) => labels.some(lbl => String(r[col] || "").trim().toLowerCase() === String(lbl).trim().toLowerCase())
                     );
                 }
-            } else {
+            } else if (rawValue !== undefined && rawValue !== null && rawValue !== "") {
                 const label = filter?.options?.find(
-                    (opt: any) => String(opt.value) === String(value)
-                )?.label;
+                    (opt: any) => String(opt.value) === String(rawValue)
+                )?.label || (typeof rawValue === "string" ? rawValue : undefined);
 
                 if (label) {
                     filtered = filtered.filter(
-                        (r) => String(r[col] || "").trim().toLowerCase() === String(label).trim().toLowerCase()
+                        (r) =>
+                            String(r[col] || "").trim().toLowerCase() === String(label).trim().toLowerCase() ||
+                            String(r[col] || "").trim().toLowerCase() === String(rawValue).trim().toLowerCase()
                     );
                 }
             }
@@ -502,9 +524,9 @@ const StockInHandReport: React.FC = () => {
     };
 
     useEffect(() => {
-    setExpanded({});
-    setPage(1);
-}, [selectedLevel2ByType]);
+        setExpanded({});
+        setPage(1);
+    }, [selectedLevel2ByType]);
 
     /* ================= GROUPING ================= */
 
@@ -535,20 +557,35 @@ const StockInHandReport: React.FC = () => {
         let filtered = rawData;
 
         Object.keys(selectedFilters).forEach((col) => {
-            const value = selectedFilters[col];
+            const rawValue = selectedFilters[col];
+            if (col === "Godown_Id" || col === "Godown_Name") return;
 
             const filter = Object.values(filterLevels)
                 .flat()
                 .find((f: any) => f.columnName === col);
 
-            const label = filter?.options?.find(
-                (opt: any) => String(opt.value) === String(value)
-            )?.label;
+            if (Array.isArray(rawValue)) {
+                if (rawValue.length > 0) {
+                    const labels = rawValue.map(val => {
+                        const opt = filter?.options?.find((o: any) => String(o.value) === String(val));
+                        return opt ? opt.label : String(val);
+                    });
+                    filtered = filtered.filter(
+                        (r) => labels.some(lbl => String(r[col] || "").trim().toLowerCase() === String(lbl).trim().toLowerCase())
+                    );
+                }
+            } else if (rawValue !== undefined && rawValue !== null && rawValue !== "") {
+                const label = filter?.options?.find(
+                    (opt: any) => String(opt.value) === String(rawValue)
+                )?.label || (typeof rawValue === "string" ? rawValue : undefined);
 
-            if (label) {
-                filtered = filtered.filter(
-                    (r) => String(r[col]) === String(label)
-                );
+                if (label) {
+                    filtered = filtered.filter(
+                        (r) =>
+                            String(r[col] || "").trim().toLowerCase() === String(label).trim().toLowerCase() ||
+                            String(r[col] || "").trim().toLowerCase() === String(rawValue).trim().toLowerCase()
+                    );
+                }
             }
         });
 
@@ -664,6 +701,100 @@ const StockInHandReport: React.FC = () => {
         return `${q.toFixed(2)} (${bags})`;
     };
 
+    /* ================= BATCH (GODOWN STOCK BADGE) HELPERS ================= */
+
+    const handleOpenBatchModal = async (item: stockWiseReport) => {
+        setSelectedBatchItem(item);
+        setBatchModalOpen(true);
+        setBatchLoading(true);
+        setBatchData([]);
+
+        try {
+            if (isExpanded) {
+                const godownFilter = (filterLevels[1] || []).find(
+                    (f: any) =>
+                        f.columnName === "Godown_Id" ||
+                        f.columnName === "Godown_Name"
+                );
+                const rawGodownId =
+                    item.Godown_Id ||
+                    selectedFilters["Godown_Id"] ||
+                    selectedFilters["Godown_Name"] ||
+                    (godownFilter ? selectedFilters[godownFilter.columnName] : undefined) ||
+                    1;
+
+                const godownId = Array.isArray(rawGodownId) ? rawGodownId[0] : rawGodownId;
+                const itemId = item.Product_Id || item.Item_Id || "";
+
+                const res = await godownStockBadgeService.getGodownStockBadge({
+                    Fromdate: fromDate,
+                    Todate: toDate,
+                    Godown_Id: godownId,
+                    Item_Id: itemId,
+                });
+
+                setBatchData(res.data?.data || []);
+            } else {
+                const res = await itemwiseStockBadgeService.getItemwiseStockBadge({
+                    Fromdate: fromDate,
+                    Todate: toDate,
+                    Item_Name: item.stock_item_name,
+                    stock_item_name: item.stock_item_name,
+                    Product_Id: item.Product_Id,
+                    Item_Id: item.Product_Id || item.Item_Id,
+                });
+
+                const rawBatches = res.data?.data || [];
+                const targetName = String(item.stock_item_name || "").trim().toLowerCase();
+                const targetId = String(item.Product_Id || item.Item_Id || "").trim();
+
+                const filtered = rawBatches.filter((b: any) => {
+                    if (targetName && String(b.stock_item_name || "").trim().toLowerCase() === targetName) {
+                        return true;
+                    }
+                    if (targetId && String(b.Product_Id || "").trim() === targetId) {
+                        return true;
+                    }
+                    return false;
+                });
+
+                setBatchData(filtered);
+            }
+        } catch (err) {
+            console.error("Failed to load batch data:", err);
+            setBatchData([]);
+        } finally {
+            setBatchLoading(false);
+        }
+    };
+
+    const getBatchQty = (item: GodownStockBadgeItem | ItemwiseStockBadgeItem, type: "OB" | "IN" | "OUT" | "CLS") => {
+        if (qtyMode === "actQty") {
+            switch (type) {
+                case "OB": return Number(item.OB_Act_Qty || 0);
+                case "IN": return Number(item.IN_Act_Qty || 0);
+                case "OUT": return Number(item.OUT_Act_Qty || 0);
+                case "CLS": return Number(item.Act_Bal_Qty || 0);
+            }
+        }
+        switch (type) {
+            case "OB": return Number(item.OB_Bal_Qty || 0);
+            case "IN": return Number(item.IN_Qty || 0);
+            case "OUT": return Number(item.OUT_Qty || 0);
+            case "CLS": return Number(item.Bal_Qty || 0);
+        }
+    };
+
+    const formatBatchQtyWithBag = (qty: number, itemRow: stockWiseReport | null) => {
+        const q = Number(qty || 0);
+        const bagKg = extractBagKg(itemRow);
+        if (!bagKg) {
+            return q.toFixed(2);
+        }
+        const bags = q / bagKg;
+        return `${q.toFixed(2)} (${formatBagCount(bags)})`;
+    };
+
 
     const flattenGroupsForExport = (groups: any[], parentKeys: Record<string, string> = {}, isExpandedMode = isExpanded): any[] => {
         const result: any[] = [];
@@ -753,172 +884,177 @@ const StockInHandReport: React.FC = () => {
     const paginated = (rows: stockWiseReport[]) =>
         rows.slice((page - 1) * rowsPerPage, page * rowsPerPage);
 
-    /* ================= ITEM TABLE ================= */
+    /* ================= TOTALS ================= */
 
-    const renderItemTable = (rows: stockWiseReport[]) => {
-        const pageRows = paginated(rows);
+    const totalOpening = useMemo(() => sum(numFilteredAndSortedRows, qtyKeys.opening), [numFilteredAndSortedRows, qtyKeys.opening]);
+    const totalIn = useMemo(() => sum(numFilteredAndSortedRows, qtyKeys.in), [numFilteredAndSortedRows, qtyKeys.in]);
+    const totalOut = useMemo(() => sum(numFilteredAndSortedRows, qtyKeys.out), [numFilteredAndSortedRows, qtyKeys.out]);
+    const totalClosing = useMemo(() => sum(numFilteredAndSortedRows, qtyKeys.closing), [numFilteredAndSortedRows, qtyKeys.closing]);
 
-        // ✅ TOTALS (full filtered rows, NOT paginated)
-        const totalOpening = sum(rows, qtyKeys.opening);
-        const totalIn = sum(rows, qtyKeys.in);
-        const totalOut = sum(rows, qtyKeys.out);
-        const totalClosing = sum(rows, qtyKeys.closing);
+    /* ================= ITEM ROWS ================= */
 
-        return (
-            <Table size="small">
-                <TableHead sx={{ background: "#1E3A8A" }}>
-                    <TableRow>
-                        <TableCell sx={{ color: "#fff", fontWeight: 600 }}>S.No</TableCell>
-                        <TableCell sx={{ color: "#fff", fontWeight: 600 }}>Item</TableCell>
-                        <TableCell sx={{ color: "#fff", fontWeight: 600 }} align="right">
-                            <SortableHeaderLabel
-                                label="Opening"
-                                columnKey={qtyKeys.opening as string}
-                                sortConfig={numSortConfig}
-                                onSort={handleNumSort}
-                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.opening as string)}
-                            />
-                        </TableCell>
-                        <TableCell sx={{ color: "#fff", fontWeight: 600 }} align="right">
-                            <SortableHeaderLabel
-                                label="In"
-                                columnKey={qtyKeys.in as string}
-                                sortConfig={numSortConfig}
-                                onSort={handleNumSort}
-                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.in as string)}
-                            />
-                        </TableCell>
-                        <TableCell sx={{ color: "#fff", fontWeight: 600 }} align="right">
-                            <SortableHeaderLabel
-                                label="Out"
-                                columnKey={qtyKeys.out as string}
-                                sortConfig={numSortConfig}
-                                onSort={handleNumSort}
-                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.out as string)}
-                            />
-                        </TableCell>
-                        <TableCell sx={{ color: "#fff", fontWeight: 600 }} align="right">
-                            <SortableHeaderLabel
-                                label="Closing"
-                                columnKey={qtyKeys.closing as string}
-                                sortConfig={numSortConfig}
-                                onSort={handleNumSort}
-                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.closing as string)}
-                            />
-                        </TableCell>
-                    </TableRow>
-                </TableHead>
+    const renderItemRows = (items: stockWiseReport[], depth = 0) =>
+        items.map((r, i) => (
+            <TableRow
+                key={`${r.Product_Id || r.Item_Id || i}-${i}`}
+                hover
+                sx={{
+                    background: "#FFFFFF",
+                    "&:hover": { bgcolor: "#EFF6FF" },
+                    borderBottom: "1px solid #F1F5F9",
+                }}
+            >
+                <TableCell width={44} sx={{ py: 0.6, textAlign: "center", color: "#94A3B8", fontSize: "0.75rem" }}>
+                    {i + 1}
+                </TableCell>
 
-                <TableBody>
-                    {/* ✅ TOTAL ROW — directly below header */}
-                    <TableRow sx={{ background: "#F1F5F9", fontWeight: 700 }}>
-                        <TableCell colSpan={2}>TOTAL</TableCell>
+                <TableCell sx={{ py: 0.6 }}>
+                    <Box sx={{ display: "flex", alignItems: "center", pl: depth * 2.5 + (depth > 0 ? 1 : 0), gap: 0.8, flexWrap: "wrap" }}>
+                        <span
+                            style={{ cursor: "pointer", color: "#1D4ED8", fontWeight: 600 }}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleTransactionClick(
+                                    r,
+                                    isExpanded ? "EXPANDED" : "ABSTRACT"
+                                );
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                        >
+                            {r.stock_item_name}
+                        </span>
 
-                        <TableCell align="right">
-                            {formatTotalQtyWithBag(totalOpening, rows, qtyKeys.opening)}
-                        </TableCell>
-
-                        <TableCell align="right">
-                            {formatTotalQtyWithBag(totalIn, rows, qtyKeys.in)}
-                        </TableCell>
-
-                        <TableCell align="right">
-                            {formatTotalQtyWithBag(totalOut, rows, qtyKeys.out)}
-                        </TableCell>
-
-                        <TableCell align="right">
-                            {formatTotalQtyWithBag(totalClosing, rows, qtyKeys.closing)}
-                        </TableCell>
-                    </TableRow>
-
-                    {/* ✅ ITEM ROWS */}
-                    {pageRows.map((r, i) => (
-                        <TableRow key={i}>
-                            <TableCell>
-                                {(page - 1) * rowsPerPage + i + 1}
-                            </TableCell>
-                            <TableCell
+                        <Tooltip title="View Batch Stock Details" arrow placement="top">
+                            <IconButton
+                                size="small"
                                 sx={{
-                                     cursor: "pointer",
-                                     color: "#1D4ED8",
-                                     fontWeight: 600,
-                                     "&:hover": { textDecoration: "none" }
+                                    p: "3px",
+                                    color: "#1E3A8A",
+                                    backgroundColor: "#EFF6FF",
+                                    border: "1px solid #BFDBFE",
+                                    borderRadius: "6px",
+                                    transition: "all 0.15s ease-in-out",
+                                    "&:hover": {
+                                        backgroundColor: "#DBEAFE",
+                                        borderColor: "#93C5FD",
+                                        transform: "scale(1.08)",
+                                    },
                                 }}
                                 onClick={(e) => {
-                                     e.stopPropagation();
-                                     handleTransactionClick(
-                                         r,
-                                         isExpanded ? "EXPANDED" : "ABSTRACT"
-                                     );
+                                    e.stopPropagation();
+                                    handleOpenBatchModal(r);
                                 }}
                             >
-                                {r.stock_item_name}
-                            </TableCell>
-                            <TableCell align="right">
-                                {formatQtyWithBag(r[qtyKeys.opening] ?? 0, r)}
-                            </TableCell>
-                            <TableCell align="right">
-                                {formatQtyWithBag(r[qtyKeys.in] ?? 0, r)}
-                            </TableCell>
-                            <TableCell align="right">
-                                {formatQtyWithBag(r[qtyKeys.out] ?? 0, r)}
-                            </TableCell>
-                            <TableCell align="right">
-                                {formatQtyWithBag(r[qtyKeys.closing] ?? 0, r)}
-                            </TableCell>
-                        </TableRow>
-                    ))}
-                </TableBody>
-            </Table>
-        );
-    };
+                                <LayersIcon sx={{ fontSize: 16 }} />
+                            </IconButton>
+                        </Tooltip>
+                    </Box>
+                </TableCell>
+
+                <TableCell align="right" sx={{ py: 0.6 }}>
+                    {formatQtyWithBag(r[qtyKeys.opening] ?? 0, r)}
+                </TableCell>
+
+                <TableCell align="right" sx={{ py: 0.6 }}>
+                    {formatQtyWithBag(r[qtyKeys.in] ?? 0, r)}
+                </TableCell>
+
+                <TableCell align="right" sx={{ py: 0.6 }}>
+                    {formatQtyWithBag(r[qtyKeys.out] ?? 0, r)}
+                </TableCell>
+
+                <TableCell align="right" sx={{ py: 0.6 }}>
+                    {formatQtyWithBag(r[qtyKeys.closing] ?? 0, r)}
+                </TableCell>
+            </TableRow>
+        ));
 
 
     /* ================= GROUP ROWS ================= */
 
-    const renderGroups = (groups: any[]) =>
+    const renderGroups = (groups: any[], depth = 0): React.ReactNode =>
         groups.map((g) => {
             const id = `${g.level}-${g.key}-${g.rows.length}`;
             const open = expanded[id];
 
+            const bgColors = ["#F8FAFC", "#FFFFFF", "#F8FAFC"];
+            const rowBg = depth === 0 ? "#F1F5F9" : bgColors[depth % bgColors.length];
+
+            const grpOpening = sum(g.rows, qtyKeys.opening);
+            const grpIn = sum(g.rows, qtyKeys.in);
+            const grpOut = sum(g.rows, qtyKeys.out);
+            const grpClosing = sum(g.rows, qtyKeys.closing);
+
             return (
                 <React.Fragment key={id}>
-                    <TableRow sx={{ background: "#F1F5F9" }}>
-                        <TableCell width={40}>
-                            <IconButton
-                                size="small"
-                                onClick={() =>
-                                    setExpanded((p) => ({ ...p, [id]: !p[id] }))
-                                }
-                            >
-                                {open ? <KeyboardArrowDownIcon /> : <KeyboardArrowRightIcon />}
-                            </IconButton>
+                    <TableRow
+                        sx={{
+                            background: rowBg,
+                            cursor: "pointer",
+                            "&:hover": { bgcolor: "#E2E8F0" },
+                            borderBottom: "1px solid #E2E8F0",
+                        }}
+                        onClick={() => setExpanded((p) => ({ ...p, [id]: !p[id] }))}
+                    >
+                        <TableCell width={44} sx={{ py: 0.8, textAlign: "center" }}>
+                            {depth === 0 ? (
+                                <IconButton
+                                    size="small"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setExpanded((p) => ({ ...p, [id]: !p[id] }));
+                                    }}
+                                >
+                                    {open ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
+                                </IconButton>
+                            ) : null}
                         </TableCell>
 
-                        <TableCell sx={{ fontWeight: 600 }}>{g.key}</TableCell>
-                        <TableCell align="right">{g.rows.length}</TableCell>
-                        <TableCell align="right">
-                            {formatTotalQtyWithBag(
-                                sum(g.rows, qtyKeys.closing),
-                                g.rows,
-                                qtyKeys.closing
-                            )}
+                        <TableCell sx={{ py: 0.8 }}>
+                            <Box sx={{ display: "flex", alignItems: "center", pl: depth * 2.5, gap: 0.6 }}>
+                                {depth > 0 && (
+                                    <IconButton
+                                        size="small"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpanded((p) => ({ ...p, [id]: !p[id] }));
+                                        }}
+                                        sx={{ p: 0.5 }}
+                                    >
+                                        {open ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
+                                    </IconButton>
+                                )}
+                                <span style={{ fontWeight: depth === 0 ? 700 : 600, color: "#1E293B" }}>
+                                    {g.key}
+                                </span>
+                                <span style={{ color: "#64748B", fontWeight: 600, fontSize: "0.82rem" }}>
+                                    ({g.rows.length})
+                                </span>
+                            </Box>
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ fontWeight: 600, py: 0.8 }}>
+                            {formatTotalQtyWithBag(grpOpening, g.rows, qtyKeys.opening)}
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ fontWeight: 600, py: 0.8 }}>
+                            {formatTotalQtyWithBag(grpIn, g.rows, qtyKeys.in)}
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ fontWeight: 600, py: 0.8 }}>
+                            {formatTotalQtyWithBag(grpOut, g.rows, qtyKeys.out)}
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ fontWeight: 600, py: 0.8 }}>
+                            {formatTotalQtyWithBag(grpClosing, g.rows, qtyKeys.closing)}
                         </TableCell>
                     </TableRow>
 
                     {open && (
-                        <TableRow>
-                            {/* colSpan should cover all columns including icon + totals */}
-                            <TableCell colSpan={6} sx={{ pl: 4 }}>
-                                {g.children.length
-                                    ? (
-                                        <Table size="small">
-                                            <TableBody>{renderGroups(g.children)}</TableBody>
-                                        </Table>
-                                    )
-                                    : renderItemTable(g.rows)}
-                            </TableCell>
-                        </TableRow>
+                        g.children?.length
+                            ? renderGroups(g.children, depth + 1)
+                            : renderItemRows(g.rows, depth + 1)
                     )}
                 </React.Fragment>
             );
@@ -945,11 +1081,17 @@ const StockInHandReport: React.FC = () => {
                 onToDateChange={setToDate}
                 filterLevels={filterLevels}
                 selectedFilters={selectedFilters}
+                level1Multiple={false}
                 onFilterChange={(col, val) => {
-                    setSelectedFilters((prev) => ({
-                        ...prev,
-                        [col]: val,
-                    }));
+                    setSelectedFilters((prev) => {
+                        const copy = { ...prev };
+                        if (val === undefined || val === null || val === "") {
+                            delete copy[col];
+                        } else {
+                            copy[col] = val;
+                        }
+                        return copy;
+                    });
                 }}
                 stockFilter={stockFilter}
                 onStockFilterChange={setStockFilter}
@@ -1086,27 +1228,103 @@ const StockInHandReport: React.FC = () => {
                             >
                                 <CircularProgress />
                             </Box>
-                        ) : hasGrouping ? (
-                            <Table size="small">
-                                <TableHead sx={{ background: "#1E3A8A" }}>
+                        ) : (
+                            <Table size="small" stickyHeader>
+                                <TableHead
+                                    sx={{
+                                        background: "#1E3A8A",
+                                        position: "sticky",
+                                        top: 0,
+                                        zIndex: 3,
+                                        "& .MuiTableCell-root": {
+                                            bgcolor: "#1E3A8A !important",
+                                            color: "#fff !important",
+                                            fontWeight: 700,
+                                            fontSize: "0.82rem",
+                                            borderBottom: "1px solid #1E3A8A",
+                                        },
+                                        "& .MuiTableCell-stickyHeader": {
+                                            bgcolor: "#1E3A8A !important",
+                                            color: "#fff !important",
+                                        },
+                                    }}
+                                >
                                     <TableRow>
-                                        <TableCell />
-                                        <TableCell sx={{ color: "#fff" }}>Name</TableCell>
-                                        <TableCell sx={{ color: "#fff" }} align="right">
-                                            Items
+                                        <TableCell sx={{ color: "#fff", width: 44, fontWeight: 700, p: 1, bgcolor: "#1E3A8A" }} />
+                                        <TableCell sx={{ color: "#fff", fontWeight: 700, bgcolor: "#1E3A8A" }}>Name</TableCell>
+                                        <TableCell sx={{ color: "#fff", fontWeight: 700, width: 140, bgcolor: "#1E3A8A" }} align="right">
+                                            <SortableHeaderLabel
+                                                label="OB"
+                                                columnKey={qtyKeys.opening as string}
+                                                sortConfig={numSortConfig}
+                                                onSort={handleNumSort}
+                                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.opening as string)}
+                                            />
                                         </TableCell>
-                                        <TableCell sx={{ color: "#fff" }} align="right">
-                                            Balance
+                                        <TableCell sx={{ color: "#fff", fontWeight: 700, width: 140, bgcolor: "#1E3A8A" }} align="right">
+                                            <SortableHeaderLabel
+                                                label="IN"
+                                                columnKey={qtyKeys.in as string}
+                                                sortConfig={numSortConfig}
+                                                onSort={handleNumSort}
+                                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.in as string)}
+                                            />
+                                        </TableCell>
+                                        <TableCell sx={{ color: "#fff", fontWeight: 700, width: 140, bgcolor: "#1E3A8A" }} align="right">
+                                            <SortableHeaderLabel
+                                                label="OUT"
+                                                columnKey={qtyKeys.out as string}
+                                                sortConfig={numSortConfig}
+                                                onSort={handleNumSort}
+                                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.out as string)}
+                                            />
+                                        </TableCell>
+                                        <TableCell sx={{ color: "#fff", fontWeight: 700, width: 140, bgcolor: "#1E3A8A" }} align="right">
+                                            <SortableHeaderLabel
+                                                label="CLS"
+                                                columnKey={qtyKeys.closing as string}
+                                                sortConfig={numSortConfig}
+                                                onSort={handleNumSort}
+                                                onOpenFilter={(e) => openNumFilter(e, qtyKeys.closing as string)}
+                                            />
                                         </TableCell>
                                     </TableRow>
                                 </TableHead>
 
                                 <TableBody>
-                                    {renderGroups(finalGroups)}
+                                    {/* ✅ TOTAL ROW — directly below header */}
+                                    <TableRow sx={{ background: "#F1F5F9", fontWeight: 700, position: "sticky", top: 37, zIndex: 1 }}>
+                                        <TableCell width={44} />
+                                        <TableCell sx={{ fontWeight: 700, color: "#0F172A" }}>
+                                            TOTAL
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
+                                            {formatTotalQtyWithBag(totalOpening, numFilteredAndSortedRows, qtyKeys.opening)}
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
+                                            {formatTotalQtyWithBag(totalIn, numFilteredAndSortedRows, qtyKeys.in)}
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
+                                            {formatTotalQtyWithBag(totalOut, numFilteredAndSortedRows, qtyKeys.out)}
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
+                                            {formatTotalQtyWithBag(totalClosing, numFilteredAndSortedRows, qtyKeys.closing)}
+                                        </TableCell>
+                                    </TableRow>
+
+                                    {numFilteredAndSortedRows.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={6} align="center" sx={{ py: 4, color: "#64748B" }}>
+                                                No records found
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : hasGrouping ? (
+                                        renderGroups(finalGroups, 0)
+                                    ) : (
+                                        renderItemRows(paginated(numFilteredAndSortedRows), 0)
+                                    )}
                                 </TableBody>
                             </Table>
-                        ) : (
-                             renderItemTable(numFilteredAndSortedRows)
                         )}
                     </TableContainer>
 
@@ -1132,6 +1350,187 @@ const StockInHandReport: React.FC = () => {
                 onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
                 onClear={clearRangeFilter}
             />
+
+            {/* ================= BATCH DETAILS MODAL (EXPANDED SIDE) ================= */}
+            <Dialog
+                open={batchModalOpen}
+                onClose={() => setBatchModalOpen(false)}
+                maxWidth="lg"
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: 2.5,
+                        boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
+                        overflow: "hidden",
+                        maxWidth: "1100px",
+                        width: "95%",
+                    }
+                }}
+            >
+                <DialogTitle
+                    sx={{
+                        m: 0,
+                        px: 3,
+                        py: 2,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        bgcolor: "#1E3A8A",
+                        color: "#fff",
+                    }}
+                >
+                    <Box>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                            <LayersIcon sx={{ fontSize: 22, color: "#93C5FD" }} />
+                            <Typography variant="h6" component="div" fontWeight={700} sx={{ fontSize: "1.05rem" }}>
+                                Batch Stock Details
+                            </Typography>
+                            <Chip
+                                label={qtyMode === "actQty" ? "Actual Qty Mode" : "Normal Qty Mode"}
+                                size="small"
+                                sx={{
+                                    bgcolor: qtyMode === "actQty" ? "#0284C7" : "#0D9488",
+                                    color: "#fff",
+                                    fontWeight: 600,
+                                    fontSize: "0.7rem",
+                                    height: 22,
+                                }}
+                            />
+                        </Box>
+                        <Typography variant="caption" sx={{ opacity: 0.9, fontWeight: 500, display: "block" }}>
+                            <strong>Item:</strong> {selectedBatchItem?.stock_item_name || "—"} &nbsp;|&nbsp;{" "}
+                            {isExpanded && (
+                                <>
+                                    <strong>Godown:</strong> {selectedBatchItem?.Godown_Name || (batchData[0] as GodownStockBadgeItem)?.Godown_Name || "—"} &nbsp;|&nbsp;{" "}
+                                </>
+                            )}
+                            <strong>Period:</strong> {dayjs(fromDate).format("DD/MM/YYYY")} - {dayjs(toDate).format("DD/MM/YYYY")}
+                        </Typography>
+                    </Box>
+                    <IconButton
+                        aria-label="close"
+                        onClick={() => setBatchModalOpen(false)}
+                        sx={{
+                            color: "#fff",
+                            "&:hover": { bgcolor: "rgba(255,255,255,0.15)" }
+                        }}
+                    >
+                        <CloseIcon />
+                    </IconButton>
+                </DialogTitle>
+
+                <DialogContent dividers sx={{ p: 2.5, bgcolor: "#F8FAFC", overflowX: "hidden" }}>
+                    {batchLoading ? (
+                        <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" minHeight={200} gap={1.5}>
+                            <CircularProgress size={36} sx={{ color: "#1E3A8A" }} />
+                            <Typography variant="body2" sx={{ color: "#64748B", fontWeight: 500 }}>
+                                Loading batch details...
+                            </Typography>
+                        </Box>
+                    ) : batchData.length === 0 ? (
+                        <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" minHeight={180} gap={1}>
+                            <Typography variant="body1" sx={{ color: "#475569", fontWeight: 600 }}>
+                                {isExpanded
+                                    ? "No batch stock found for this item in this godown."
+                                    : "No batch stock found for this item."}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: "#94A3B8" }}>
+                                Try changing the date range in the Report Filter Drawer.
+                            </Typography>
+                        </Box>
+                    ) : (
+                        <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid #CBD5E1", borderRadius: 2, maxHeight: 460, overflowX: "hidden" }}>
+                            <Table size="small" stickyHeader>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, width: 60 }}>
+                                            S.No
+                                        </TableCell>
+                                        <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600 }}>
+                                            Batch No
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600 }}>
+                                            OB
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600 }}>
+                                            IN
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600 }}>
+                                            OUT
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600 }}>
+                                            CLS
+                                        </TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {/* TOTAL ROW */}
+                                    <TableRow sx={{ background: "#F1F5F9", fontWeight: 700, position: "sticky", top: 37, zIndex: 1 }}>
+                                        <TableCell colSpan={2} sx={{ fontWeight: 700, color: "#0F172A" }}>
+                                            TOTAL ({batchData.length} Batches)
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
+                                            {formatBatchQtyWithBag(
+                                                batchData.reduce((s, b) => s + getBatchQty(b, "OB"), 0),
+                                                selectedBatchItem
+                                            )}
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
+                                            {formatBatchQtyWithBag(
+                                                batchData.reduce((s, b) => s + getBatchQty(b, "IN"), 0),
+                                                selectedBatchItem
+                                            )}
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
+                                            {formatBatchQtyWithBag(
+                                                batchData.reduce((s, b) => s + getBatchQty(b, "OUT"), 0),
+                                                selectedBatchItem
+                                            )}
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
+                                            {formatBatchQtyWithBag(
+                                                batchData.reduce((s, b) => s + getBatchQty(b, "CLS"), 0),
+                                                selectedBatchItem
+                                            )}
+                                        </TableCell>
+                                    </TableRow>
+
+                                    {/* BATCH ROWS */}
+                                    {batchData.map((batch, idx) => (
+                                        <TableRow
+                                            key={idx}
+                                            hover
+                                            sx={{
+                                                "&:nth-of-type(even)": { backgroundColor: "#FAFAFA" },
+                                                "&:last-child td, &:last-child th": { border: 0 }
+                                            }}
+                                        >
+                                            <TableCell sx={{ color: "#64748B", fontWeight: 500 }}>
+                                                {idx + 1}
+                                            </TableCell>
+                                            <TableCell sx={{ fontWeight: 600, color: "#1E293B" }}>
+                                                {batch.Batch_No || "—"}
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ fontWeight: 500 }}>
+                                                {formatBatchQtyWithBag(getBatchQty(batch, "OB"), selectedBatchItem)}
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ fontWeight: 500, color: getBatchQty(batch, "IN") > 0 ? "#16A34A" : "inherit" }}>
+                                                {formatBatchQtyWithBag(getBatchQty(batch, "IN"), selectedBatchItem)}
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ fontWeight: 500, color: getBatchQty(batch, "OUT") > 0 ? "#DC2626" : "inherit" }}>
+                                                {formatBatchQtyWithBag(getBatchQty(batch, "OUT"), selectedBatchItem)}
+                                            </TableCell>
+                                            <TableCell align="right" sx={{ fontWeight: 600, color: "#1D4ED8" }}>
+                                                {formatBatchQtyWithBag(getBatchQty(batch, "CLS"), selectedBatchItem)}
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    )}
+                </DialogContent>
+            </Dialog>
         </>
     );
 };

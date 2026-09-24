@@ -986,14 +986,69 @@ const OnlineSalesReportLOL: React.FC = () => {
     const buildExportRows = () => {
         const rows: any[] = [];
 
+        // Identify non-numeric / classification columns that precede the detail / numeric columns
+        const firstNumericIndex = enabledColumns.findIndex(
+            c => c.isNumeric || NUMERIC_KEYS.includes(c.key)
+        );
+        const leadingCols =
+            firstNumericIndex === -1
+                ? enabledColumns
+                : enabledColumns.slice(0, firstNumericIndex);
+
+        // Classification columns are all non-numeric leading columns except the last non-numeric column
+        // (which serves as the line-item / detail description, e.g. Product Name)
+        const classificationCols =
+            leadingCols.length > 1
+                ? leadingCols.slice(0, leadingCols.length - 1)
+                : [];
+
+        const formatCellValue = (row: any, col: ColumnConfig) => {
+            if (col.key === "Ledger_Date") {
+                return row[col.key] && row[col.key] !== "-" && !String(row[col.key]).includes("/")
+                    ? dayjs(row[col.key]).format("DD/MM/YYYY")
+                    : (row[col.key] ?? "");
+            }
+            if (col.key === "Created_on") {
+                return formatCreatedOn(row[col.key]);
+            }
+            return row[col.key] ?? "";
+        };
+
+        const createDetailRow = (row: any, prevRow: any) => {
+            const detail: any = {};
+            let parentChanged = false;
+
+            classificationCols.forEach(col => {
+                const currVal = formatCellValue(row, col);
+                const prevVal = prevRow ? formatCellValue(prevRow, col) : null;
+
+                if (!prevRow || parentChanged || String(currVal).trim() !== String(prevVal).trim()) {
+                    detail[col.label] = currVal;
+                    parentChanged = true;
+                } else {
+                    detail[col.label] = "";
+                }
+            });
+
+            for (let j = classificationCols.length; j < enabledColumns.length; j++) {
+                const col = enabledColumns[j];
+                detail[col.label] = formatCellValue(row, col);
+            }
+
+            return detail;
+        };
+
         const walk = (
             list: any[],
             level = 0
         ) => {
+            let prevDetailRow: any = null;
+
             for (const row of list) {
 
                 // GROUP ROW
                 if (row.__group) {
+                    prevDetailRow = null;
 
                     const exportGroup: any = {};
 
@@ -1045,18 +1100,8 @@ const OnlineSalesReportLOL: React.FC = () => {
                 }
 
                 // DETAIL ROW
-                const detail: any = {};
-
-                enabledColumns.forEach(col => {
-
-                    detail[col.label] =
-                        col.key === "Ledger_Date"
-                            ? dayjs(row[col.key]).format("DD/MM/YYYY")
-                            : col.key === "Created_on"
-                                ? formatCreatedOn(row[col.key])
-                                : row[col.key];
-                });
-
+                const detail = createDetailRow(row, prevDetailRow);
+                prevDetailRow = row;
                 rows.push(detail);
             }
         };
@@ -1065,19 +1110,10 @@ const OnlineSalesReportLOL: React.FC = () => {
             walk(groupedRows);
         }
         else {
+            let prevRow: any = null;
             sortedRows.forEach(row => {
-
-                const detail: any = {};
-
-                enabledColumns.forEach(col => {
-                    detail[col.label] =
-                        col.key === "Ledger_Date"
-                            ? dayjs(row[col.key]).format("DD/MM/YYYY")
-                            : col.key === "Created_on"
-                                ? formatCreatedOn(row[col.key])
-                                : row[col.key];
-                });
-
+                const detail = createDetailRow(row, prevRow);
+                prevRow = row;
                 rows.push(detail);
             });
         }

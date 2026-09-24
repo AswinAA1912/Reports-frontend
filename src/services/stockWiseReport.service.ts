@@ -172,3 +172,69 @@ export const godownItemTransactionService = {
         ),
 };
 
+/* ---------------- GODOWN STOCK BADGE (BATCH) API ---------------- */
+
+export interface GodownStockBadgeItem {
+    Godown_Id: string | number;
+    Product_Id: string | number;
+    Batch_No: string;
+    OB_Act_Qty: number | string;
+    OB_Bal_Qty: number | string;
+    IN_Act_Qty: number | string;
+    IN_Qty: number | string;
+    OUT_Act_Qty: number | string;
+    OUT_Qty: number | string;
+    Act_Bal_Qty: number | string;
+    Bal_Qty: number | string;
+    stock_item_name: string;
+    Godown_Name: string;
+    [key: string]: any;
+}
+
+export const godownStockBadgeService = {
+    getGodownStockBadge: (params: {
+        Fromdate: string;
+        Todate: string;
+        Godown_Id: string | number;
+        Item_Id: string | number;
+    }) =>
+        axios.get<{ success: boolean; data: GodownStockBadgeItem[]; message?: string }>(
+            `${getBaseURL()}api/reports/externalAPI/godownStockBadge`,
+            { params }
+        ),
+};
+
+/* ---------------- ITEMWISE STOCK BADGE (BATCH) API ---------------- */
+
+export interface ItemwiseStockBadgeItem {
+    Product_Id: string | number;
+    Batch_No: string | null;
+    OB_Act_Qty: number | string;
+    OB_Bal_Qty: number | string;
+    IN_Act_Qty: number | string;
+    IN_Qty: number | string;
+    OUT_Act_Qty: number | string;
+    OUT_Qty: number | string;
+    Act_Bal_Qty: number | string;
+    Bal_Qty: number | string;
+    stock_item_name: string;
+    [key: string]: any;
+}
+
+export const itemwiseStockBadgeService = {
+    getItemwiseStockBadge: (params: {
+        Fromdate: string;
+        Todate: string;
+        Item_Name?: string;
+        stock_item_name?: string;
+        Product_Id?: string | number;
+        Item_Id?: string | number;
+        company_id?: string | number;
+    }) =>
+        axios.get<{ success: boolean; data: ItemwiseStockBadgeItem[]; message?: string }>(
+            `${getBaseURL()}api/reports/externalAPI/itemwiseBadge`,
+            { params }
+        ),
+};
+
+

@@ -120,7 +120,7 @@ type ColumnConfig = {
 };
 
 type FiltersMap = {
-    Date: { from: string; to: string };
+    Date: { to: string; from?: string };
     columnFilters: Record<string, string[] | undefined>;
 };
 
@@ -133,11 +133,11 @@ const buildAbstractData = (rows: any[]) => {
         if (!map[row.invoice_no]) {
             map[row.invoice_no] = {
                 ...row,
-                itemCount: 0,
+                itemCount: row.itemCount ?? row.Item_Count ?? 0,
             };
+        } else if (!row.itemCount && !row.Item_Count) {
+            map[row.invoice_no].itemCount += 1;
         }
-
-        map[row.invoice_no].itemCount += 1;
     });
 
     return Object.values(map);
@@ -251,7 +251,7 @@ const PendingSaleOrder: React.FC = () => {
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
     /* ===== FILTERS ===== */
     const [filters, setFilters] = useState<FiltersMap>({
-        Date: { from: "", to: today },
+        Date: { to: today },
         columnFilters: {},
     });
     /* ===== GROUPING STATE ===== */
@@ -282,7 +282,7 @@ const PendingSaleOrder: React.FC = () => {
     });
 
     const [tempDateFilter, setTempDateFilter] = useState({
-        from: today,
+        from: "",
         to: today,
     });
 
@@ -379,7 +379,6 @@ const PendingSaleOrder: React.FC = () => {
 
     }, [
         toggleMode,
-        filters.Date.from,
         filters.Date.to,
         templateConfig,
         abstractLoaded,
@@ -391,7 +390,6 @@ const PendingSaleOrder: React.FC = () => {
         setAbstractLoaded(false);
         setExpandedLoaded(false);
     }, [
-        filters.Date.from,
         filters.Date.to,
         templateConfig
     ]);
@@ -430,35 +428,23 @@ const PendingSaleOrder: React.FC = () => {
 
     const filteredRows = useMemo(() => {
         return rawRows.filter(row => {
-            // Filter by Cancelled status
+            // Filter by Cancelled / Pending status
             const statusCancel = String(row.Status_Cancel ?? "").trim().toLowerCase();
-            const isCancelled = statusCancel === "cancelled";
+            const convertStatus = String(row.Convert_Status ?? "").trim().toLowerCase();
+            const isCancelled = statusCancel === "cancelled" || convertStatus === "cancelled";
+
             if (showCancelledOnly) {
+                // Cancelled List: show records that are cancelled
                 if (!isCancelled) return false;
             } else {
+                // Pending List: must not be cancelled, and convert status must be pending (if provided)
                 if (isCancelled) return false;
+                if (convertStatus && convertStatus !== "pending") return false;
             }
 
-            // Filter by Date Range (Ledger_Date) when applied via header filter
-            if (filters.Date.from && row.Ledger_Date) {
-                const rowDate = dayjs(row.Ledger_Date);
-                const fromDate = dayjs(filters.Date.from);
-                const toDate = dayjs(filters.Date.to);
-
-                if (fromDate.isValid() && toDate.isValid()) {
-                    const rowDateStr = rowDate.format("YYYY-MM-DD");
-                    const fromDateStr = fromDate.format("YYYY-MM-DD");
-                    const toDateStr = toDate.format("YYYY-MM-DD");
-
-                    if (rowDateStr < fromDateStr || rowDateStr > toDateStr) {
-                        return false;
-                    }
-                }
-            }
-
-            // ✅ COLUMN FILTERS (SKIP DATE COLUMN)
+            // ✅ COLUMN FILTERS (Skip Ledger_Date since fromDate is handled by SP and toDate is passed to API)
             for (const [key, values] of Object.entries(filters.columnFilters)) {
-                if (key === "Ledger_Date") continue; // 🚨 IMPORTANT
+                if (key === "Ledger_Date") continue;
 
                 if (values === undefined) continue;
                 const rowValue = String(row[key] ?? "");
@@ -467,7 +453,7 @@ const PendingSaleOrder: React.FC = () => {
 
             return true;
         });
-    }, [rawRows, filters, showCancelledOnly]);
+    }, [rawRows, filters.columnFilters, showCancelledOnly]);
 
     const {
         sortConfig: numSortConfig,
@@ -1111,8 +1097,13 @@ const PendingSaleOrder: React.FC = () => {
                         setToggleMode("Abstract");
 
                         setFilters({
-                            Date: { from: todayDate, to: todayDate },
+                            Date: { to: todayDate },
                             columnFilters: {},
+                        });
+
+                        setTempDateFilter({
+                            from: "",
+                            to: todayDate,
                         });
 
                         setAbstractGrouping([]);
@@ -1256,6 +1247,12 @@ const PendingSaleOrder: React.FC = () => {
                                                     openNumFilter(e, c.key);
                                                 } else {
                                                     setActiveHeader(c.key);
+                                                    if (c.key === "Ledger_Date") {
+                                                        setTempDateFilter({
+                                                            from: filters.Date.from || "",
+                                                            to: filters.Date.to || today,
+                                                        });
+                                                    }
                                                     setFilterAnchor(e.currentTarget);
                                                 }
                                             }}
@@ -1356,7 +1353,6 @@ const PendingSaleOrder: React.FC = () => {
                     setFilters((prev) => ({
                         ...prev,
                         Date: {
-                            from: tempDateFilter.from,
                             to: tempDateFilter.to,
                         },
                     }));

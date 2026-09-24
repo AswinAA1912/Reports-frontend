@@ -13,17 +13,10 @@ import {
     TableRow,
     Paper,
     CircularProgress,
-    Dialog,
-    DialogTitle,
-    DialogContent,
     Typography,
-    Tooltip,
-    Chip,
 } from "@mui/material";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
-import LayersIcon from "@mui/icons-material/Layers";
-import CloseIcon from "@mui/icons-material/Close";
 import dayjs from "dayjs";
 import AppLayout, { useToggleMode } from "../../Layout/appLayout";
 import PageHeader from "../../Layout/PageHeader";
@@ -67,11 +60,10 @@ const StockInHandReport: React.FC = () => {
     const [page, setPage] = useState(1);
     const [rowsPerPage, setRowsPerPage] = useState(100);
 
-    /* ===== BATCH MODAL STATES ===== */
-    const [batchModalOpen, setBatchModalOpen] = useState(false);
-    const [batchLoading, setBatchLoading] = useState(false);
-    const [batchData, setBatchData] = useState<(GodownStockBadgeItem | ItemwiseStockBadgeItem)[]>([]);
-    const [selectedBatchItem, setSelectedBatchItem] = useState<stockWiseReport | null>(null);
+    /* ===== BATCH ACCORDION STATES ===== */
+    const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+    const [batchDataMap, setBatchDataMap] = useState<Record<string, (GodownStockBadgeItem | ItemwiseStockBadgeItem)[]>>({});
+    const [batchLoadingMap, setBatchLoadingMap] = useState<Record<string, boolean>>({});
 
     /* ===== FILTER STATES ===== */
 
@@ -348,6 +340,9 @@ const StockInHandReport: React.FC = () => {
             }
 
             setExpanded({});
+            setExpandedItems({});
+            setBatchDataMap({});
+            setBatchLoadingMap({});
             setPage(1);
 
         } catch (err) {
@@ -366,6 +361,9 @@ const StockInHandReport: React.FC = () => {
 
     useEffect(() => {
         setExpanded({});
+        setExpandedItems({});
+        setBatchDataMap({});
+        setBatchLoadingMap({});
         setPage(1);
     }, [toggleMode]);
 
@@ -636,7 +634,7 @@ const StockInHandReport: React.FC = () => {
         }));
     }, [numFilteredAndSortedRows, isExpanded, groupConfig]);
 
-    const hasGrouping = groupConfig.length > 0;
+    const hasGrouping = isExpanded ? finalGroups.length > 0 : groupConfig.length > 0;
 
     const formatQty = (value: any) =>
         Number(value || 0).toFixed(2);
@@ -701,29 +699,39 @@ const StockInHandReport: React.FC = () => {
         return `${q.toFixed(2)} (${bags})`;
     };
 
-    /* ================= BATCH (GODOWN STOCK BADGE) HELPERS ================= */
+    /* ================= BATCH (STOCK BADGE) HELPERS ================= */
 
-    const handleOpenBatchModal = async (item: stockWiseReport) => {
-        setSelectedBatchItem(item);
-        setBatchModalOpen(true);
-        setBatchLoading(true);
-        setBatchData([]);
+    const getGodownIdForItem = (item: stockWiseReport) => {
+        const godownFilter = (filterLevels[1] || []).find(
+            (f: any) =>
+                f.columnName === "Godown_Id" ||
+                f.columnName === "Godown_Name"
+        );
+        const rawGodownId =
+            item.Godown_Id ||
+            selectedFilters["Godown_Id"] ||
+            selectedFilters["Godown_Name"] ||
+            (godownFilter ? selectedFilters[godownFilter.columnName] : undefined) ||
+            1;
+
+        return Array.isArray(rawGodownId) ? rawGodownId[0] : rawGodownId;
+    };
+
+    const getItemKey = (item: stockWiseReport, index?: number) => {
+        const id = item.Product_Id || item.Item_Id || item.stock_item_name || (index !== undefined ? index : 0);
+        if (isExpanded) {
+            const gid = getGodownIdForItem(item);
+            return `exp_${gid}_${id}`;
+        }
+        return `abs_${id}`;
+    };
+
+    const fetchBatchForItem = async (item: stockWiseReport, itemKey: string) => {
+        setBatchLoadingMap((prev) => ({ ...prev, [itemKey]: true }));
 
         try {
             if (isExpanded) {
-                const godownFilter = (filterLevels[1] || []).find(
-                    (f: any) =>
-                        f.columnName === "Godown_Id" ||
-                        f.columnName === "Godown_Name"
-                );
-                const rawGodownId =
-                    item.Godown_Id ||
-                    selectedFilters["Godown_Id"] ||
-                    selectedFilters["Godown_Name"] ||
-                    (godownFilter ? selectedFilters[godownFilter.columnName] : undefined) ||
-                    1;
-
-                const godownId = Array.isArray(rawGodownId) ? rawGodownId[0] : rawGodownId;
+                const godownId = getGodownIdForItem(item);
                 const itemId = item.Product_Id || item.Item_Id || "";
 
                 const res = await godownStockBadgeService.getGodownStockBadge({
@@ -733,7 +741,7 @@ const StockInHandReport: React.FC = () => {
                     Item_Id: itemId,
                 });
 
-                setBatchData(res.data?.data || []);
+                setBatchDataMap((prev) => ({ ...prev, [itemKey]: res.data?.data || [] }));
             } else {
                 const res = await itemwiseStockBadgeService.getItemwiseStockBadge({
                     Fromdate: fromDate,
@@ -758,14 +766,30 @@ const StockInHandReport: React.FC = () => {
                     return false;
                 });
 
-                setBatchData(filtered);
+                setBatchDataMap((prev) => ({ ...prev, [itemKey]: filtered }));
             }
         } catch (err) {
             console.error("Failed to load batch data:", err);
-            setBatchData([]);
+            setBatchDataMap((prev) => ({ ...prev, [itemKey]: [] }));
         } finally {
-            setBatchLoading(false);
+            setBatchLoadingMap((prev) => ({ ...prev, [itemKey]: false }));
         }
+    };
+
+    const toggleItemAccordion = (item: stockWiseReport, itemKey: string) => {
+        setExpandedItems((prev) => {
+            const isCurrentlyOpen = Boolean(prev[itemKey]);
+            const nextState = !isCurrentlyOpen;
+
+            if (nextState && !batchDataMap[itemKey]) {
+                fetchBatchForItem(item, itemKey);
+            }
+
+            return {
+                ...prev,
+                [itemKey]: nextState,
+            };
+        });
     };
 
     const getBatchQty = (item: GodownStockBadgeItem | ItemwiseStockBadgeItem, type: "OB" | "IN" | "OUT" | "CLS") => {
@@ -894,81 +918,222 @@ const StockInHandReport: React.FC = () => {
     /* ================= ITEM ROWS ================= */
 
     const renderItemRows = (items: stockWiseReport[], depth = 0) =>
-        items.map((r, i) => (
-            <TableRow
-                key={`${r.Product_Id || r.Item_Id || i}-${i}`}
-                hover
-                sx={{
-                    background: "#FFFFFF",
-                    "&:hover": { bgcolor: "#EFF6FF" },
-                    borderBottom: "1px solid #F1F5F9",
-                }}
-            >
-                <TableCell width={44} sx={{ py: 0.6, textAlign: "center", color: "#94A3B8", fontSize: "0.75rem" }}>
-                    {i + 1}
-                </TableCell>
+        items.map((r, i) => {
+            const itemKey = getItemKey(r, i);
+            const isItemOpen = Boolean(expandedItems[itemKey]);
+            const batches = batchDataMap[itemKey] || [];
+            const isBatchLoading = Boolean(batchLoadingMap[itemKey]);
+            const itemPl = depth === 0 ? 0.8 : 0.8 + (depth - 1) * 1.2;
+            const batchPl = itemPl + 1.2;
 
-                <TableCell sx={{ py: 0.6 }}>
-                    <Box sx={{ display: "flex", alignItems: "center", pl: depth * 2.5 + (depth > 0 ? 1 : 0), gap: 0.8, flexWrap: "wrap" }}>
-                        <span
-                            style={{ cursor: "pointer", color: "#1D4ED8", fontWeight: 600 }}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleTransactionClick(
-                                    r,
-                                    isExpanded ? "EXPANDED" : "ABSTRACT"
-                                );
-                            }}
-                            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
-                            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
-                        >
-                            {r.stock_item_name}
-                        </span>
+            return (
+                <React.Fragment key={`${r.Product_Id || r.Item_Id || i}-${i}`}>
+                    <TableRow
+                        hover
+                        sx={{
+                            background: isItemOpen ? "#F8FAFC" : "#FFFFFF",
+                            "&:hover": { bgcolor: "#EFF6FF" },
+                            borderBottom: isItemOpen ? "none" : "1px solid #F1F5F9",
+                            cursor: "pointer",
+                        }}
+                        onClick={() => toggleItemAccordion(r, itemKey)}
+                    >
+                        <TableCell width={44} sx={{ py: 0.6, textAlign: "center", color: "#94A3B8", fontSize: "0.75rem" }}>
+                            {i + 1}
+                        </TableCell>
 
-                        <Tooltip title="View Batch Stock Details" arrow placement="top">
-                            <IconButton
-                                size="small"
-                                sx={{
-                                    p: "3px",
-                                    color: "#1E3A8A",
-                                    backgroundColor: "#EFF6FF",
-                                    border: "1px solid #BFDBFE",
-                                    borderRadius: "6px",
-                                    transition: "all 0.15s ease-in-out",
-                                    "&:hover": {
-                                        backgroundColor: "#DBEAFE",
-                                        borderColor: "#93C5FD",
-                                        transform: "scale(1.08)",
-                                    },
-                                }}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenBatchModal(r);
-                                }}
+                        <TableCell sx={{ py: 0.6 }}>
+                            <Box sx={{ display: "flex", alignItems: "center", pl: itemPl, gap: 0.6, flexWrap: "wrap" }}>
+                                <IconButton
+                                    size="small"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleItemAccordion(r, itemKey);
+                                    }}
+                                    sx={{
+                                        p: 0.25,
+                                        color: isItemOpen ? "#1E3A8A" : "#64748B",
+                                        borderRadius: "4px",
+                                        "&:hover": { bgcolor: "#DBEAFE", color: "#1E3A8A" }
+                                    }}
+                                >
+                                    {isItemOpen ? (
+                                        <KeyboardArrowDownIcon sx={{ fontSize: 17 }} />
+                                    ) : (
+                                        <KeyboardArrowRightIcon sx={{ fontSize: 17 }} />
+                                    )}
+                                </IconButton>
+
+                                <span
+                                    style={{ cursor: "pointer", color: "#1D4ED8", fontWeight: 600 }}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleTransactionClick(
+                                            r,
+                                            isExpanded ? "EXPANDED" : "ABSTRACT"
+                                        );
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                                >
+                                    {r.stock_item_name}
+                                </span>
+                            </Box>
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ py: 0.6 }}>
+                            {formatQtyWithBag(r[qtyKeys.opening] ?? 0, r)}
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ py: 0.6 }}>
+                            {formatQtyWithBag(r[qtyKeys.in] ?? 0, r)}
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ py: 0.6 }}>
+                            {formatQtyWithBag(r[qtyKeys.out] ?? 0, r)}
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ py: 0.6 }}>
+                            {formatQtyWithBag(r[qtyKeys.closing] ?? 0, r)}
+                        </TableCell>
+                    </TableRow>
+
+                    {/* BATCH ROWS (INLINE ALIGNED WITH MAIN TABLE) */}
+                    {isItemOpen && (
+                        isBatchLoading ? (
+                            <TableRow
+                                key={`batch-loading-${itemKey}`}
+                                sx={{ background: "#F8FAFC", borderBottom: "1px solid #F1F5F9" }}
                             >
-                                <LayersIcon sx={{ fontSize: 16 }} />
-                            </IconButton>
-                        </Tooltip>
-                    </Box>
-                </TableCell>
+                                <TableCell width={44} sx={{ py: 0.6 }} />
+                                <TableCell colSpan={5} sx={{ py: 0.6 }}>
+                                    <Box sx={{ display: "flex", alignItems: "center", pl: batchPl, gap: 0.6 }}>
+                                        <Box sx={{ width: 21, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                            <CircularProgress size={16} sx={{ color: "#1E3A8A" }} />
+                                        </Box>
+                                        <Typography variant="body2" sx={{ color: "#64748B", fontSize: "0.75rem", fontWeight: 500 }}>
+                                            Loading batch details...
+                                        </Typography>
+                                    </Box>
+                                </TableCell>
+                            </TableRow>
+                        ) : batches.length === 0 ? (
+                            <TableRow
+                                key={`batch-empty-${itemKey}`}
+                                sx={{ background: "#F8FAFC", borderBottom: "1px solid #F1F5F9" }}
+                            >
+                                <TableCell width={44} sx={{ py: 0.6 }} />
+                                <TableCell colSpan={5} sx={{ py: 0.6 }}>
+                                    <Box sx={{ display: "flex", alignItems: "center", pl: batchPl, gap: 0.6 }}>
+                                        <Box sx={{ width: 21, flexShrink: 0 }} />
+                                        <Typography variant="body2" sx={{ color: "#64748B", fontSize: "0.75rem", fontStyle: "italic" }}>
+                                            {isExpanded
+                                                ? "No batch stock found for this item in this godown."
+                                                : "No batch stock found for this item."}
+                                        </Typography>
+                                    </Box>
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            batches.map((batch, idx) => (
+                                <TableRow
+                                    key={`batch-${itemKey}-${batch.Batch_No || idx}-${idx}`}
+                                    hover
+                                    sx={{
+                                        background: "#F8FAFC",
+                                        "&:hover": { bgcolor: "#EFF6FF" },
+                                        borderBottom: "1px solid #F1F5F9",
+                                    }}
+                                >
+                                    <TableCell
+                                        width={44}
+                                        sx={{
+                                            py: 0.5,
+                                            textAlign: "center",
+                                            color: "#94A3B8",
+                                            fontSize: "0.7rem",
+                                        }}
+                                    />
 
-                <TableCell align="right" sx={{ py: 0.6 }}>
-                    {formatQtyWithBag(r[qtyKeys.opening] ?? 0, r)}
-                </TableCell>
+                                    <TableCell sx={{ py: 0.5 }}>
+                                        <Box
+                                            sx={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                pl: batchPl,
+                                                gap: 0.6,
+                                            }}
+                                        >
+                                            <Box
+                                                sx={{
+                                                    width: 21,
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                    flexShrink: 0,
+                                                }}
+                                            >
+                                                <Box
+                                                    sx={{
+                                                        width: 5,
+                                                        height: 5,
+                                                        borderRadius: "50%",
+                                                        bgcolor: "#64748B",
+                                                    }}
+                                                />
+                                            </Box>
+                                            <Typography component="span" sx={{ fontSize: "0.76rem", color: "#475569" }}>
+                                                Batch: <strong style={{ color: "#0F172A", fontWeight: 600 }}>{batch.Batch_No || "—"}</strong>
+                                            </Typography>
+                                        </Box>
+                                    </TableCell>
 
-                <TableCell align="right" sx={{ py: 0.6 }}>
-                    {formatQtyWithBag(r[qtyKeys.in] ?? 0, r)}
-                </TableCell>
+                                    <TableCell align="right" sx={{ py: 0.5, fontSize: "0.75rem", color: "#334155" }}>
+                                        {formatBatchQtyWithBag(getBatchQty(batch, "OB"), r)}
+                                    </TableCell>
 
-                <TableCell align="right" sx={{ py: 0.6 }}>
-                    {formatQtyWithBag(r[qtyKeys.out] ?? 0, r)}
-                </TableCell>
+                                    <TableCell
+                                        align="right"
+                                        sx={{
+                                            py: 0.5,
+                                            fontSize: "0.75rem",
+                                            color: getBatchQty(batch, "IN") > 0 ? "#16A34A" : "#334155",
+                                            fontWeight: getBatchQty(batch, "IN") > 0 ? 600 : 400,
+                                        }}
+                                    >
+                                        {formatBatchQtyWithBag(getBatchQty(batch, "IN"), r)}
+                                    </TableCell>
 
-                <TableCell align="right" sx={{ py: 0.6 }}>
-                    {formatQtyWithBag(r[qtyKeys.closing] ?? 0, r)}
-                </TableCell>
-            </TableRow>
-        ));
+                                    <TableCell
+                                        align="right"
+                                        sx={{
+                                            py: 0.5,
+                                            fontSize: "0.75rem",
+                                            color: getBatchQty(batch, "OUT") > 0 ? "#DC2626" : "#334155",
+                                            fontWeight: getBatchQty(batch, "OUT") > 0 ? 600 : 400,
+                                        }}
+                                    >
+                                        {formatBatchQtyWithBag(getBatchQty(batch, "OUT"), r)}
+                                    </TableCell>
+
+                                    <TableCell
+                                        align="right"
+                                        sx={{
+                                            py: 0.5,
+                                            fontSize: "0.75rem",
+                                            fontWeight: 600,
+                                            color: "#1D4ED8",
+                                        }}
+                                    >
+                                        {formatBatchQtyWithBag(getBatchQty(batch, "CLS"), r)}
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )
+                    )}
+                </React.Fragment>
+            );
+        });
 
 
     /* ================= GROUP ROWS ================= */
@@ -985,6 +1150,8 @@ const StockInHandReport: React.FC = () => {
             const grpIn = sum(g.rows, qtyKeys.in);
             const grpOut = sum(g.rows, qtyKeys.out);
             const grpClosing = sum(g.rows, qtyKeys.closing);
+
+            const groupPl = depth === 0 ? 0 : 0.8 + (depth - 1) * 1.2;
 
             return (
                 <React.Fragment key={id}>
@@ -1012,7 +1179,7 @@ const StockInHandReport: React.FC = () => {
                         </TableCell>
 
                         <TableCell sx={{ py: 0.8 }}>
-                            <Box sx={{ display: "flex", alignItems: "center", pl: depth * 2.5, gap: 0.6 }}>
+                            <Box sx={{ display: "flex", alignItems: "center", pl: groupPl, gap: 0.6 }}>
                                 {depth > 0 && (
                                     <IconButton
                                         size="small"
@@ -1020,12 +1187,17 @@ const StockInHandReport: React.FC = () => {
                                             e.stopPropagation();
                                             setExpanded((p) => ({ ...p, [id]: !p[id] }));
                                         }}
-                                        sx={{ p: 0.5 }}
+                                        sx={{
+                                            p: 0.25,
+                                            color: open ? "#1E3A8A" : "#64748B",
+                                            borderRadius: "4px",
+                                            "&:hover": { bgcolor: "#E2E8F0" }
+                                        }}
                                     >
-                                        {open ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
+                                        {open ? <KeyboardArrowDownIcon sx={{ fontSize: 17 }} /> : <KeyboardArrowRightIcon sx={{ fontSize: 17 }} />}
                                     </IconButton>
                                 )}
-                                <span style={{ fontWeight: depth === 0 ? 700 : 600, color: "#1E293B" }}>
+                                <span style={{ fontWeight: depth === 0 ? 700 : depth === 1 ? 600 : 500, color: depth === 0 ? "#0F172A" : depth === 1 ? "#1E293B" : "#334155" }}>
                                     {g.key}
                                 </span>
                                 <span style={{ color: "#64748B", fontWeight: 600, fontSize: "0.82rem" }}>
@@ -1351,186 +1523,6 @@ const StockInHandReport: React.FC = () => {
                 onClear={clearRangeFilter}
             />
 
-            {/* ================= BATCH DETAILS MODAL (EXPANDED SIDE) ================= */}
-            <Dialog
-                open={batchModalOpen}
-                onClose={() => setBatchModalOpen(false)}
-                maxWidth="lg"
-                fullWidth
-                PaperProps={{
-                    sx: {
-                        borderRadius: 2.5,
-                        boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
-                        overflow: "hidden",
-                        maxWidth: "1100px",
-                        width: "95%",
-                    }
-                }}
-            >
-                <DialogTitle
-                    sx={{
-                        m: 0,
-                        px: 3,
-                        py: 2,
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        bgcolor: "#1E3A8A",
-                        color: "#fff",
-                    }}
-                >
-                    <Box>
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
-                            <LayersIcon sx={{ fontSize: 22, color: "#93C5FD" }} />
-                            <Typography variant="h6" component="div" fontWeight={700} sx={{ fontSize: "1.05rem" }}>
-                                Batch Stock Details
-                            </Typography>
-                            <Chip
-                                label={qtyMode === "actQty" ? "Actual Qty Mode" : "Normal Qty Mode"}
-                                size="small"
-                                sx={{
-                                    bgcolor: qtyMode === "actQty" ? "#0284C7" : "#0D9488",
-                                    color: "#fff",
-                                    fontWeight: 600,
-                                    fontSize: "0.7rem",
-                                    height: 22,
-                                }}
-                            />
-                        </Box>
-                        <Typography variant="caption" sx={{ opacity: 0.9, fontWeight: 500, display: "block" }}>
-                            <strong>Item:</strong> {selectedBatchItem?.stock_item_name || "—"} &nbsp;|&nbsp;{" "}
-                            {isExpanded && (
-                                <>
-                                    <strong>Godown:</strong> {selectedBatchItem?.Godown_Name || (batchData[0] as GodownStockBadgeItem)?.Godown_Name || "—"} &nbsp;|&nbsp;{" "}
-                                </>
-                            )}
-                            <strong>Period:</strong> {dayjs(fromDate).format("DD/MM/YYYY")} - {dayjs(toDate).format("DD/MM/YYYY")}
-                        </Typography>
-                    </Box>
-                    <IconButton
-                        aria-label="close"
-                        onClick={() => setBatchModalOpen(false)}
-                        sx={{
-                            color: "#fff",
-                            "&:hover": { bgcolor: "rgba(255,255,255,0.15)" }
-                        }}
-                    >
-                        <CloseIcon />
-                    </IconButton>
-                </DialogTitle>
-
-                <DialogContent dividers sx={{ p: 2.5, bgcolor: "#F8FAFC", overflowX: "hidden" }}>
-                    {batchLoading ? (
-                        <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" minHeight={200} gap={1.5}>
-                            <CircularProgress size={36} sx={{ color: "#1E3A8A" }} />
-                            <Typography variant="body2" sx={{ color: "#64748B", fontWeight: 500 }}>
-                                Loading batch details...
-                            </Typography>
-                        </Box>
-                    ) : batchData.length === 0 ? (
-                        <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" minHeight={180} gap={1}>
-                            <Typography variant="body1" sx={{ color: "#475569", fontWeight: 600 }}>
-                                {isExpanded
-                                    ? "No batch stock found for this item in this godown."
-                                    : "No batch stock found for this item."}
-                            </Typography>
-                            <Typography variant="caption" sx={{ color: "#94A3B8" }}>
-                                Try changing the date range in the Report Filter Drawer.
-                            </Typography>
-                        </Box>
-                    ) : (
-                        <TableContainer component={Paper} elevation={0} sx={{ border: "1px solid #CBD5E1", borderRadius: 2, maxHeight: 460, overflowX: "hidden" }}>
-                            <Table size="small" stickyHeader>
-                                <TableHead>
-                                    <TableRow>
-                                        <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600, width: 60 }}>
-                                            S.No
-                                        </TableCell>
-                                        <TableCell sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600 }}>
-                                            Batch No
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600 }}>
-                                            OB
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600 }}>
-                                            IN
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600 }}>
-                                            OUT
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ backgroundColor: "#1E3A8A", color: "#fff", fontWeight: 600 }}>
-                                            CLS
-                                        </TableCell>
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    {/* TOTAL ROW */}
-                                    <TableRow sx={{ background: "#F1F5F9", fontWeight: 700, position: "sticky", top: 37, zIndex: 1 }}>
-                                        <TableCell colSpan={2} sx={{ fontWeight: 700, color: "#0F172A" }}>
-                                            TOTAL ({batchData.length} Batches)
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
-                                            {formatBatchQtyWithBag(
-                                                batchData.reduce((s, b) => s + getBatchQty(b, "OB"), 0),
-                                                selectedBatchItem
-                                            )}
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
-                                            {formatBatchQtyWithBag(
-                                                batchData.reduce((s, b) => s + getBatchQty(b, "IN"), 0),
-                                                selectedBatchItem
-                                            )}
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
-                                            {formatBatchQtyWithBag(
-                                                batchData.reduce((s, b) => s + getBatchQty(b, "OUT"), 0),
-                                                selectedBatchItem
-                                            )}
-                                        </TableCell>
-                                        <TableCell align="right" sx={{ fontWeight: 700, color: "#0F172A" }}>
-                                            {formatBatchQtyWithBag(
-                                                batchData.reduce((s, b) => s + getBatchQty(b, "CLS"), 0),
-                                                selectedBatchItem
-                                            )}
-                                        </TableCell>
-                                    </TableRow>
-
-                                    {/* BATCH ROWS */}
-                                    {batchData.map((batch, idx) => (
-                                        <TableRow
-                                            key={idx}
-                                            hover
-                                            sx={{
-                                                "&:nth-of-type(even)": { backgroundColor: "#FAFAFA" },
-                                                "&:last-child td, &:last-child th": { border: 0 }
-                                            }}
-                                        >
-                                            <TableCell sx={{ color: "#64748B", fontWeight: 500 }}>
-                                                {idx + 1}
-                                            </TableCell>
-                                            <TableCell sx={{ fontWeight: 600, color: "#1E293B" }}>
-                                                {batch.Batch_No || "—"}
-                                            </TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 500 }}>
-                                                {formatBatchQtyWithBag(getBatchQty(batch, "OB"), selectedBatchItem)}
-                                            </TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 500, color: getBatchQty(batch, "IN") > 0 ? "#16A34A" : "inherit" }}>
-                                                {formatBatchQtyWithBag(getBatchQty(batch, "IN"), selectedBatchItem)}
-                                            </TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 500, color: getBatchQty(batch, "OUT") > 0 ? "#DC2626" : "inherit" }}>
-                                                {formatBatchQtyWithBag(getBatchQty(batch, "OUT"), selectedBatchItem)}
-                                            </TableCell>
-                                            <TableCell align="right" sx={{ fontWeight: 600, color: "#1D4ED8" }}>
-                                                {formatBatchQtyWithBag(getBatchQty(batch, "CLS"), selectedBatchItem)}
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        </TableContainer>
-                    )}
-                </DialogContent>
-            </Dialog>
         </>
     );
 };

@@ -23,12 +23,17 @@ import {
     DialogActions,
     DialogTitle,
     DialogContent,
-    CircularProgress
+    CircularProgress,
+    Chip
 } from "@mui/material";
 import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
 import dayjs from "dayjs";
 import SettingsIcon from "@mui/icons-material/Settings";
 import GroupWorkIcon from "@mui/icons-material/GroupWork";
+import CloseIcon from "@mui/icons-material/Close";
+import TableChartIcon from "@mui/icons-material/TableChart";
+import ViewListIcon from "@mui/icons-material/ViewList";
+import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import {
     DndContext,
     closestCenter,
@@ -74,6 +79,8 @@ type ColumnConfig = {
     order: number;
     groupBy?: number;
 };
+
+export type ExportFormat = "default" | "not_repeated";
 
 /* ================= CONSTANTS ================= */
 
@@ -319,6 +326,8 @@ const OnlineSalesReportLOL: React.FC = () => {
     const currentDateKey = `${filters.Date.from}_${filters.Date.to}`;
 
     const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+    const [exportDialogOpen, setExportDialogOpen] = useState(false);
+    const [exportTargetType, setExportTargetType] = useState<"Excel" | "PDF">("Excel");
 
     const [abstractGrouping, setAbstractGrouping] = useState<string[]>([]);
     const [expandedGrouping, setExpandedGrouping] = useState<string[]>([]);
@@ -983,7 +992,7 @@ const OnlineSalesReportLOL: React.FC = () => {
         );
     }, [activeHeader, rawRows, sortConfig.order]);
 
-    const buildExportRows = () => {
+    const buildExportRows = (format: ExportFormat = "default") => {
         const rows: any[] = [];
 
         // Identify non-numeric / classification columns that precede the detail / numeric columns
@@ -1016,23 +1025,31 @@ const OnlineSalesReportLOL: React.FC = () => {
 
         const createDetailRow = (row: any, prevRow: any) => {
             const detail: any = {};
-            let parentChanged = false;
 
-            classificationCols.forEach(col => {
-                const currVal = formatCellValue(row, col);
-                const prevVal = prevRow ? formatCellValue(prevRow, col) : null;
+            if (format === "not_repeated") {
+                let parentChanged = false;
 
-                if (!prevRow || parentChanged || String(currVal).trim() !== String(prevVal).trim()) {
-                    detail[col.label] = currVal;
-                    parentChanged = true;
-                } else {
-                    detail[col.label] = "";
+                classificationCols.forEach(col => {
+                    const currVal = formatCellValue(row, col);
+                    const prevVal = prevRow ? formatCellValue(prevRow, col) : null;
+
+                    if (!prevRow || parentChanged || String(currVal).trim() !== String(prevVal).trim()) {
+                        detail[col.label] = currVal;
+                        parentChanged = true;
+                    } else {
+                        detail[col.label] = "";
+                    }
+                });
+
+                for (let j = classificationCols.length; j < enabledColumns.length; j++) {
+                    const col = enabledColumns[j];
+                    detail[col.label] = formatCellValue(row, col);
                 }
-            });
-
-            for (let j = classificationCols.length; j < enabledColumns.length; j++) {
-                const col = enabledColumns[j];
-                detail[col.label] = formatCellValue(row, col);
+            } else {
+                // Default: how the screen should look like
+                enabledColumns.forEach(col => {
+                    detail[col.label] = formatCellValue(row, col);
+                });
             }
 
             return detail;
@@ -1121,9 +1138,9 @@ const OnlineSalesReportLOL: React.FC = () => {
         return rows;
     };
 
-    const handleExportExcel = () => {
+    const handleExportExcel = (format: ExportFormat = "default") => {
 
-        const exportRows = buildExportRows();
+        const exportRows = buildExportRows(format);
 
         const worksheet =
             XLSX.utils.json_to_sheet(exportRows);
@@ -1137,25 +1154,31 @@ const OnlineSalesReportLOL: React.FC = () => {
             toggleMode
         );
 
+        const suffix =
+            format === "not_repeated" ? "SameDatasNotRepeated" : "Default";
+
         XLSX.writeFile(
             workbook,
-            `OnlineSales_${toggleMode}_${dayjs().format(
+            `OnlineSales_${toggleMode}_${suffix}_${dayjs().format(
                 "DDMMYYYY"
             )}.xlsx`
         );
     };
 
-    const handleExportPDF = () => {
+    const handleExportPDF = (format: ExportFormat = "default") => {
 
-        const exportRows = buildExportRows();
+        const exportRows = buildExportRows(format);
 
         const doc =
             new jsPDF("l", "mm", "a4");
 
         doc.setFontSize(12);
 
+        const formatTitle =
+            format === "not_repeated" ? "Same Datas not repeated" : "Default";
+
         doc.text(
-            `Online Sales Report (${toggleMode})`,
+            `Online Sales Report (${toggleMode}) - ${formatTitle}`,
             14,
             10
         );
@@ -1192,6 +1215,7 @@ const OnlineSalesReportLOL: React.FC = () => {
                     enabledColumns[0]?.label;
 
                 if (
+                    row &&
                     row[firstColumn] &&
                     typeof row[firstColumn] === "string" &&
                     row[firstColumn].startsWith(" ")
@@ -1202,8 +1226,11 @@ const OnlineSalesReportLOL: React.FC = () => {
             }
         });
 
+        const suffix =
+            format === "not_repeated" ? "SameDatasNotRepeated" : "Default";
+
         doc.save(
-            `OnlineSales_${toggleMode}.pdf`
+            `OnlineSales_${toggleMode}_${suffix}.pdf`
         );
     };
 
@@ -1430,8 +1457,14 @@ const OnlineSalesReportLOL: React.FC = () => {
             <PageHeader
                 toggleMode={toggleMode}
                 onToggleChange={setToggleMode}
-                onExportPDF={handleExportPDF}
-                onExportExcel={handleExportExcel}
+                onExportPDF={() => {
+                    setExportTargetType("PDF");
+                    setExportDialogOpen(true);
+                }}
+                onExportExcel={() => {
+                    setExportTargetType("Excel");
+                    setExportDialogOpen(true);
+                }}
                 onReportChange={(template) => {
                     if (!template) {
                         const todayDate = dayjs().format("YYYY-MM-DD");
@@ -2013,6 +2046,173 @@ const OnlineSalesReportLOL: React.FC = () => {
                         onClick={handleQuickSave}
                     >
                         Save
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Export Format Selection Dialog */}
+            <Dialog
+                open={exportDialogOpen}
+                onClose={() => setExportDialogOpen(false)}
+                maxWidth="sm"
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: 3,
+                        p: 1,
+                        boxShadow: "0 10px 40px rgba(0,0,0,0.15)"
+                    }
+                }}
+            >
+                <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", pb: 1 }}>
+                    <Box display="flex" alignItems="center" gap={1.25}>
+                        <FileDownloadIcon sx={{ color: "#1E3A8A", fontSize: 26 }} />
+                        <Typography variant="h6" fontWeight={700} color="#1E3A8A">
+                            {exportTargetType === "Excel" ? "Export as Excel" : "Export as PDF"}
+                        </Typography>
+                    </Box>
+                    <IconButton size="small" onClick={() => setExportDialogOpen(false)}>
+                        <CloseIcon />
+                    </IconButton>
+                </DialogTitle>
+
+                <DialogContent dividers sx={{ display: "flex", flexDirection: "column", gap: 2, py: 2.5 }}>
+                    <Typography variant="body2" color="text.secondary">
+                        Please select the format you want to download:
+                    </Typography>
+
+                    {/* Format 1: Default */}
+                    <Paper
+                        variant="outlined"
+                        onClick={() => {
+                            setExportDialogOpen(false);
+                            if (exportTargetType === "Excel") {
+                                handleExportExcel("default");
+                            } else {
+                                handleExportPDF("default");
+                            }
+                        }}
+                        sx={{
+                            p: 2,
+                            borderRadius: 2,
+                            borderColor: "#cbd5e1",
+                            cursor: "pointer",
+                            transition: "all 0.2s ease-in-out",
+                            "&:hover": {
+                                borderColor: "#1E3A8A",
+                                bgcolor: "#f8fafc",
+                                transform: "translateY(-1px)",
+                                boxShadow: "0 4px 12px rgba(30, 58, 138, 0.08)"
+                            }
+                        }}
+                    >
+                        <Box display="flex" justifyContent="space-between" alignItems="center" gap={2}>
+                            <Box>
+                                <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                                    <TableChartIcon sx={{ fontSize: 20, color: "#1E3A8A" }} />
+                                    <Chip label="Default" size="small" sx={{ fontWeight: 700, fontSize: "0.65rem", bgcolor: "#e2e8f0" }} />
+                                    <Typography variant="subtitle1" fontWeight={700} color="#1e293b">
+                                        Default
+                                    </Typography>
+                                </Box>
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                    Downloads how the screen looks with all row data and repeated values fully displayed.
+                                </Typography>
+                            </Box>
+                            <Button
+                                variant="contained"
+                                size="small"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExportDialogOpen(false);
+                                    if (exportTargetType === "Excel") {
+                                        handleExportExcel("default");
+                                    } else {
+                                        handleExportPDF("default");
+                                    }
+                                }}
+                                sx={{
+                                    textTransform: "none",
+                                    bgcolor: "#1E3A8A",
+                                    fontWeight: 600,
+                                    borderRadius: 1.5,
+                                    flexShrink: 0,
+                                    "&:hover": { bgcolor: "#1b3580" }
+                                }}
+                            >
+                                {exportTargetType === "Excel" ? "Download Excel" : "Download PDF"}
+                            </Button>
+                        </Box>
+                    </Paper>
+
+                    {/* Format 2: Same Datas not repeated */}
+                    <Paper
+                        variant="outlined"
+                        onClick={() => {
+                            setExportDialogOpen(false);
+                            if (exportTargetType === "Excel") {
+                                handleExportExcel("not_repeated");
+                            } else {
+                                handleExportPDF("not_repeated");
+                            }
+                        }}
+                        sx={{
+                            p: 2,
+                            borderRadius: 2,
+                            borderColor: "#93c5fd",
+                            bgcolor: "#f0f7ff",
+                            cursor: "pointer",
+                            transition: "all 0.2s ease-in-out",
+                            "&:hover": {
+                                borderColor: "#1E3A8A",
+                                bgcolor: "#e8f2fe",
+                                transform: "translateY(-1px)",
+                                boxShadow: "0 4px 12px rgba(30, 58, 138, 0.12)"
+                            }
+                        }}
+                    >
+                        <Box display="flex" justifyContent="space-between" alignItems="center" gap={2}>
+                            <Box>
+                                <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                                    <ViewListIcon sx={{ fontSize: 20, color: "#1E3A8A" }} />
+                                    <Chip label="Same Datas not repeated" size="small" sx={{ fontWeight: 700, fontSize: "0.65rem", bgcolor: "#dbeafe", color: "#1E3A8A" }} />
+                                    <Typography variant="subtitle1" fontWeight={700} color="#1E3A8A">
+                                        Same Datas not repeated
+                                    </Typography>
+                                </Box>
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                    Retailer Name, Invoice No and repeated values are fixed once, leaving subsequent repeated cells blank.
+                                </Typography>
+                            </Box>
+                            <Button
+                                variant="contained"
+                                size="small"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExportDialogOpen(false);
+                                    if (exportTargetType === "Excel") {
+                                        handleExportExcel("not_repeated");
+                                    } else {
+                                        handleExportPDF("not_repeated");
+                                    }
+                                }}
+                                sx={{
+                                    textTransform: "none",
+                                    bgcolor: "#1E3A8A",
+                                    fontWeight: 600,
+                                    borderRadius: 1.5,
+                                    flexShrink: 0,
+                                    "&:hover": { bgcolor: "#1b3580" }
+                                }}
+                            >
+                                {exportTargetType === "Excel" ? "Download Excel" : "Download PDF"}
+                            </Button>
+                        </Box>
+                    </Paper>
+                </DialogContent>
+                <DialogActions sx={{ px: 2, py: 1.5 }}>
+                    <Button onClick={() => setExportDialogOpen(false)} sx={{ textTransform: "none", color: "text.secondary" }}>
+                        Cancel
                     </Button>
                 </DialogActions>
             </Dialog>

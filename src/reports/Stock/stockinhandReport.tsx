@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNumericalFilter } from "../../hooks/useNumericalFilter";
 import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
 import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
@@ -14,9 +14,15 @@ import {
     Paper,
     CircularProgress,
     Typography,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    Chip,
+    Button,
 } from "@mui/material";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
+import CloseIcon from "@mui/icons-material/Close";
 import dayjs from "dayjs";
 import AppLayout, { useToggleMode } from "../../Layout/appLayout";
 import PageHeader from "../../Layout/PageHeader";
@@ -35,6 +41,8 @@ import {
     GodownStockBadgeItem,
     itemwiseStockBadgeService,
     ItemwiseStockBadgeItem,
+    TransactionBatchStockItem,
+    transactionBatchStockService,
 } from "../../services/stockWiseReport.service";
 
 
@@ -65,6 +73,22 @@ const StockInHandReport: React.FC = () => {
     const [batchDataMap, setBatchDataMap] = useState<Record<string, (GodownStockBadgeItem | ItemwiseStockBadgeItem)[]>>({});
     const [batchLoadingMap, setBatchLoadingMap] = useState<Record<string, boolean>>({});
 
+    /* ===== BATCH TRANSACTION MODAL STATES ===== */
+    const [batchModalOpen, setBatchModalOpen] = useState(false);
+    const [selectedBatchItem, setSelectedBatchItem] = useState<{
+        item: stockWiseReport;
+        batchNo: string;
+        apiBatch: string;
+        productId: string | number;
+        productName: string;
+        godownId?: string | number;
+        godownName?: string;
+        isGodownWise?: boolean;
+    } | null>(null);
+    const [batchTransactions, setBatchTransactions] = useState<TransactionBatchStockItem[]>([]);
+    const [batchModalLoading, setBatchModalLoading] = useState(false);
+    const [batchModalError, setBatchModalError] = useState<string | null>(null);
+
     /* ===== FILTER STATES ===== */
 
     const [drawerOpen, setDrawerOpen] = useState(false);
@@ -75,6 +99,58 @@ const StockInHandReport: React.FC = () => {
     const [loading, setLoading] = useState(false);
 
     const [qtyMode, setQtyMode] = useState<"qty" | "actQty">("qty");
+
+    /* ===== FETCH BATCH TRANSACTIONS ===== */
+    const loadBatchTransactions = useCallback(
+        async (selected: NonNullable<typeof selectedBatchItem>) => {
+            const productId = selected.productId || selected.item.Product_Id || selected.item.Item_Id || "";
+            if (!productId) {
+                setBatchModalError("Product ID is missing.");
+                setBatchTransactions([]);
+                return;
+            }
+
+            setBatchModalLoading(true);
+            setBatchModalError(null);
+
+            try {
+                let res;
+                if (selected.isGodownWise && selected.godownId) {
+                    res = await transactionBatchStockService.getTransactionBatchStockByGodown({
+                        fromDate,
+                        toDate,
+                        Product_Id: productId,
+                        Godown_Id: selected.godownId,
+                        Batch: selected.apiBatch || selected.batchNo,
+                    });
+                } else {
+                    res = await transactionBatchStockService.getTransactionBatchStock({
+                        fromDate,
+                        toDate,
+                        Product_Id: productId,
+                        Batch: selected.apiBatch || selected.batchNo || "Primary Batch",
+                    });
+                }
+
+                const rawData = res.data?.data || [];
+                setBatchTransactions(Array.isArray(rawData) ? rawData : []);
+            } catch (err: any) {
+                console.error("Error fetching batch transaction stock:", err);
+                setBatchModalError(
+                    err.response?.data?.message || "Failed to load batch transaction data."
+                );
+                setBatchTransactions([]);
+            } finally {
+                setBatchModalLoading(false);
+            }
+        },
+        [fromDate, toDate]
+    );
+
+    useEffect(() => {
+        if (!batchModalOpen || !selectedBatchItem) return;
+        loadBatchTransactions(selectedBatchItem);
+    }, [batchModalOpen, selectedBatchItem, loadBatchTransactions]);
 
     const qtyKeys = useMemo(() => {
         if (isExpanded) {
@@ -792,6 +868,39 @@ const StockInHandReport: React.FC = () => {
         });
     };
 
+    const handleBatchClick = (item: stockWiseReport, batch: any) => {
+        const batchNo = String(batch?.Batch_No || "Primary Batch").trim() || "Primary Batch";
+        const apiBatch =
+            batch?.Batch_No !== undefined && batch?.Batch_No !== null && String(batch.Batch_No).trim() !== ""
+                ? String(batch.Batch_No).trim()
+                : String(batch?.Batch_No ?? "Primary Batch");
+
+        const isGodown = Boolean(isExpanded || batch?.Godown_Id || item?.Godown_Id);
+        const godownId = isGodown
+            ? (batch?.Godown_Id || item?.Godown_Id || getGodownIdForItem(item))
+            : undefined;
+        const godownName = batch?.Godown_Name || item?.Godown_Name || "";
+        const productId = batch?.Product_Id || item?.Product_Id || item?.Item_Id || "";
+        const productName =
+            batch?.stock_item_name ||
+            item?.stock_item_name ||
+            item?.Item_Name ||
+            item?.POS_Item_Name ||
+            "Item Details";
+
+        setSelectedBatchItem({
+            item,
+            batchNo,
+            apiBatch,
+            productId,
+            productName,
+            godownId,
+            godownName,
+            isGodownWise: Boolean(isGodown && godownId),
+        });
+        setBatchModalOpen(true);
+    };
+
     const getBatchQty = (item: GodownStockBadgeItem | ItemwiseStockBadgeItem, type: "OB" | "IN" | "OUT" | "CLS") => {
         if (qtyMode === "actQty") {
             switch (type) {
@@ -818,6 +927,73 @@ const StockInHandReport: React.FC = () => {
         const bags = q / bagKg;
         return `${q.toFixed(2)} (${formatBagCount(bags)})`;
     };
+
+    /* ===== PROCESSED BATCH LEDGER (SORTED BY DATE) ===== */
+    const processedBatchRows = useMemo(() => {
+        const isAct = qtyMode === "actQty";
+
+        // Sort by Opening Balance (OB) first, then chronological by Ledger_Date
+        const sorted = [...batchTransactions].sort((a, b) => {
+            const isA_OB =
+                a.invoice_no === "OB" ||
+                a.ord === 0 ||
+                String(a.Particulars || "").toLowerCase().includes("opening balance");
+            const isB_OB =
+                b.invoice_no === "OB" ||
+                b.ord === 0 ||
+                String(b.Particulars || "").toLowerCase().includes("opening balance");
+
+            if (isA_OB && !isB_OB) return -1;
+            if (!isA_OB && isB_OB) return 1;
+
+            const dateA = a.Ledger_Date ? new Date(a.Ledger_Date).getTime() : 0;
+            const dateB = b.Ledger_Date ? new Date(b.Ledger_Date).getTime() : 0;
+            if (dateA !== dateB) return dateA - dateB;
+
+            const ordA = Number(a.ord || 0);
+            const ordB = Number(b.ord || 0);
+            if (ordA !== ordB) return ordA - ordB;
+
+            return Number(a.Trans_Id || 0) - Number(b.Trans_Id || 0);
+        });
+
+        let running = 0;
+        return sorted.map((row, index) => {
+            const inQtyVal = isAct
+                ? Number(row.In_Act_Qty !== undefined && row.In_Act_Qty !== null ? row.In_Act_Qty : (row.In_Qty || 0))
+                : Number(row.In_Qty || 0);
+            const outQtyVal = isAct
+                ? Number(row.Out_Act_Qty !== undefined && row.Out_Act_Qty !== null ? row.Out_Act_Qty : (row.Out_Qty || 0))
+                : Number(row.Out_Qty || 0);
+
+            running += inQtyVal - outQtyVal;
+
+            return {
+                ...row,
+                sNo: index + 1,
+                inQtyVal,
+                outQtyVal,
+                clsQtyVal: running,
+            };
+        });
+    }, [batchTransactions, qtyMode]);
+
+    const batchTotals = useMemo(() => {
+        let totalIn = 0;
+        let totalOut = 0;
+
+        processedBatchRows.forEach((r) => {
+            totalIn += r.inQtyVal;
+            totalOut += r.outQtyVal;
+        });
+
+        const finalCls =
+            processedBatchRows.length > 0
+                ? processedBatchRows[processedBatchRows.length - 1].clsQtyVal
+                : 0;
+
+        return { totalIn, totalOut, finalCls };
+    }, [processedBatchRows]);
 
 
     const flattenGroupsForExport = (groups: any[], parentKeys: Record<string, string> = {}, isExpandedMode = isExpanded): any[] => {
@@ -1043,7 +1219,9 @@ const StockInHandReport: React.FC = () => {
                                         background: "#F8FAFC",
                                         "&:hover": { bgcolor: "#EFF6FF" },
                                         borderBottom: "1px solid #F1F5F9",
+                                        cursor: "pointer",
                                     }}
+                                    onClick={() => handleBatchClick(r, batch)}
                                 >
                                     <TableCell
                                         width={44}
@@ -1075,15 +1253,30 @@ const StockInHandReport: React.FC = () => {
                                             >
                                                 <Box
                                                     sx={{
-                                                        width: 5,
-                                                        height: 5,
+                                                        width: 6,
+                                                        height: 6,
                                                         borderRadius: "50%",
-                                                        bgcolor: "#64748B",
+                                                        bgcolor: "#2563EB",
                                                     }}
                                                 />
                                             </Box>
                                             <Typography component="span" sx={{ fontSize: "0.76rem", color: "#475569" }}>
-                                                Batch: <strong style={{ color: "#0F172A", fontWeight: 600 }}>{batch.Batch_No || "—"}</strong>
+                                                Batch:{" "}
+                                                <strong
+                                                    style={{
+                                                        color: "#1D4ED8",
+                                                        fontWeight: 600,
+                                                        cursor: "pointer",
+                                                        textDecoration: "underline",
+                                                    }}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleBatchClick(r, batch);
+                                                    }}
+                                                    title="Click to view batch transactions"
+                                                >
+                                                    {batch.Batch_No || "Primary Batch"}
+                                                </strong>
                                             </Typography>
                                         </Box>
                                     </TableCell>
@@ -1522,6 +1715,556 @@ const StockInHandReport: React.FC = () => {
                 onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
                 onClear={clearRangeFilter}
             />
+
+            {/* ===== BATCH TRANSACTION MODAL POPUP (EMBEDDED) ===== */}
+            <Dialog
+                open={batchModalOpen}
+                onClose={() => setBatchModalOpen(false)}
+                maxWidth="lg"
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: 3,
+                        boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+                        overflow: "hidden",
+                        display: "flex",
+                        flexDirection: "column",
+                        maxHeight: "92vh",
+                    },
+                }}
+            >
+                {/* Header with Item Name and Batch No */}
+                <DialogTitle
+                    sx={{
+                        m: 0,
+                        p: 2.2,
+                        bgcolor: "#1E3A8A",
+                        color: "#FFFFFF",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        justifyContent: "space-between",
+                        borderBottom: "1px solid rgba(255, 255, 255, 0.12)",
+                    }}
+                >
+                    <Box sx={{ pr: 2 }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1.2, flexWrap: "wrap" }}>
+                            <Typography
+                                variant="h6"
+                                component="span"
+                                sx={{
+                                    fontWeight: 700,
+                                    fontSize: "1.15rem",
+                                    color: "#FFFFFF",
+                                    letterSpacing: "0.2px",
+                                }}
+                            >
+                                {selectedBatchItem?.productName ||
+                                    batchTransactions[0]?.Product_Name ||
+                                    selectedBatchItem?.item.stock_item_name ||
+                                    selectedBatchItem?.item.Item_Name ||
+                                    selectedBatchItem?.item.POS_Item_Name ||
+                                    "Item Details"}
+                            </Typography>
+
+                            <Chip
+                                label={`Batch: ${selectedBatchItem?.batchNo || "Primary Batch"}`}
+                                size="small"
+                                sx={{
+                                    bgcolor: "rgba(255, 255, 255, 0.2)",
+                                    color: "#FFFFFF",
+                                    fontWeight: 700,
+                                    fontSize: "0.78rem",
+                                    border: "1px solid rgba(255, 255, 255, 0.35)",
+                                    px: 0.5,
+                                }}
+                            />
+
+                            {(selectedBatchItem?.godownName || batchTransactions[0]?.Godown_Name || selectedBatchItem?.item?.Godown_Name) && (
+                                <Chip
+                                    label={`Godown: ${selectedBatchItem?.godownName || batchTransactions[0]?.Godown_Name || selectedBatchItem?.item?.Godown_Name}`}
+                                    size="small"
+                                    sx={{
+                                        bgcolor: "rgba(255, 255, 255, 0.2)",
+                                        color: "#FFFFFF",
+                                        fontWeight: 600,
+                                        fontSize: "0.72rem",
+                                        border: "1px solid rgba(255, 255, 255, 0.25)",
+                                    }}
+                                />
+                            )}
+
+                            <Chip
+                                label={qtyMode === "actQty" ? "Mode: Act_qty" : "Mode: Qty"}
+                                size="small"
+                                sx={{
+                                    bgcolor: qtyMode === "actQty" ? "#7C3AED" : "rgba(255, 255, 255, 0.15)",
+                                    color: "#FFFFFF",
+                                    fontWeight: 600,
+                                    fontSize: "0.72rem",
+                                    border: "1px solid rgba(255, 255, 255, 0.2)",
+                                }}
+                            />
+                        </Box>
+
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 2, mt: 0.6, flexWrap: "wrap" }}>
+                            <Typography variant="caption" sx={{ color: "rgba(255, 255, 255, 0.85)", fontSize: "0.75rem" }}>
+                                From: <strong>{dayjs(fromDate).format("DD/MM/YYYY")}</strong> | To:{" "}
+                                <strong>{dayjs(toDate).format("DD/MM/YYYY")}</strong>
+                            </Typography>
+
+                            {(selectedBatchItem?.godownName || batchTransactions[0]?.Godown_Name || selectedBatchItem?.item?.Godown_Name) && (
+                                <Typography variant="caption" sx={{ color: "rgba(255, 255, 255, 0.85)", fontSize: "0.75rem" }}>
+                                    Godown: <strong>{selectedBatchItem?.godownName || batchTransactions[0]?.Godown_Name || selectedBatchItem?.item?.Godown_Name}</strong>
+                                </Typography>
+                            )}
+
+                            <Typography variant="caption" sx={{ color: "rgba(255, 255, 255, 0.85)", fontSize: "0.75rem" }}>
+                                Total Entries: <strong>{processedBatchRows.length}</strong>
+                            </Typography>
+                        </Box>
+                    </Box>
+
+                    <IconButton
+                        aria-label="close"
+                        onClick={() => setBatchModalOpen(false)}
+                        sx={{
+                            color: "#FFFFFF",
+                            bgcolor: "rgba(255, 255, 255, 0.08)",
+                            "&:hover": { bgcolor: "rgba(255, 255, 255, 0.2)" },
+                            p: 0.8,
+                        }}
+                    >
+                        <CloseIcon sx={{ fontSize: 20 }} />
+                    </IconButton>
+                </DialogTitle>
+
+                {/* Dialog Content: Table with Invoice No & Date as Separate Columns & No Horizontal Bottom Scroll */}
+                <DialogContent sx={{ p: 0, bgcolor: "#FFFFFF", overflowX: "hidden" }}>
+                    {batchModalLoading ? (
+                        <Box
+                            sx={{
+                                display: "flex",
+                                flexDirection: "column",
+                                justifyContent: "center",
+                                alignItems: "center",
+                                py: 8,
+                                gap: 1.5,
+                            }}
+                        >
+                            <CircularProgress size={36} sx={{ color: "#1E3A8A" }} />
+                            <Typography sx={{ color: "#64748B", fontSize: "0.85rem", fontWeight: 500 }}>
+                                Loading batch transactions...
+                            </Typography>
+                        </Box>
+                    ) : batchModalError ? (
+                        <Box sx={{ textAlign: "center", py: 5, px: 2 }}>
+                            <Typography sx={{ color: "#DC2626", fontWeight: 600, mb: 1 }}>{batchModalError}</Typography>
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => {
+                                    if (selectedBatchItem) {
+                                        loadBatchTransactions(selectedBatchItem);
+                                    }
+                                }}
+                            >
+                                Retry
+                            </Button>
+                        </Box>
+                    ) : processedBatchRows.length === 0 ? (
+                        <Box sx={{ textAlign: "center", py: 8 }}>
+                            <Typography sx={{ color: "#64748B", fontSize: "0.9rem", fontWeight: 500 }}>
+                                No transaction records found for Batch &ldquo;{selectedBatchItem?.batchNo}&rdquo; within the selected date range.
+                            </Typography>
+                        </Box>
+                    ) : (
+                        <TableContainer
+                            sx={{
+                                maxHeight: "65vh",
+                                overflowY: "auto",
+                                overflowX: "hidden",
+                            }}
+                        >
+                            <Table size="small" stickyHeader sx={{ width: "100%", tableLayout: "auto" }}>
+                                <TableHead>
+                                    {/* ROW 1: COLUMN HEADERS */}
+                                    <TableRow sx={{ height: 32 }}>
+                                        <TableCell
+                                            align="center"
+                                            sx={{
+                                                bgcolor: "#1E3A8A !important",
+                                                color: "#FFFFFF !important",
+                                                fontWeight: 700,
+                                                fontSize: "0.76rem",
+                                                width: 48,
+                                                py: 0.4,
+                                                whiteSpace: "nowrap",
+                                                borderRight: "1px solid rgba(255, 255, 255, 0.1)",
+                                                zIndex: 3,
+                                            }}
+                                        >
+                                            S.NO
+                                        </TableCell>
+
+                                        <TableCell
+                                            sx={{
+                                                bgcolor: "#1E3A8A !important",
+                                                color: "#FFFFFF !important",
+                                                fontWeight: 700,
+                                                fontSize: "0.76rem",
+                                                width: 95,
+                                                py: 0.4,
+                                                whiteSpace: "nowrap",
+                                                borderRight: "1px solid rgba(255, 255, 255, 0.1)",
+                                                zIndex: 3,
+                                            }}
+                                        >
+                                            Date
+                                        </TableCell>
+
+                                        {/* INVOICE NO (SEPARATE COLUMN) */}
+                                        <TableCell
+                                            sx={{
+                                                bgcolor: "#1E3A8A !important",
+                                                color: "#FFFFFF !important",
+                                                fontWeight: 700,
+                                                fontSize: "0.76rem",
+                                                width: 130,
+                                                py: 0.4,
+                                                whiteSpace: "nowrap",
+                                                borderRight: "1px solid rgba(255, 255, 255, 0.1)",
+                                                zIndex: 3,
+                                            }}
+                                        >
+                                            Invoice No
+                                        </TableCell>
+
+                                        <TableCell
+                                            sx={{
+                                                bgcolor: "#1E3A8A !important",
+                                                color: "#FFFFFF !important",
+                                                fontWeight: 700,
+                                                fontSize: "0.76rem",
+                                                py: 0.4,
+                                                borderRight: "1px solid rgba(255, 255, 255, 0.1)",
+                                                whiteSpace: "nowrap",
+                                                zIndex: 3,
+                                            }}
+                                        >
+                                            Particulars
+                                        </TableCell>
+
+                                        <TableCell
+                                            sx={{
+                                                bgcolor: "#1E3A8A !important",
+                                                color: "#FFFFFF !important",
+                                                fontWeight: 700,
+                                                fontSize: "0.76rem",
+                                                py: 0.4,
+                                                width: 130,
+                                                whiteSpace: "nowrap",
+                                                borderRight: "1px solid rgba(255, 255, 255, 0.1)",
+                                                zIndex: 3,
+                                            }}
+                                        >
+                                            Voucher Name
+                                        </TableCell>
+
+                                        <TableCell
+                                            sx={{
+                                                bgcolor: "#1E3A8A !important",
+                                                color: "#FFFFFF !important",
+                                                fontWeight: 700,
+                                                fontSize: "0.76rem",
+                                                py: 0.4,
+                                                width: 160,
+                                                whiteSpace: "nowrap",
+                                                borderRight: "1px solid rgba(255, 255, 255, 0.1)",
+                                                zIndex: 3,
+                                            }}
+                                        >
+                                            Retailer
+                                        </TableCell>
+
+                                        <TableCell
+                                            align="right"
+                                            sx={{
+                                                bgcolor: "#1E3A8A !important",
+                                                color: "#FFFFFF !important",
+                                                fontWeight: 700,
+                                                fontSize: "0.76rem",
+                                                py: 0.4,
+                                                width: 120,
+                                                whiteSpace: "nowrap",
+                                                borderRight: "1px solid rgba(255, 255, 255, 0.1)",
+                                                zIndex: 3,
+                                            }}
+                                        >
+                                            IN
+                                        </TableCell>
+
+                                        <TableCell
+                                            align="right"
+                                            sx={{
+                                                bgcolor: "#1E3A8A !important",
+                                                color: "#FFFFFF !important",
+                                                fontWeight: 700,
+                                                fontSize: "0.76rem",
+                                                py: 0.4,
+                                                width: 120,
+                                                whiteSpace: "nowrap",
+                                                borderRight: "1px solid rgba(255, 255, 255, 0.1)",
+                                                zIndex: 3,
+                                            }}
+                                        >
+                                            OUT
+                                        </TableCell>
+
+                                        <TableCell
+                                            align="right"
+                                            sx={{
+                                                bgcolor: "#1E3A8A !important",
+                                                color: "#FFFFFF !important",
+                                                fontWeight: 700,
+                                                fontSize: "0.76rem",
+                                                py: 0.4,
+                                                width: 125,
+                                                whiteSpace: "nowrap",
+                                                zIndex: 3,
+                                            }}
+                                        >
+                                            CLS
+                                        </TableCell>
+                                    </TableRow>
+
+                                    {/* ROW 2: FIXED TOTAL ROW — directly below Table Header */}
+                                    <TableRow
+                                        sx={{
+                                            height: 32,
+                                            "& .MuiTableCell-root": {
+                                                bgcolor: "#F1F5F9 !important",
+                                                position: "sticky",
+                                                top: "32px !important",
+                                                zIndex: 2,
+                                                py: 0.35,
+                                                whiteSpace: "nowrap",
+                                                borderBottom: "2px solid #CBD5E1",
+                                            },
+                                        }}
+                                    >
+                                        <TableCell align="center" />
+                                        <TableCell />
+                                        <TableCell />
+                                        <TableCell sx={{ fontWeight: 700, color: "#0F172A", fontSize: "0.76rem", whiteSpace: "nowrap" }}>
+                                            TOTAL
+                                        </TableCell>
+                                        <TableCell />
+                                        <TableCell />
+                                        <TableCell
+                                            align="right"
+                                            sx={{
+                                                fontWeight: 700,
+                                                color: "#16A34A",
+                                                fontSize: "0.76rem",
+                                                whiteSpace: "nowrap",
+                                            }}
+                                        >
+                                            {formatBatchQtyWithBag(batchTotals.totalIn, selectedBatchItem?.item || null)}
+                                        </TableCell>
+                                        <TableCell
+                                            align="right"
+                                            sx={{
+                                                fontWeight: 700,
+                                                color: "#DC2626",
+                                                fontSize: "0.76rem",
+                                                whiteSpace: "nowrap",
+                                            }}
+                                        >
+                                            {formatBatchQtyWithBag(batchTotals.totalOut, selectedBatchItem?.item || null)}
+                                        </TableCell>
+                                        <TableCell
+                                            align="right"
+                                            sx={{
+                                                fontWeight: 700,
+                                                color: "#1D4ED8",
+                                                fontSize: "0.78rem",
+                                                whiteSpace: "nowrap",
+                                            }}
+                                        >
+                                            {formatBatchQtyWithBag(batchTotals.finalCls, selectedBatchItem?.item || null)}
+                                        </TableCell>
+                                    </TableRow>
+                                </TableHead>
+
+                                <TableBody>
+                                    {/* DATA ROWS (COMPACT SINGLE LINE) */}
+                                    {processedBatchRows.map((row) => {
+                                        const isOB =
+                                            row.invoice_no === "OB" ||
+                                            String(row.Particulars || "").toLowerCase().includes("opening balance");
+
+                                        return (
+                                            <TableRow
+                                                key={`${row.Trans_Id || row.sNo}-${row.sNo}`}
+                                                hover
+                                                sx={{
+                                                    height: 32,
+                                                    bgcolor: isOB ? "#F8FAFC" : row.sNo % 2 === 0 ? "#FAFAFA" : "#FFFFFF",
+                                                    "&:hover": { bgcolor: "#EFF6FF" },
+                                                    borderBottom: "1px solid #F1F5F9",
+                                                }}
+                                            >
+                                                {/* S.NO */}
+                                                <TableCell
+                                                    align="center"
+                                                    sx={{
+                                                        py: 0.35,
+                                                        fontSize: "0.75rem",
+                                                        color: "#64748B",
+                                                        fontWeight: 500,
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                >
+                                                    {row.sNo}
+                                                </TableCell>
+
+                                                {/* Date */}
+                                                <TableCell
+                                                    sx={{
+                                                        py: 0.35,
+                                                        fontSize: "0.75rem",
+                                                        color: "#475569",
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                >
+                                                    {row.Ledger_Date ? dayjs(row.Ledger_Date).format("DD/MM/YYYY") : "—"}
+                                                </TableCell>
+
+                                                {/* Invoice No (Separate Column) */}
+                                                <TableCell
+                                                    sx={{
+                                                        py: 0.35,
+                                                        fontSize: "0.75rem",
+                                                        color: "#595a5cff",
+                                                        fontWeight: row.invoice_no === "OB" ? 500 : 600,
+                                                        whiteSpace: "nowrap",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        maxWidth: 140,
+                                                    }}
+                                                    title={row.invoice_no || ""}
+                                                >
+                                                    {row.invoice_no || "—"}
+                                                </TableCell>
+
+                                                {/* Particulars (Single Line) */}
+                                                <TableCell
+                                                    sx={{
+                                                        py: 0.35,
+                                                        whiteSpace: "nowrap",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        maxWidth: 240,
+                                                    }}
+                                                    title={row.Particulars || (isOB ? "Opening Balance" : "—")}
+                                                >
+                                                    <Typography
+                                                        component="span"
+                                                        sx={{
+                                                            fontSize: "0.75rem",
+                                                            fontWeight: isOB ? 700 : 500,
+                                                            color: isOB ? "#0F172A" : "#1E293B",
+                                                            whiteSpace: "nowrap",
+                                                        }}
+                                                    >
+                                                        {row.Particulars || (isOB ? "Opening Balance" : "—")}
+                                                    </Typography>
+                                                </TableCell>
+
+                                                {/* Voucher Name (Single Line) */}
+                                                <TableCell
+                                                    sx={{
+                                                        py: 0.35,
+                                                        fontSize: "0.75rem",
+                                                        color: "#334155",
+                                                        whiteSpace: "nowrap",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        maxWidth: 140,
+                                                    }}
+                                                    title={row.voucher_name || ""}
+                                                >
+                                                    {row.voucher_name || "—"}
+                                                </TableCell>
+
+                                                {/* Retailer (Single Line) */}
+                                                <TableCell
+                                                    sx={{
+                                                        py: 0.35,
+                                                        fontSize: "0.75rem",
+                                                        color: "#334155",
+                                                        whiteSpace: "nowrap",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        maxWidth: 170,
+                                                    }}
+                                                    title={row.Retailer_Name || ""}
+                                                >
+                                                    {row.Retailer_Name || "—"}
+                                                </TableCell>
+
+                                                {/* IN */}
+                                                <TableCell
+                                                    align="right"
+                                                    sx={{
+                                                        py: 0.35,
+                                                        fontSize: "0.75rem",
+                                                        fontWeight: row.inQtyVal > 0 ? 600 : 400,
+                                                        color: row.inQtyVal > 0 ? "#16A34A" : "#94A3B8",
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                >
+                                                    {formatBatchQtyWithBag(row.inQtyVal, selectedBatchItem?.item || null)}
+                                                </TableCell>
+
+                                                {/* OUT */}
+                                                <TableCell
+                                                    align="right"
+                                                    sx={{
+                                                        py: 0.35,
+                                                        fontSize: "0.75rem",
+                                                        fontWeight: row.outQtyVal > 0 ? 600 : 400,
+                                                        color: row.outQtyVal > 0 ? "#DC2626" : "#94A3B8",
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                >
+                                                    {formatBatchQtyWithBag(row.outQtyVal, selectedBatchItem?.item || null)}
+                                                </TableCell>
+
+                                                {/* CLS */}
+                                                <TableCell
+                                                    align="right"
+                                                    sx={{
+                                                        py: 0.35,
+                                                        fontSize: "0.75rem",
+                                                        fontWeight: 700,
+                                                        color: "#1D4ED8",
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                >
+                                                    {formatBatchQtyWithBag(row.clsQtyVal, selectedBatchItem?.item || null)}
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    })}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    )}
+                </DialogContent>
+            </Dialog>
+
+
 
         </>
     );

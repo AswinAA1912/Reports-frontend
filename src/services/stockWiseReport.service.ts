@@ -237,4 +237,58 @@ export const itemwiseStockBadgeService = {
         ),
 };
 
+/* ---------------- TRANSACTION BATCH STOCK REPORT API ---------------- */
+
+export interface TransactionBatchStockItem {
+    invoice_no: string;
+    Batch: string;
+    Ledger_Date: string;
+    Month_No: number;
+    Invoice_Month: string;
+    Invoice_Year: number;
+    Month_Year: string;
+    Product_Id: string | number;
+    Product_Name: string;
+    Godown_Id: string | number;
+    Godown_Name: string;
+    In_Qty: number;
+    Out_Qty: number;
+    In_Act_Qty: number;
+    Out_Act_Qty: number;
+    Rate: number;
+    Amount: number;
+    Trans_Id: string;
+    voucher_name: string;
+    Particulars: string;
+    Retailer_Name: string;
+    ord: number;
+    [key: string]: any;
+}
+
+export const transactionBatchStockService = {
+    getTransactionBatchStock: (params: {
+        fromDate: string;
+        toDate: string;
+        Product_Id: string | number;
+        Batch: string;
+    }) =>
+        axios.get<{ success: boolean; data: TransactionBatchStockItem[]; message?: string }>(
+            `${getBaseURL()}api/reports/externalAPI/transactionBatchStockReportByProId`,
+            { params }
+        ),
+
+    getTransactionBatchStockByGodown: (params: {
+        fromDate: string;
+        toDate: string;
+        Product_Id: string | number;
+        Godown_Id: string | number;
+        Batch: string;
+    }) =>
+        axios.get<{ success: boolean; data: TransactionBatchStockItem[]; message?: string }>(
+            `${getBaseURL()}api/reports/externalAPI/transactionBatchStockReportByProIdandGodownId`,
+            { params }
+        ),
+};
+
+
 

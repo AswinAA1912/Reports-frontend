@@ -298,6 +298,13 @@ const ItemWiseTransaction = () => {
                                     >
                                         Date
                                     </TableCell>
+
+                                    <TableCell
+                                        sx={{ color: "#fff", fontWeight: 600, }}
+                                    >
+                                        Batch
+                                    </TableCell>
+
                                     <TableCell
                                         sx={{ color: "#fff", fontWeight: 600, cursor: "pointer" }}
                                         onClick={e => openHeaderFilter(e, "voucher_name")}
@@ -337,6 +344,7 @@ const ItemWiseTransaction = () => {
                                         {g.items.map((r, i) => (
                                             <TableRow key={i}>
                                                 <TableCell>{formatDate(r.Ledger_Date)}</TableCell>
+                                                <TableCell>{r.Batch || "-"}</TableCell>
                                                 <TableCell>{r.voucher_name || "-"}</TableCell>
                                                 <TableCell>{r.invoice_no || "-"}</TableCell>
                                                 <TableCell>{r.Retailer_Name || "-"}</TableCell>
@@ -369,6 +377,9 @@ const ItemWiseTransaction = () => {
                                         <TableRow sx={{ background: "#f3f4f6" }}>
                                             <TableCell colSpan={4} sx={{ fontWeight: 700 }}>
                                                 TOTAL ({formatDate(g.date)})
+                                            </TableCell>
+                                            <TableCell>
+
                                             </TableCell>
                                             <TableCell align="right" sx={{ fontWeight: 700 }}>
                                                 {g.totalIn.toFixed(2)}

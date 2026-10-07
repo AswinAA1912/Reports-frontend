@@ -2,14 +2,22 @@ import axios from "axios";
 import { getBaseURL } from "../config/portalBaseURL";
 
 export interface PurchaseOrderItem {
+    Trans_Id?: string | number | (string | number)[];
+    Id?: string | number;
+    OrderId?: string | number;
     invoice_no: string;
-    Ledger_date: string;
-    Product_name: string;
-    Bill_Qty: number;
-    Rate: number;
-    Amount: number;
-    Retailer_Name: string;
-    Total_Invoice_Value: number;
+    Ledger_date?: string;
+    Ledger_Date?: string;
+    Product_name?: string;
+    Product_Name?: string;
+    Product_Id?: number;
+    Bill_Qty?: number;
+    Weight?: number;
+    Rate?: number;
+    Amount?: number;
+    Retailer_Name?: string;
+    Total_Invoice_Value?: number;
+    [key: string]: any;
 }
 
 export interface PurchaseOrderResponse {
@@ -33,3 +41,5 @@ export const PurchaseOrderReportItem = {
             {params}
         )
 }
+
+export * from "./purchaseOrderTripItem.service";

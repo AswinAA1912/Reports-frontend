@@ -69,9 +69,10 @@ const OnlinePurchaseReportPage: React.FC = () => {
     useState<null | HTMLElement>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const today = dayjs().format("YYYY-MM-DD");
+  const currentMonthStart = dayjs().startOf("month").format("YYYY-MM-DD");
   const [columnFilters, setColumnFilters] = useState<Record<string, any>>({
     Ledger_Date: {
-      from: today,
+      from: currentMonthStart,
       to: today,
     },
   });
@@ -334,7 +335,7 @@ const OnlinePurchaseReportPage: React.FC = () => {
   /* ================= LOAD DATA ================= */
   useEffect(() => {
     const fromDate =
-      columnFilters?.Ledger_Date?.from || dayjs().format("YYYY-MM-DD");
+      columnFilters?.Ledger_Date?.from || currentMonthStart;
 
     const toDate =
       columnFilters?.Ledger_Date?.to || dayjs().format("YYYY-MM-DD");

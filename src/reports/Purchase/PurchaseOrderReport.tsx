@@ -179,6 +179,7 @@ const normalizeRow = (row: any) => {
 
 const PurchaseOrder: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
+    const currentMonthStart = dayjs().startOf("month").format("YYYY-MM-DD");
     const { toggleMode, setToggleMode } = useToggleMode();
 
     /* ===== DATA ===== */
@@ -210,7 +211,7 @@ const PurchaseOrder: React.FC = () => {
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
     /* ===== FILTERS ===== */
     const [filters, setFilters] = useState<FiltersMap>({
-        Date: { from: today, to: today },
+        Date: { from: currentMonthStart, to: today },
         columnFilters: {},
     });
     /* ===== GROUPING STATE ===== */
@@ -1011,7 +1012,7 @@ const PurchaseOrder: React.FC = () => {
                         setToggleMode("Abstract");
 
                         setFilters({
-                            Date: { from: todayDate, to: todayDate },
+                            Date: { from: currentMonthStart, to: todayDate },
                             columnFilters: {},
                         });
 
@@ -1099,7 +1100,7 @@ const PurchaseOrder: React.FC = () => {
             />
 
             <AppLayout fullWidth>
-                <Box sx={{ overflow: "auto", mt: 1 }}>
+                <Box sx={{ overflow: "auto", mt: 1, px: { xs: 1.5, md: 2 } }}>
                     <TableContainer
                         component={Paper}
                         sx={{

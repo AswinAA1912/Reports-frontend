@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useMemo } from "react";
 import {
   Box,
   Typography,
@@ -7,8 +7,13 @@ import {
   Card,
   CardContent,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  TextField,
+  InputAdornment,
+  IconButton,
 } from "@mui/material";
+import SearchIcon from "@mui/icons-material/Search";
+import ClearIcon from "@mui/icons-material/Clear";
 import {
   ResponsiveContainer,
   LineChart,
@@ -39,6 +44,16 @@ const Dashboard: React.FC = () => {
     },
     enabled: !!companyId && !!user,
   });
+
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredMenuList = useMemo(() => {
+    if (!searchQuery.trim()) return menuList;
+    const q = searchQuery.toLowerCase().trim();
+    return menuList.filter((item: any) =>
+      item.name?.toLowerCase().includes(q)
+    );
+  }, [menuList, searchQuery]);
 
   const today = new Date();
 
@@ -296,15 +311,92 @@ const Dashboard: React.FC = () => {
             maxHeight: "100%",
           }}
         >
-          <Typography fontSize={22} fontWeight={700} mb={2}>
-            MENU
-          </Typography>
+          {/* Header row with MENU title and Search Bar parallel to each other */}
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: { xs: "column", sm: "row" },
+              justifyContent: "space-between",
+              alignItems: { xs: "stretch", sm: "center" },
+              gap: 1.5,
+              mb: 2,
+            }}
+          >
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Typography fontSize={22} fontWeight={700}>
+                MENU
+              </Typography>
+              {searchQuery && (
+                <Typography fontSize={13} color="text.secondary" fontWeight={500}>
+                  ({filteredMenuList.length} {filteredMenuList.length === 1 ? "item" : "items"})
+                </Typography>
+              )}
+            </Box>
+
+            <TextField
+              size="small"
+              placeholder="Search menus..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ color: "#64748b", fontSize: 20 }} />
+                  </InputAdornment>
+                ),
+                endAdornment: searchQuery ? (
+                  <InputAdornment position="end">
+                    <IconButton
+                      size="small"
+                      onClick={() => setSearchQuery("")}
+                      sx={{ p: 0.2 }}
+                    >
+                      <ClearIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </InputAdornment>
+                ) : null,
+              }}
+              sx={{
+                width: { xs: "100%", sm: 260, md: 300 },
+                "& .MuiOutlinedInput-root": {
+                  borderRadius: 2,
+                  bgcolor: "#ffffff7e",
+                  fontSize: "0.82rem",
+                  height: 36,
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+                  "&:hover": {
+                    bgcolor: "#ffffff8e",
+                  },
+                  "&.Mui-focused": {
+                    bgcolor: "#ffffff8e",
+                  },
+                },
+              }}
+            />
+          </Box>
 
           <Divider sx={{ mb: 3 }} />
 
           {isLoading ? (
-            <Box textAlign="center">
+            <Box textAlign="center" py={4}>
               <CircularProgress />
+            </Box>
+          ) : filteredMenuList.length === 0 ? (
+            <Box
+              sx={{
+                py: 6,
+                textAlign: "center",
+                bgcolor: "rgba(255,255,255,0.6)",
+                borderRadius: 2,
+                p: 3,
+              }}
+            >
+              <Typography fontSize={15} fontWeight={600} color="#64748b">
+                No menus found matching "{searchQuery}"
+              </Typography>
+              <Typography fontSize={13} color="#94a3b8" mt={0.5}>
+                Try searching with different keywords
+              </Typography>
             </Box>
           ) : (
             <Box
@@ -316,7 +408,7 @@ const Dashboard: React.FC = () => {
                 gap: 2,
               }}
             >
-              {menuList.map((item: any) => (
+              {filteredMenuList.map((item: any) => (
                 <Box
                   key={item.id}
                   onClick={() => handleExternalOrMenuNavigation(item.rUrl, item.name, navigate, token, user)}

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
     Box,
     Paper,
@@ -17,12 +17,18 @@ import {
     TextField,
     InputAdornment,
     IconButton,
+    Tooltip,
+    LinearProgress,
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
+import TableViewOutlinedIcon from "@mui/icons-material/TableViewOutlined";
+import PaymentOutlinedIcon from "@mui/icons-material/PaymentOutlined";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -33,8 +39,24 @@ import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import CommonPagination from "../../Components/CommonPagination";
 import {
     PurchaseDeliveryItem,
-    PURCHASE_DELIVERY_DATA,
+    PurchaseDeliveryService,
 } from "../../services/purchaseDelivery.service";
+import {
+    OnlinePurchaseReportItemByOrderIdService,
+    OnlinePurchaseReportItemByOrderIdItem,
+    PurchaseOrderPaymentService,
+    PurchaseOrderPaymentItem,
+} from "../../services/OnlinePurchaseReport.service";
+import {
+    deriveStockGroup,
+    cleanItemName,
+    fetchRawPurchaseDatasets,
+    formatKgQuantity,
+} from "../../services/purchaseDataIntegration.service";
+import {
+    PurchaseOrderTripItemService,
+    PurchaseOrderTripItem,
+} from "../../services/purchaseOrderTripItem.service";
 
 /* ================= HELPER FORMATTERS ================= */
 
@@ -51,27 +73,341 @@ const formatCurrency = (val: number | string): string => {
 /* ================= COMPONENT ================= */
 
 const PurchaseDelivery: React.FC = () => {
-    // State
-    const [data] = useState<PurchaseDeliveryItem[]>(PURCHASE_DELIVERY_DATA);
-    const [searchQuery, setSearchQuery] = useState<string>("");
-    const [activeStatusFilter, setActiveStatusFilter] = useState<string>("ALL");
+    const navigate = useNavigate();
+    const location = useLocation();
+    const [searchParams] = useSearchParams();
+
+    // Specific order and date range passed from navigation (e.g. from PurchaseItemPaymentReport or PurchasePaymentReport)
+    const navOrderId =
+        location.state?.orderId ||
+        location.state?.purOrderNo ||
+        location.state?.searchQuery ||
+        searchParams.get("orderId") ||
+        searchParams.get("po") ||
+        "";
+
+    const navFromDate =
+        location.state?.fromDate ||
+        searchParams.get("fromDate") ||
+        searchParams.get("Fromdate") ||
+        "";
+
+    const navToDate =
+        location.state?.toDate ||
+        searchParams.get("toDate") ||
+        searchParams.get("Todate") ||
+        "";
 
     const today = dayjs().format("YYYY-MM-DD");
+    const currentMonthStart = dayjs().startOf("month").format("YYYY-MM-DD");
+
+    const initialFromDate = navFromDate && dayjs(navFromDate).isValid() ? navFromDate : currentMonthStart;
+    const initialToDate = navToDate && dayjs(navToDate).isValid() ? navToDate : today;
+
+    const [selectedOrderOnly, setSelectedOrderOnly] = useState<string>(navOrderId);
+    const [data, setData] = useState<PurchaseDeliveryItem[]>([]);
+    const [loading, setLoading] = useState<boolean>(true);
+    const [searchQuery, setSearchQuery] = useState<string>("");
+    const [activeStatusFilter, setActiveStatusFilter] = useState<string>("All");
 
     // Filter Drawer State
     const [drawerOpen, setDrawerOpen] = useState(false);
-    const [fromDate, setFromDate] = useState<string>(today);
-    const [toDate, setToDate] = useState<string>(today);
-    const [tempFromDate, setTempFromDate] = useState<string>(today);
-    const [tempToDate, setTempToDate] = useState<string>(today);
+    const [fromDate, setFromDate] = useState<string>(initialFromDate);
+    const [toDate, setToDate] = useState<string>(initialToDate);
+    const [tempFromDate, setTempFromDate] = useState<string>(initialFromDate);
+    const [tempToDate, setTempToDate] = useState<string>(initialToDate);
+
+    // Keep selectedOrderOnly and dates synced if location.state or query changes
+    useEffect(() => {
+        const oId =
+            location.state?.orderId ||
+            location.state?.purOrderNo ||
+            location.state?.searchQuery ||
+            searchParams.get("orderId") ||
+            searchParams.get("po") ||
+            "";
+        const fDate =
+            location.state?.fromDate ||
+            searchParams.get("fromDate") ||
+            searchParams.get("Fromdate") ||
+            "";
+        const tDate =
+            location.state?.toDate ||
+            searchParams.get("toDate") ||
+            searchParams.get("Todate") ||
+            "";
+
+        if (oId) {
+            setSelectedOrderOnly(oId);
+            setPage(1);
+        }
+        if (fDate && dayjs(fDate).isValid()) {
+            setFromDate(fDate);
+            setTempFromDate(fDate);
+        }
+        if (tDate && dayjs(tDate).isValid()) {
+            setToDate(tDate);
+            setTempToDate(tDate);
+        }
+    }, [location.state, searchParams]);
 
     // Pagination State
     const [page, setPage] = useState<number>(1);
     const [rowsPerPage, setRowsPerPage] = useState<number>(100);
 
+    // Payment lookup map from purchaseOrderPayment API
+    const paymentsMapRef = React.useRef<Map<string, PurchaseOrderPaymentItem>>(new Map());
+    // Live items fetched from OnlinePurchaseReportItemByOrderId API for specific orders
+    const [liveOrderDeliveryMap, setLiveOrderDeliveryMap] = useState<Record<string, PurchaseDeliveryItem[]>>({});
+    const [liveOrderLoading, setLiveOrderLoading] = useState<boolean>(false);
+
+    // Helper to extract a single clean scalar ID
+    const toCleanSingleId = (val: any): string | number | null => {
+        if (val === undefined || val === null) return null;
+        if (Array.isArray(val)) {
+            return val.length > 0 ? toCleanSingleId(val[0]) : null;
+        }
+        const s = String(val).trim();
+        if (!s || s === "-" || s === "PO-UNKNOWN") return null;
+        if (s.includes(",")) {
+            return toCleanSingleId(s.split(",")[0].trim());
+        }
+        if (!isNaN(Number(s))) {
+            return Number(s);
+        }
+        return s;
+    };
+
+    // Load purchase order payments from external API
+    const loadPayments = async (targetToDate: string): Promise<Map<string, PurchaseOrderPaymentItem>> => {
+        try {
+            const res = await PurchaseOrderPaymentService.getPurchaseOrderPayments({
+                Todate: targetToDate,
+                company_id: 1,
+            });
+            const rawList = res.data?.data || (Array.isArray(res.data) ? res.data : []);
+            const map = new Map<string, PurchaseOrderPaymentItem>();
+            rawList.forEach((p) => {
+                if (p && p.invoice_no !== undefined && p.invoice_no !== null) {
+                    const k = String(p.invoice_no).trim().toLowerCase();
+                    if (k) {
+                        map.set(k, p);
+                        if (k.startsWith("ps/")) {
+                            map.set("mia/" + k.slice(3), p);
+                        }
+                        const cleanNo = k.replace(/^[a-z]+\//, "");
+                        if (cleanNo && cleanNo !== k) {
+                            map.set(cleanNo, p);
+                            const digits = cleanNo.split("/")[0].replace(/^0+/, "");
+                            if (digits) map.set(digits, p);
+                        }
+                    }
+                }
+            });
+            paymentsMapRef.current = map;
+            return map;
+        } catch (err) {
+            console.error("Failed to load purchaseOrderPayment for delivery:", err);
+            return new Map();
+        }
+    };
+
+    // Fetch live delivery records for an order using OnlinePurchaseReportItemByOrderIdService
+    const fetchLiveDeliveryForOrder = async (orderIdentifier: string) => {
+        if (!orderIdentifier) return;
+        const cleanOrder = orderIdentifier.trim();
+        if (liveOrderDeliveryMap[cleanOrder] !== undefined) return;
+
+        setLiveOrderLoading(true);
+        try {
+            let targetPoId: string | number | null = null;
+            if (!isNaN(Number(cleanOrder))) {
+                targetPoId = Number(cleanOrder);
+            } else {
+                const matching = data.find((d) =>
+                    d.purOrderNo?.toLowerCase().includes(cleanOrder.toLowerCase()) ||
+                    d.purInvNo?.toLowerCase().includes(cleanOrder.toLowerCase()) ||
+                    d.id?.toLowerCase().includes(cleanOrder.toLowerCase())
+                );
+                if (matching) {
+                    const fromTrans = toCleanSingleId((matching as any).transId || (matching as any).OrderId || (matching as any).trans_id);
+                    if (fromTrans !== null && String(fromTrans) !== String(matching.purOrderNo).trim()) {
+                        targetPoId = fromTrans;
+                    }
+                }
+            }
+
+            if (targetPoId === null) {
+                const raw = await fetchRawPurchaseDatasets({ Fromdate: fromDate, Todate: toDate }).catch(() => null);
+                if (raw && raw.purchaseOrders) {
+                    const poMatch = raw.purchaseOrders.find((po: any) =>
+                        cleanOrder.toLowerCase().includes(String(po.invoice_no || "").toLowerCase()) ||
+                        String(po.invoice_no || "").toLowerCase().includes(cleanOrder.toLowerCase())
+                    );
+                    if (poMatch) {
+                        targetPoId = toCleanSingleId((poMatch as any).Trans_Id || (poMatch as any).trans_id || poMatch.invoice_no);
+                    }
+                }
+            }
+
+            if (targetPoId !== null) {
+                let payMap = paymentsMapRef.current;
+                if (!payMap || payMap.size === 0) {
+                    payMap = await loadPayments(toDate);
+                }
+
+                const [res, tripsRes] = await Promise.all([
+                    OnlinePurchaseReportItemByOrderIdService.getReportsitemByOrderId({
+                        Po_Id: targetPoId,
+                        company_id: 1,
+                    }),
+                    PurchaseOrderTripItemService.getPurchaseOrderTripItemDetails({
+                        Fromdate: fromDate,
+                        Todate: toDate,
+                    }).catch(() => ({ data: { data: [] } })),
+                ]);
+                const fetchedItems: OnlinePurchaseReportItemByOrderIdItem[] = res.data?.data || (Array.isArray(res.data) ? res.data : []);
+                const rawTrips: PurchaseOrderTripItem[] = (tripsRes.data as any)?.data || (Array.isArray(tripsRes.data) ? tripsRes.data : []);
+                const orderTrips = rawTrips.filter((t) => String(t.OrderId) === String(targetPoId));
+
+                if (fetchedItems.length > 0) {
+                    const totalBatchAmount = fetchedItems.reduce((acc, it) => {
+                        const a = typeof it.Amount === "number" ? it.Amount : parseFloat(String(it.Amount || 0).replace(/,/g, "")) || 0;
+                        return acc + a;
+                    }, 0);
+
+                    const liveRows: PurchaseDeliveryItem[] = fetchedItems.map((item, idx) => {
+                        const rawProd = cleanItemName(item.Product_Name || item.Stock_Item || item.POS_Item_Name || "Item");
+                        const qty = typeof item.Bill_Qty === "number" ? item.Bill_Qty : parseFloat(String(item.Bill_Qty || 0).replace(/,/g, "")) || 0;
+                        const qtyText = qty > 0 ? ` (${formatKgQuantity(qty)})` : "";
+                        const batchText = item.Batch ? ` [Batch: ${item.Batch}]` : "";
+                        const invNo = String(item.invoice_no || "").trim();
+
+                        const matchedTrip = orderTrips.find((t) =>
+                            (t.Product_Id && item.Product_Id && String(t.Product_Id) === String(item.Product_Id)) ||
+                            (t.Batch_No && item.Batch && String(t.Batch_No).trim() === String(item.Batch).trim()) ||
+                            (t.Product_Name && item.Product_Name && cleanItemName(t.Product_Name).toLowerCase() === rawProd.toLowerCase())
+                        ) || orderTrips[idx];
+
+                        const inwardJou = matchedTrip?.TR_INV_ID || (item as any).TR_INV_ID || item.Ref_Po_Inv_No || item.Trans_Id || "-";
+
+                        const invK = invNo.toLowerCase();
+                        const refK = String(item.Ref_Po_Inv_No || item.Trans_Id || "").trim().toLowerCase();
+                        let matchedPay = (invK && payMap.get(invK)) ||
+                                         (refK && payMap.get(refK)) ||
+                                         (invK && payMap.get(invK.replace(/^mia\//, "ps/"))) ||
+                                         (invK && payMap.get(invK.replace(/^[a-z]+\//, ""))) ||
+                                         (refK && payMap.get(refK.replace(/^[a-z]+\//, "")));
+
+                        if (!matchedPay && cleanOrder) {
+                            matchedPay = payMap.get(cleanOrder.toLowerCase());
+                        }
+
+                        const itemAmt = typeof item.Amount === "number" ? item.Amount : parseFloat(String(item.Amount || 0).replace(/,/g, "")) || 0;
+                        let paidAmt: number | string = "";
+                        let paymentInvoiceNo = "-";
+
+                        if (matchedPay) {
+                            paymentInvoiceNo = matchedPay.invoice_no || invNo || "-";
+                            if (matchedPay.Debit_Amt > 0) {
+                                if (totalBatchAmount > 0 && fetchedItems.length > 1) {
+                                    paidAmt = Math.round(matchedPay.Debit_Amt * (itemAmt / totalBatchAmount));
+                                } else {
+                                    paidAmt = matchedPay.Debit_Amt;
+                                }
+                            }
+                        } else if (invNo) {
+                            paymentInvoiceNo = invNo;
+                        }
+
+                        return {
+                            id: `pd-live-${item.invoice_no || idx}-${idx + 1}`,
+                            sNo: idx + 1,
+                            stockGroup: item.Stock_Group || deriveStockGroup(rawProd),
+                            inwardBatchWithItemName: `${rawProd}${qtyText}${batchText}`,
+                            purOrderNo: cleanOrder,
+                            inwardJouNo: inwardJou,
+                            purInvNo: invNo || "-",
+                            paymentNo: paymentInvoiceNo,
+                            paymentAmt: paidAmt,
+                            status: item.Cancel_status === "0" || !item.Cancel_status ? "COMPLETED" : "NOT COMPLETED",
+                            orderDate: item.Ledger_Date ? dayjs(item.Ledger_Date).format("YYYY-MM-DD") : dayjs().format("YYYY-MM-DD"),
+                        };
+                    });
+
+                    setLiveOrderDeliveryMap((prev) => ({
+                        ...prev,
+                        [cleanOrder]: liveRows,
+                    }));
+                }
+            }
+        } catch (err) {
+            console.error("Failed to fetch live delivery for order:", cleanOrder, err);
+        } finally {
+            setLiveOrderLoading(false);
+        }
+    };
+
+    // Load live dataset from APIs
+    useEffect(() => {
+        let isMounted = true;
+        const loadData = async () => {
+            setLoading(true);
+            try {
+                const [liveData] = await Promise.all([
+                    PurchaseDeliveryService.getPurchaseDeliveries({
+                        Fromdate: fromDate,
+                        Todate: toDate,
+                    }),
+                    loadPayments(toDate),
+                ]);
+                if (isMounted) {
+                    setData(liveData || []);
+                }
+            } catch (err) {
+                console.error("Failed to load live purchase delivery data:", err);
+                if (isMounted) {
+                    setData([]);
+                }
+            } finally {
+                if (isMounted) setLoading(false);
+            }
+        };
+
+        loadData();
+        return () => {
+            isMounted = false;
+        };
+    }, [fromDate, toDate]);
+
+    // Automatically fetch live delivery details when viewing specific order
+    useEffect(() => {
+        if (selectedOrderOnly) {
+            fetchLiveDeliveryForOrder(selectedOrderOnly);
+        }
+    }, [selectedOrderOnly, data]);
+
+
     // Filtered dataset
     const filteredData = useMemo(() => {
-        return data.filter((item) => {
+        // If specific order is passed from navigation, filter ONLY that exact order's records
+        let list = data;
+        if (selectedOrderOnly) {
+            const cleanSo = selectedOrderOnly.trim();
+            const liveItems = liveOrderDeliveryMap[cleanSo];
+            if (liveItems && liveItems.length > 0) {
+                list = liveItems;
+            } else {
+                const q = cleanSo.toLowerCase();
+                list = data.filter((item) =>
+                    item.purOrderNo?.toLowerCase().includes(q) ||
+                    item.purInvNo?.toLowerCase().includes(q) ||
+                    item.inwardBatchWithItemName?.toLowerCase().includes(q)
+                );
+            }
+        }
+
+        return list.filter((item) => {
             // 1. Search Query
             if (searchQuery.trim() !== "") {
                 const q = searchQuery.toLowerCase().trim();
@@ -103,8 +439,8 @@ const PurchaseDelivery: React.FC = () => {
                 if (item.status === "COMPLETED") return false;
             }
 
-            // 3. Date filter (Order Date)
-            if (fromDate || toDate) {
+            // 3. Date filter (Order Date) - only apply if NOT explicitly viewing a selected order
+            if (!selectedOrderOnly && (fromDate || toDate)) {
                 if (item.orderDate) {
                     const itemDate = dayjs(item.orderDate);
                     if (itemDate.isValid()) {
@@ -116,7 +452,7 @@ const PurchaseDelivery: React.FC = () => {
 
             return true;
         });
-    }, [data, searchQuery, activeStatusFilter, fromDate, toDate]);
+    }, [data, selectedOrderOnly, searchQuery, activeStatusFilter, fromDate, toDate]);
 
     // Metrics summary
     const metrics = useMemo(() => {
@@ -155,9 +491,9 @@ const PurchaseDelivery: React.FC = () => {
     const handleResetFilters = () => {
         setSearchQuery("");
         setActiveStatusFilter("ALL");
-        setFromDate(today);
+        setFromDate(currentMonthStart);
         setToDate(today);
-        setTempFromDate(today);
+        setTempFromDate(currentMonthStart);
         setTempToDate(today);
         setPage(1);
     };
@@ -188,7 +524,7 @@ const PurchaseDelivery: React.FC = () => {
                 "Pur .order no",
                 "Inward Jou no",
                 "Pur Inv no",
-                "Payment no",
+                "Payment invoice",
                 "Payment amt",
                 "status",
             ]);
@@ -277,7 +613,7 @@ const PurchaseDelivery: React.FC = () => {
             ws["!cols"] = [
                 { wch: 8 },  // S.no
                 { wch: 16 }, // Stock group
-                { wch: 34 }, // Inward Batch with item name
+                { wch: 36 }, // Inward Batch with item name
                 { wch: 18 }, // Pur .order no
                 { wch: 15 }, // Inward Jou no
                 { wch: 18 }, // Pur Inv no
@@ -326,7 +662,7 @@ const PurchaseDelivery: React.FC = () => {
                     "Pur .order no",
                     "Inward Jou no",
                     "Pur Inv no",
-                    "Payment no",
+                    "Payment invoice",
                     "Payment amt",
                     "status",
                 ],
@@ -455,6 +791,67 @@ const PurchaseDelivery: React.FC = () => {
                     gap: 1,
                 }}
             >
+                {/* ACTIVE ORDER FILTER BANNER (No top tabs) */}
+                {selectedOrderOnly && (
+                    <Box
+                        sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            bgcolor: "#eff6ff",
+                            border: "1px solid #bfdbfe",
+                            borderRadius: 1.5,
+                            px: 1.5,
+                            py: 0.8,
+                            flexShrink: 0,
+                            gap: 1,
+                        }}
+                    >
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <LocalShippingOutlinedIcon sx={{ color: "#1e3a8a", fontSize: 18 }} />
+                            <Typography sx={{ fontSize: "0.82rem", fontWeight: 700, color: "#1e3a8a" }}>
+                                Showing Delivery Details for Order: <strong>{selectedOrderOnly}</strong> ({filteredData.length} records)
+                            </Typography>
+                            {liveOrderDeliveryMap[selectedOrderOnly.trim()] && liveOrderDeliveryMap[selectedOrderOnly.trim()].length > 0 && (
+                                <Chip
+                                    size="small"
+                                    label="Live Order Item API"
+                                    sx={{
+                                        bgcolor: "#dcfce7",
+                                        color: "#15803d",
+                                        fontWeight: 800,
+                                        fontSize: "0.62rem",
+                                        height: 20,
+                                    }}
+                                />
+                            )}
+                            {liveOrderLoading && (
+                                <Typography sx={{ fontSize: "0.70rem", color: "#64748b" }}>
+                                    (Loading live items...)
+                                </Typography>
+                            )}
+                        </Box>
+                        <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => {
+                                setSelectedOrderOnly("");
+                                navigate("/purchaseDelivery", { replace: true });
+                            }}
+                            sx={{
+                                textTransform: "none",
+                                fontSize: "0.72rem",
+                                fontWeight: 600,
+                                py: 0.3,
+                                px: 1.2,
+                                bgcolor: "#ffffff",
+                            }}
+                        >
+                            Clear Filter & View All Orders
+                        </Button>
+                    </Box>
+                )}
+
                 {/* TITLE & CONTROLS BAR */}
                 <Box
                     sx={{
@@ -594,6 +991,8 @@ const PurchaseDelivery: React.FC = () => {
                     </Box>
                 </Box>
 
+
+
                 {/* 4. MAIN TABLE (FLAT TABLE WITHOUT EXPANSION MATCHING USER IMAGE) */}
                 <Paper
                     elevation={0}
@@ -609,6 +1008,7 @@ const PurchaseDelivery: React.FC = () => {
                         overflow: "hidden",
                     }}
                 >
+                    {loading && <LinearProgress sx={{ height: 3 }} />}
                     <TableContainer
                         sx={{
                             flex: 1,
@@ -664,13 +1064,16 @@ const PurchaseDelivery: React.FC = () => {
                                         Pur Inv no
                                     </TableCell>
                                     <TableCell sx={{ width: "12%" }}>
-                                        Payment no
+                                        Payment invoice
                                     </TableCell>
                                     <TableCell align="right" sx={{ width: "11%" }}>
                                         Payment amt
                                     </TableCell>
-                                    <TableCell align="center" sx={{ width: "11%", borderRight: "none" }}>
+                                    <TableCell align="center" sx={{ width: "9%" }}>
                                         status
+                                    </TableCell>
+                                    <TableCell align="center" sx={{ width: "8%", borderRight: "none" }}>
+                                        Actions
                                     </TableCell>
                                 </TableRow>
 
@@ -715,7 +1118,7 @@ const PurchaseDelivery: React.FC = () => {
                                     >
                                         {metrics.totalPaymentAmt > 0 ? formatCurrency(metrics.totalPaymentAmt) : "-"}
                                     </TableCell>
-                                    <TableCell align="center" sx={{ borderRight: "none" }}>
+                                    <TableCell align="center">
                                         <Chip
                                             size="small"
                                             label={`${metrics.completionRate}% Done`}
@@ -728,6 +1131,7 @@ const PurchaseDelivery: React.FC = () => {
                                             }}
                                         />
                                     </TableCell>
+                                    <TableCell align="center" sx={{ borderRight: "none" }}> </TableCell>
                                 </TableRow>
                             </TableHead>
 
@@ -816,7 +1220,7 @@ const PurchaseDelivery: React.FC = () => {
                                                             wordBreak: "break-word",
                                                         }}
                                                     >
-                                                        {row.purOrderNo}
+                                                        {row.purOrderNo || "-"}
                                                     </Typography>
                                                 </TableCell>
 
@@ -832,14 +1236,14 @@ const PurchaseDelivery: React.FC = () => {
                                                         borderRight: "1px solid #eef2f6",
                                                     }}
                                                 >
-                                                    {row.inwardJouNo}
+                                                    {row.inwardJouNo || "-"}
                                                 </TableCell>
 
                                                 {/* PUR INV NO */}
                                                 <TableCell
                                                     sx={{
                                                         fontWeight: 600,
-                                                        color: "#475569",
+                                                        color: "#0369a1",
                                                         fontSize: "0.78rem",
                                                         py: 0.8,
                                                         px: 0.8,
@@ -847,7 +1251,7 @@ const PurchaseDelivery: React.FC = () => {
                                                         wordBreak: "break-word",
                                                     }}
                                                 >
-                                                    {row.purInvNo}
+                                                    {row.purInvNo || "-"}
                                                 </TableCell>
 
                                                 {/* PAYMENT NO */}
@@ -862,7 +1266,7 @@ const PurchaseDelivery: React.FC = () => {
                                                         wordBreak: "break-word",
                                                     }}
                                                 >
-                                                    {row.paymentNo}
+                                                    {row.paymentNo || "-"}
                                                 </TableCell>
 
                                                 {/* PAYMENT AMT */}
@@ -885,7 +1289,7 @@ const PurchaseDelivery: React.FC = () => {
                                                             row.paymentAmt
                                                         )
                                                     ) : (
-                                                        ""
+                                                        "-"
                                                     )}
                                                 </TableCell>
 
@@ -895,7 +1299,7 @@ const PurchaseDelivery: React.FC = () => {
                                                     sx={{
                                                         py: 0.8,
                                                         px: 0.8,
-                                                        borderRight: "none",
+                                                        borderRight: "1px solid #eef2f6",
                                                     }}
                                                 >
                                                     <Chip
@@ -922,12 +1326,71 @@ const PurchaseDelivery: React.FC = () => {
                                                         }}
                                                     />
                                                 </TableCell>
+
+                                                {/* ACTIONS */}
+                                                <TableCell
+                                                    align="center"
+                                                    sx={{
+                                                        py: 0.8,
+                                                        px: 0.5,
+                                                        borderRight: "none",
+                                                    }}
+                                                >
+                                                    <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 0.5 }}>
+                                                        {/* Item & Invoice Payment */}
+                                                        <Tooltip title={`Item & Invoice Payment (${row.purOrderNo || row.purInvNo}) - Open in New Tab`}>
+                                                            <IconButton
+                                                                size="small"
+                                                                onClick={() => {
+                                                                    const effectiveFrom = row.orderDate && dayjs(row.orderDate).isValid() && dayjs(row.orderDate).isBefore(dayjs(fromDate))
+                                                                        ? dayjs(row.orderDate).format("YYYY-MM-DD")
+                                                                        : fromDate;
+                                                                    const url = `/purchaseItemPayment?orderId=${encodeURIComponent(row.purOrderNo || row.purInvNo)}&fromDate=${encodeURIComponent(effectiveFrom)}&toDate=${encodeURIComponent(toDate)}`;
+                                                                    window.open(url, "_blank");
+                                                                }}
+                                                                sx={{
+                                                                    bgcolor: "#f0f9ff",
+                                                                    color: "#0369a1",
+                                                                    border: "1px solid #bae6fd",
+                                                                    p: 0.5,
+                                                                    "&:hover": { bgcolor: "#e0f2fe" },
+                                                                }}
+                                                            >
+                                                                <TableViewOutlinedIcon sx={{ fontSize: 15 }} />
+                                                            </IconButton>
+                                                        </Tooltip>
+
+                                                        {/* Purchase Payment */}
+                                                        <Tooltip title={`Payment Details (${row.purOrderNo || row.purInvNo}) - Open in New Tab`}>
+                                                            <IconButton
+                                                                size="small"
+                                                                onClick={() => {
+                                                                    const effectiveFrom = row.orderDate && dayjs(row.orderDate).isValid() && dayjs(row.orderDate).isBefore(dayjs(fromDate))
+                                                                        ? dayjs(row.orderDate).format("YYYY-MM-DD")
+                                                                        : fromDate;
+                                                                    const url = `/purchasePayment?orderId=${encodeURIComponent(row.purOrderNo || row.purInvNo)}&fromDate=${encodeURIComponent(effectiveFrom)}&toDate=${encodeURIComponent(toDate)}`;
+                                                                    window.open(url, "_blank");
+                                                                }}
+                                                                sx={{
+                                                                    bgcolor: "#fdf4ff",
+                                                                    color: "#a21caf",
+                                                                    border: "1px solid #f0abfc",
+                                                                    p: 0.5,
+                                                                    "&:hover": { bgcolor: "#fae8ff" },
+                                                                }}
+                                                            >
+                                                                <PaymentOutlinedIcon sx={{ fontSize: 15 }} />
+                                                            </IconButton>
+                                                        </Tooltip>
+
+                                                    </Box>
+                                                </TableCell>
                                             </TableRow>
                                         );
                                     })
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
+                                        <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
                                             <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                                                 <ErrorOutlineIcon sx={{ fontSize: 36, color: "#94a3b8" }} />
                                                 <Typography sx={{ color: "#64748b", fontWeight: 600, fontSize: "0.9rem" }}>

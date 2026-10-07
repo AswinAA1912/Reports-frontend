@@ -128,7 +128,7 @@ const StockInHandReport: React.FC = () => {
                         fromDate,
                         toDate,
                         Product_Id: productId,
-                        Batch: selected.apiBatch || selected.batchNo || "Primary Batch",
+                        Batch: selected.apiBatch || selected.batchNo || "Unassigned",
                     });
                 }
 
@@ -663,33 +663,109 @@ const StockInHandReport: React.FC = () => {
             }
         });
 
+        // ✅ Apply stockFilter to level1FilteredData (Data only has values / Data with 0 / All)
+        filtered = filtered.filter((r) => {
+            const ob = Number(r[qtyKeys.opening]) || 0;
+            const input = Number(r[qtyKeys.in]) || 0;
+            const out = Number(r[qtyKeys.out]) || 0;
+            const cls = Number(r[qtyKeys.closing]) || 0;
+
+            const hasValue = ob !== 0 || input !== 0 || out !== 0 || cls !== 0;
+            const isZero = ob === 0 && input === 0 && out === 0 && cls === 0;
+
+            if (stockFilter === "hasValues") return hasValue;
+            if (stockFilter === "zero") return isZero;
+
+            return true; // "all"
+        });
+
         return filtered;
-    }, [rawData, selectedFilters, filterLevels]);
+    }, [rawData, selectedFilters, filterLevels, stockFilter, qtyKeys]);
 
 
     /* ===== GODOWN FIRST (EXPANDED MODE) ===== */
-    const computeLevel2Values = (
-        columnName: string,
-        parent?: { column: string; value: string }
-    ) => {
-        const map = new Map<string, number>();
+    const computeLevel2Values = useCallback(
+        (
+            columnName: string,
+            parent?: { column: string; value: string }
+        ) => {
+            const map = new Map<string, number>();
 
-        level1FilteredData.forEach((r: any) => {
-            if (parent) {
-                if (String(r[parent.column]) !== parent.value) return;
-            }
+            level1FilteredData.forEach((r: any) => {
+                if (parent) {
+                    if (String(r[parent.column]) !== parent.value) return;
+                }
 
-            const v = r[columnName];
-            if (!v) return;
+                const v = r[columnName];
+                if (!v || !String(v).trim()) return;
 
-            const qty = Number(r[qtyKeys.closing] || 0);
-            map.set(String(v), (map.get(String(v)) || 0) + qty);
+                const qty = Number(r[qtyKeys.closing] || 0);
+                map.set(String(v), (map.get(String(v)) || 0) + qty);
+            });
+
+            return Array.from(map.entries())
+                .map(([value, total]) => ({ value, total }))
+                .filter(({ total }) => {
+                    // Only show chips with data (> 0 or non-zero), hide if it is 0
+                    if (stockFilter === "hasValues") {
+                        return Math.abs(Number(total.toFixed(2))) > 0;
+                    }
+                    if (stockFilter === "zero") {
+                        return Math.abs(Number(total.toFixed(2))) === 0;
+                    }
+                    return true; // "all"
+                })
+                .sort((a, b) => b.total - a.total);
+        },
+        [level1FilteredData, qtyKeys, stockFilter]
+    );
+
+    // ✅ Clean up any stale selectedLevel2ByType that is no longer in valid values
+    useEffect(() => {
+        setSelectedLevel2ByType((prev) => {
+            let changed = false;
+            const updated = { ...prev };
+
+            level2TypeOrder.forEach((type, idx) => {
+                const selected = updated[type];
+                if (!selected) return;
+
+                const meta = level2Meta.find((m) => m.type === type);
+                if (!meta) {
+                    delete updated[type];
+                    changed = true;
+                    return;
+                }
+
+                let parent;
+                if (idx > 0) {
+                    const parentType = level2TypeOrder[idx - 1];
+                    const parentValue = updated[parentType];
+                    if (!parentValue) {
+                        delete updated[type];
+                        changed = true;
+                        return;
+                    }
+
+                    const parentMeta = level2Meta.find((m) => m.type === parentType);
+                    if (parentMeta) {
+                        parent = {
+                            column: parentMeta.columnName,
+                            value: parentValue,
+                        };
+                    }
+                }
+
+                const values = computeLevel2Values(meta.columnName, parent);
+                if (!values.some((v) => v.value === selected)) {
+                    delete updated[type];
+                    changed = true;
+                }
+            });
+
+            return changed ? updated : prev;
         });
-
-        return Array.from(map.entries())
-            .map(([value, total]) => ({ value, total }))
-            .sort((a, b) => b.total - a.total);
-    };
+    }, [level2TypeOrder, level2Meta, computeLevel2Values]);
 
 
     const finalGroups = useMemo(() => {
@@ -869,11 +945,11 @@ const StockInHandReport: React.FC = () => {
     };
 
     const handleBatchClick = (item: stockWiseReport, batch: any) => {
-        const batchNo = String(batch?.Batch_No || "Primary Batch").trim() || "Primary Batch";
+        const batchNo = String(batch?.Batch_No || "Unassigned").trim() || "Unassigned";
         const apiBatch =
             batch?.Batch_No !== undefined && batch?.Batch_No !== null && String(batch.Batch_No).trim() !== ""
                 ? String(batch.Batch_No).trim()
-                : String(batch?.Batch_No ?? "Primary Batch");
+                : String(batch?.Batch_No ?? "Unassigned");
 
         const isGodown = Boolean(isExpanded || batch?.Godown_Id || item?.Godown_Id);
         const godownId = isGodown
@@ -1275,7 +1351,7 @@ const StockInHandReport: React.FC = () => {
                                                     }}
                                                     title="Click to view batch transactions"
                                                 >
-                                                    {batch.Batch_No || "Primary Batch"}
+                                                    {batch.Batch_No || "Unassigned"}
                                                 </strong>
                                             </Typography>
                                         </Box>
@@ -1767,7 +1843,7 @@ const StockInHandReport: React.FC = () => {
                             </Typography>
 
                             <Chip
-                                label={`Batch: ${selectedBatchItem?.batchNo || "Primary Batch"}`}
+                                label={`Batch: ${selectedBatchItem?.batchNo || "Unassigned"}`}
                                 size="small"
                                 sx={{
                                     bgcolor: "rgba(255, 255, 255, 0.2)",
@@ -1936,7 +2012,7 @@ const StockInHandReport: React.FC = () => {
                                                 zIndex: 3,
                                             }}
                                         >
-                                            Invoice No
+                                            Vocuher No
                                         </TableCell>
 
                                         <TableCell
@@ -1967,7 +2043,7 @@ const StockInHandReport: React.FC = () => {
                                                 zIndex: 3,
                                             }}
                                         >
-                                            Voucher Name
+                                            Voucher Type
                                         </TableCell>
 
                                         <TableCell

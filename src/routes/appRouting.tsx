@@ -50,6 +50,8 @@ import SalesStockGodown from "../reports/Stock/SalesStockGodown";
 import UserRights from "../settings/UserRights";
 import OverallItemwise from "../reports/Stock/OverallItemwise";
 import PurchaseDelivery from "../reports/Purchase/PurchaseDelivery";
+import PurchasePaymentReport from "../reports/Purchase/PurchasePaymentReport";
+import PurchaseItemPaymentReport from "../reports/Purchase/PurchaseItemPaymentReport";
 
 interface AppRoutingProps {
   setActiveCategory: (category: string) => void;
@@ -74,6 +76,12 @@ const URLSyncHandler: React.FC<{ setActiveCategory: (cat: string) => void }> = (
       "/recievablePayable": "Receivable & Payable Report",
       "/purchasedelivery": "Purchase Delivery Funnel Report",
       "/purchaseDelivery": "Purchase Delivery Funnel Report",
+      "/purchasepayment": "Purchase Payment Report",
+      "/purchasePayment": "Purchase Payment Report",
+      "/purchaseitempayment": "Purchase Item & Invoice Payment Report",
+      "/purchaseItemPayment": "Purchase Item & Invoice Payment Report",
+      "/purchaseinvoicepayment": "Purchase Item & Invoice Payment Report",
+      "/purchaseInvoicePayment": "Purchase Item & Invoice Payment Report",
       "/groupwiseItem": "Group Wise Item",
       "/": "Login",
     };
@@ -573,7 +581,27 @@ const AppRouting: React.FC<AppRoutingProps> = ({
             </RequireAuth>
           }
         />
+        <Route
+          path="/purchasedetailed"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <PurchaseReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
 
+        <Route
+          path="/purchaseDelivery"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <PurchaseDelivery />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
         <Route
           path="/purchasedelivery"
           element={
@@ -586,11 +614,42 @@ const AppRouting: React.FC<AppRoutingProps> = ({
         />
 
         <Route
-          path="/purchaseDelivery"
+          path="/purchasePayment"
           element={
             <RequireAuth>
               <AppLayout fullWidth>
-                <PurchaseDelivery />
+                <PurchasePaymentReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/purchasepayment"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <PurchasePaymentReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/purchaseItemPayment"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <PurchaseItemPaymentReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/purchaseitempayment"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <PurchaseItemPaymentReport />
               </AppLayout>
             </RequireAuth>
           }

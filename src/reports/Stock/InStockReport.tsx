@@ -849,12 +849,14 @@ const InStockReport: React.FC = () => {
             processData.forEach((t: any) => {
                 if (String(t.godown_id) === godownIdStr) {
                     const pId = Number(t.item_id);
-                    if (pId && !existingProductIds.has(pId)) {
+                    const itemName = String(t.item_name || "").trim();
+                    const qty = Number(t.quantity || 0);
+                    if (pId && itemName && itemName !== "-" && qty !== 0 && !existingProductIds.has(pId)) {
                         existingProductIds.add(pId);
                         extraRows.push({
                             Product_Id: pId,
-                            stock_item_name: t.item_name,
-                            Stock_Item: t.item_name,
+                            stock_item_name: itemName,
+                            Stock_Item: itemName,
                             Brand: "Others",
                             Group_Name: "Others",
                             OB_Bal_Qty: 0,
@@ -885,9 +887,65 @@ const InStockReport: React.FC = () => {
             });
 
             const mergedRows = [...apiRows, ...extraRows];
-            setDetailedStockData(mergedRows);
 
-            if (apiRows.length) {
+            // Filter out empty items: only keep items that have valid product names and actual data/movements
+            const validRows = mergedRows.filter((item) => {
+                const pName = String(item.stock_item_name || item.Stock_Item || item.product_name || "").trim();
+                if (!pName || pName === "-" || pName.toLowerCase() === "undefined" || pName.toLowerCase() === "null") {
+                    return false;
+                }
+
+                const hasRawQty =
+                    Number(item.OB_Bal_Qty || 0) !== 0 ||
+                    Number(item.Pur_Qty || 0) !== 0 ||
+                    Number(item.Sal_Qty || 0) !== 0 ||
+                    Number(item.Bal_Qty || 0) !== 0 ||
+                    Number(item.OB_Act_Qty || 0) !== 0 ||
+                    Number(item.Pur_Act_Qty || 0) !== 0 ||
+                    Number(item.Sal_Act_Qty || 0) !== 0 ||
+                    Number(item.Bal_Act_Qty || 0) !== 0 ||
+                    Number(item.Act_Bal_Qty || 0) !== 0 ||
+                    Number(item.OB_Qty || 0) !== 0 ||
+                    Number(item.IN_Qty || 0) !== 0 ||
+                    Number(item.Out_Qty || 0) !== 0 ||
+                    Number(item.OUT_Qty || 0) !== 0 ||
+                    Number(item.CL_QTY || 0) !== 0 ||
+                    Number(item.ACt_OB_Qty || 0) !== 0 ||
+                    Number(item.ACt_In_Qty || 0) !== 0 ||
+                    Number(item.IN_Act_Qty || 0) !== 0 ||
+                    Number(item.ACt_Out_Qty || 0) !== 0 ||
+                    Number(item.OUT_Act_Qty || 0) !== 0 ||
+                    Number(item.CL_ACt_QTY || 0) !== 0 ||
+                    Number(item.Process_IN_OUT_Qty || 0) !== 0 ||
+                    Number(item.Process_Act_IN_OUT_Qty || 0) !== 0 ||
+                    Number(item.Proc_IN_Qty || 0) !== 0 ||
+                    Number(item.Proc_OUT_Qty || 0) !== 0 ||
+                    Number(item.Proc_IN_Act_Qty || 0) !== 0 ||
+                    Number(item.Proc_OUT_Act_Qty || 0) !== 0 ||
+                    Number(item.SOU_In_Qty || 0) !== 0 ||
+                    Number(item.SOU_ACt_In_Qty || 0) !== 0 ||
+                    Number(item.SOU_Out_Qty || 0) !== 0 ||
+                    Number(item.SOU_ACt_Out_Qty || 0) !== 0 ||
+                    Object.keys(item).some(k => /qty/i.test(k) && Number(item[k] || 0) !== 0);
+
+                if (hasRawQty) return true;
+
+                const pId = Number(item.Product_Id);
+                const pNameLower = pName.toLowerCase();
+                const hasProcessRecord = processData.some((t: any) => {
+                    if (String(t.godown_id) !== godownIdStr) return false;
+                    const matchesId = pId && Number(t.item_id) === pId;
+                    const matchesName = t.item_name && String(t.item_name).trim().toLowerCase() === pNameLower;
+                    return (matchesId || matchesName) && Number(t.quantity || 0) !== 0;
+                });
+
+                return hasProcessRecord;
+            });
+
+            setDetailedStockData(validRows);
+
+            if (validRows.length || apiRows.length) {
+                const sourceRow = validRows[0] || apiRows[0];
                 const FIXED_KEYS = [
                     "OB_Bal_Qty",
                     "Pur_Qty",
@@ -904,7 +962,7 @@ const InStockReport: React.FC = () => {
                 ];
                 const DEFAULT_COLUMNS = ["Brand", "stock_item_name", "Stock_Item"];
 
-                const baseCols = Object.keys(apiRows[0])
+                const baseCols = Object.keys(sourceRow)
                     .filter(key => !FIXED_KEYS.includes(key))
                     .map((key, index) => {
                         const matchedDefault = DEFAULT_CONFIGURABLE_COLUMNS.find(c => c.key === key);
@@ -1146,6 +1204,10 @@ const InStockReport: React.FC = () => {
     const groupChips = useMemo(() => {
         const set = new Set<string>();
         (detailedStockData || []).forEach(x => {
+            const productName = String(x.stock_item_name || x.Stock_Item || "").trim();
+            if (!productName || productName === "-" || productName.toLowerCase() === "undefined" || productName.toLowerCase() === "null") {
+                return;
+            }
             const val = x[groupByColumn];
             if (val) set.add(String(val));
         });
@@ -1155,7 +1217,11 @@ const InStockReport: React.FC = () => {
     // Filtered data based on search and active group value
     const filteredDetailedData = useMemo(() => {
         const filtered = (detailedStockData || []).filter((item) => {
-            const productName = item.stock_item_name || item.Stock_Item || "";
+            const productName = String(item.stock_item_name || item.Stock_Item || item.product_name || "").trim();
+            if (!productName || productName === "-" || productName.toLowerCase() === "undefined" || productName.toLowerCase() === "null") {
+                return false;
+            }
+
             const brandName = item.Brand || item.Group_Name || "";
             const groupVal = String(item[groupByColumn] || "");
             const matchesSearch = productName.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -1165,25 +1231,69 @@ const InStockReport: React.FC = () => {
 
             if (!matchesSearch || !matchesGroup) return false;
 
+            const { trips, returnQty, stockInQty, procInQty, procOutQty, outwardQty, outRecords, hasModuleTransactions } = getProductDetails(item);
+
+            const hasNonZeroQty =
+                Number(item.OB_Bal_Qty || 0) !== 0 ||
+                Number(item.Pur_Qty || 0) !== 0 ||
+                Number(item.Sal_Qty || 0) !== 0 ||
+                Number(item.Bal_Qty || 0) !== 0 ||
+                Number(item.OB_Act_Qty || 0) !== 0 ||
+                Number(item.Pur_Act_Qty || 0) !== 0 ||
+                Number(item.Sal_Act_Qty || 0) !== 0 ||
+                Number(item.Bal_Act_Qty || 0) !== 0 ||
+                Number(item.Act_Bal_Qty || 0) !== 0 ||
+                Number(item.OB_Qty || 0) !== 0 ||
+                Number(item.IN_Qty || 0) !== 0 ||
+                Number(item.Out_Qty || 0) !== 0 ||
+                Number(item.OUT_Qty || 0) !== 0 ||
+                Number(item.CL_QTY || 0) !== 0 ||
+                Number(item.ACt_OB_Qty || 0) !== 0 ||
+                Number(item.ACt_In_Qty || 0) !== 0 ||
+                Number(item.IN_Act_Qty || 0) !== 0 ||
+                Number(item.ACt_Out_Qty || 0) !== 0 ||
+                Number(item.OUT_Act_Qty || 0) !== 0 ||
+                Number(item.CL_ACt_QTY || 0) !== 0 ||
+                Number(item.Process_IN_OUT_Qty || 0) !== 0 ||
+                Number(item.Process_Act_IN_OUT_Qty || 0) !== 0 ||
+                Number(item.Proc_IN_Qty || 0) !== 0 ||
+                Number(item.Proc_OUT_Qty || 0) !== 0 ||
+                Number(item.Proc_IN_Act_Qty || 0) !== 0 ||
+                Number(item.Proc_OUT_Act_Qty || 0) !== 0 ||
+                Number(item.SOU_In_Qty || 0) !== 0 ||
+                Number(item.SOU_ACt_In_Qty || 0) !== 0 ||
+                Number(item.SOU_Out_Qty || 0) !== 0 ||
+                Number(item.SOU_ACt_Out_Qty || 0) !== 0 ||
+                Object.keys(item).some(k => /qty/i.test(k) && Number(item[k] || 0) !== 0);
+
+            const hasProcessActivity =
+                trips.length > 0 ||
+                Number(returnQty || 0) !== 0 ||
+                Number(stockInQty || 0) !== 0 ||
+                Number(procInQty || 0) !== 0 ||
+                Number(procOutQty || 0) !== 0 ||
+                Number(outwardQty || 0) !== 0 ||
+                outRecords.length > 0;
+
+            if (!hasNonZeroQty && !hasProcessActivity) {
+                return false;
+            }
+
             if (moduleFilter !== 'ALL') {
-                const { hasModuleTransactions } = getProductDetails(item);
                 if (!hasModuleTransactions) return false;
             }
 
             if (inwardMode) {
-                const { stockInQty } = getProductDetails(item);
-                const totalStockIn = processApiData.length > 0 ? stockInQty : Number(item[qtyKeys.in] || 0);
+                const totalStockIn = Math.max(stockInQty, Number(item[qtyKeys.in] || 0));
                 if (totalStockIn <= 0) return false;
             }
             if (processMode) {
-                const { procInQty, procOutQty } = getProductDetails(item);
-                const totalProcIn = processApiData.length > 0 ? procInQty : Number(item[qtyKeys.procIn] || 0);
-                const totalProcOut = processApiData.length > 0 ? procOutQty : Number(item[qtyKeys.procOut] || 0);
+                const totalProcIn = Math.max(procInQty, Number(item[qtyKeys.procIn] || 0));
+                const totalProcOut = Math.max(procOutQty, Number(item[qtyKeys.procOut] || 0));
                 if (totalProcIn <= 0 && totalProcOut <= 0) return false;
             }
             if (outwardMode) {
-                const { outwardQty } = getProductDetails(item);
-                const totalStockOut = processApiData.length > 0 ? outwardQty : Number(item[qtyKeys.out] || 0);
+                const totalStockOut = Math.max(outwardQty, Number(item[qtyKeys.out] || 0));
                 if (totalStockOut <= 0) return false;
             }
 

@@ -119,6 +119,46 @@ const PageHeader: React.FC<PageHeaderProps> = ({
     return isDevOrAdmin || !!(currentPage?.id && userAllowedMenuIds.includes(currentPage.id));
   }, [isDevOrAdmin, currentPage, userAllowedMenuIds]);
 
+  const effectiveSelectedPath = useMemo(() => {
+    if (pages.some((p) => p.path === selectedPath)) {
+      return selectedPath;
+    }
+    const caseMatch = pages.find(
+      (p) => p.path.toLowerCase() === selectedPath.toLowerCase()
+    );
+    if (caseMatch) {
+      return caseMatch.path;
+    }
+    if (parentReportName) {
+      const labelMatch = pages.find(
+        (p) => p.label.trim().toUpperCase() === parentReportName.trim().toUpperCase()
+      );
+      if (labelMatch) {
+        return labelMatch.path;
+      }
+    }
+    return selectedPath;
+  }, [pages, selectedPath, parentReportName]);
+
+  const displayPages = useMemo(() => {
+    if (pages.length === 0) return [];
+    const hasCurrent = pages.some(
+      (p) =>
+        p.path.toLowerCase() === selectedPath.toLowerCase() ||
+        (parentReportName && p.label.trim().toUpperCase() === parentReportName.trim().toUpperCase())
+    );
+    if (!hasCurrent && currentPageLabel) {
+      return [
+        ...pages,
+        {
+          label: currentPageLabel,
+          path: selectedPath,
+        },
+      ];
+    }
+    return pages;
+  }, [pages, selectedPath, currentPageLabel, parentReportName]);
+
 
   // Company name for display
   const companyName = useMemo(() => user?.Company_Name || "", [user]);
@@ -362,8 +402,14 @@ const PageHeader: React.FC<PageHeaderProps> = ({
               ) : (
                 <Select
                   size="small"
-                  value={selectedPath}
-                  onChange={() => { }}
+                  value={effectiveSelectedPath}
+                  onChange={(e) => {
+                    const nextPath = e.target.value as string;
+                    const item = displayPages.find((p) => p.path === nextPath);
+                    if (item) {
+                      handleExternalOrMenuNavigation(item.path, item.label, navigate, token, user);
+                    }
+                  }}
                   sx={{
                     minWidth: isMobile ? 140 : 180,
                     height: 24,
@@ -377,7 +423,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
                     },
                   }}
                 >
-                  {pages.map((p) => (
+                  {displayPages.map((p) => (
                     <MenuItem
                       key={p.path}
                       value={p.path}

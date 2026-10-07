@@ -19,9 +19,13 @@ import {
     DialogActions,
     Grid,
     Divider,
+    LinearProgress,
 } from "@mui/material";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import LocalShippingIcon from "@mui/icons-material/LocalShipping";
+import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
+import TableViewOutlinedIcon from "@mui/icons-material/TableViewOutlined";
+import PaymentOutlinedIcon from "@mui/icons-material/PaymentOutlined";
 import CloseIcon from "@mui/icons-material/Close";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
@@ -31,6 +35,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
 import { toast } from "react-toastify";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import PageHeader from "../../Layout/PageHeader";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import CommonPagination from "../../Components/CommonPagination";
@@ -39,8 +44,7 @@ import {
     TripDetail,
     DeliveryStatus,
     PurchaseReportFilterType,
-    getPurchaseDataByFilter,
-    getPurchaseFilterCounts,
+    PurchaseReportService,
 } from "../../services/purchaseReport.service";
 
 /* ================= HELPER FORMATTERS ================= */
@@ -250,6 +254,11 @@ const PurchaseRow: React.FC<RowProps> = ({
                     <Chip
                         size="small"
                         label={row.orderId}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            window.open(`/purchaseItemPayment?orderId=${encodeURIComponent(row.orderId)}`, "_blank");
+                        }}
+                        title="Click to view Item & Invoice Payment details for this order in new tab"
                         sx={{
                             height: 20,
                             fontSize: "0.72rem",
@@ -257,6 +266,11 @@ const PurchaseRow: React.FC<RowProps> = ({
                             bgcolor: "#e0f2fe",
                             color: "#0369a1",
                             border: "1px solid #bae6fd",
+                            cursor: "pointer",
+                            "&:hover": {
+                                bgcolor: "#bae6fd",
+                                textDecoration: "underline",
+                            },
                         }}
                     />
                 </TableCell>
@@ -441,6 +455,75 @@ const PurchaseRow: React.FC<RowProps> = ({
                                         }}
                                     />
                                 </Box>
+
+                                {/* QUICK INTERLINK NAVIGATION ACTIONS (Open in New Tab) */}
+                                <Box sx={{ display: "flex", alignItems: "center", gap: 0.8, flexWrap: "wrap" }}>
+                                    <Button
+                                        size="small"
+                                        variant="outlined"
+                                        startIcon={<LocalShippingOutlinedIcon sx={{ fontSize: 13 }} />}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            window.open(`/purchaseDelivery?orderId=${encodeURIComponent(row.order.orderId)}`, "_blank");
+                                        }}
+                                        sx={{
+                                            textTransform: "none",
+                                            fontSize: "0.68rem",
+                                            fontWeight: 700,
+                                            py: 0.2,
+                                            px: 1,
+                                            color: "#1e3a8a",
+                                            borderColor: "#bfdbfe",
+                                            bgcolor: "#ffffff",
+                                            "&:hover": { bgcolor: "#eff6ff", borderColor: "#93c5fd" },
+                                        }}
+                                    >
+                                        Delivery
+                                    </Button>
+                                    <Button
+                                        size="small"
+                                        variant="outlined"
+                                        startIcon={<PaymentOutlinedIcon sx={{ fontSize: 13 }} />}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            window.open(`/purchasePayment?orderId=${encodeURIComponent(row.order.orderId)}`, "_blank");
+                                        }}
+                                        sx={{
+                                            textTransform: "none",
+                                            fontSize: "0.68rem",
+                                            fontWeight: 700,
+                                            py: 0.2,
+                                            px: 1,
+                                            color: "#1e3a8a",
+                                            borderColor: "#bfdbfe",
+                                            bgcolor: "#ffffff",
+                                            "&:hover": { bgcolor: "#eff6ff", borderColor: "#93c5fd" },
+                                        }}
+                                    >
+                                        Payment
+                                    </Button>
+                                    <Button
+                                        size="small"
+                                        variant="contained"
+                                        startIcon={<TableViewOutlinedIcon sx={{ fontSize: 13 }} />}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            window.open(`/purchaseItemPayment?orderId=${encodeURIComponent(row.order.orderId)}`, "_blank");
+                                        }}
+                                        sx={{
+                                            textTransform: "none",
+                                            fontSize: "0.68rem",
+                                            fontWeight: 700,
+                                            py: 0.2,
+                                            px: 1,
+                                            color: "#ffffff",
+                                            bgcolor: "#1e3a8a",
+                                            "&:hover": { bgcolor: "#1e40af" },
+                                        }}
+                                    >
+                                        Item Payment
+                                    </Button>
+                                </Box>
                             </Box>
 
                             {/* WHOLE ORDER ITEMS SUBTABLE */}
@@ -620,11 +703,26 @@ const PurchaseRow: React.FC<RowProps> = ({
 /* ================= MAIN COMPONENT ================= */
 
 const PurchaseReport: React.FC = () => {
+    const navigate = useNavigate();
+    const location = useLocation();
+    const [searchParams] = useSearchParams();
+
+    // Specific order passed from navigation
+    const navOrderId =
+        location.state?.orderId ||
+        location.state?.altOrderId ||
+        location.state?.searchQuery ||
+        searchParams.get("orderId") ||
+        searchParams.get("po") ||
+        "";
+
+    const [selectedOrderOnly, setSelectedOrderOnly] = useState<string>(navOrderId);
     const today = dayjs().format("YYYY-MM-DD");
+    const currentMonthStart = dayjs().startOf("month").format("YYYY-MM-DD");
     const [activeFilter, setActiveFilter] = useState<PurchaseReportFilterType>("today_arrival");
-    const [fromDate, setFromDate] = useState(today);
+    const [fromDate, setFromDate] = useState(currentMonthStart);
     const [toDate, setToDate] = useState(today);
-    const [tempFromDate, setTempFromDate] = useState(today);
+    const [tempFromDate, setTempFromDate] = useState(currentMonthStart);
     const [tempToDate, setTempToDate] = useState(today);
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
@@ -632,6 +730,87 @@ const PurchaseReport: React.FC = () => {
     const [rowsPerPage, setRowsPerPage] = useState(100);
     const [selectedTrip, setSelectedTrip] = useState<TripDetail | null>(null);
     const [tripItemRef, setTripItemRef] = useState<string>("");
+    const [loading, setLoading] = useState<boolean>(false);
+    const [dataMap, setDataMap] = useState<Record<PurchaseReportFilterType, TodayArrivalItem[]>>({
+        today_arrival: [],
+        pending_orders: [],
+        pending_payments: [],
+        completed: [],
+    });
+
+    // Load live dataset from APIs
+    React.useEffect(() => {
+        let isMounted = true;
+        const loadReportData = async () => {
+            setLoading(true);
+            try {
+                const [todayRes, pendingOrdersRes, pendingPaymentsRes, completedRes] = await Promise.all([
+                    PurchaseReportService.getPurchaseReportData({ fromDate, toDate, filterType: "today_arrival" }),
+                    PurchaseReportService.getPurchaseReportData({ fromDate, toDate, filterType: "pending_orders" }),
+                    PurchaseReportService.getPurchaseReportData({ fromDate, toDate, filterType: "pending_payments" }),
+                    PurchaseReportService.getPurchaseReportData({ fromDate, toDate, filterType: "completed" }),
+                ]);
+
+                if (isMounted) {
+                    setDataMap({
+                        today_arrival: todayRes.data || [],
+                        pending_orders: pendingOrdersRes.data || [],
+                        pending_payments: pendingPaymentsRes.data || [],
+                        completed: completedRes.data || [],
+                    });
+                }
+            } catch (err) {
+                console.error("Failed to load live purchase report data:", err);
+            } finally {
+                if (isMounted) setLoading(false);
+            }
+        };
+
+        loadReportData();
+        return () => {
+            isMounted = false;
+        };
+    }, [fromDate, toDate]);
+
+    // Keep selectedOrderOnly synced if location.state or query changes
+    React.useEffect(() => {
+        const oId =
+            location.state?.orderId ||
+            location.state?.altOrderId ||
+            location.state?.purOrderNo ||
+            location.state?.searchQuery ||
+            searchParams.get("orderId") ||
+            searchParams.get("po") ||
+            "";
+        if (oId) {
+            setSelectedOrderOnly(oId);
+            setPage(1);
+        }
+    }, [location.state, searchParams]);
+
+    // Auto-expand and focus when navigated with a specific order
+    React.useEffect(() => {
+        if (selectedOrderOnly) {
+            const q = selectedOrderOnly.toLowerCase().trim();
+            const map: Record<string, boolean> = {};
+            const allItems = [
+                ...dataMap.today_arrival,
+                ...dataMap.pending_orders,
+                ...dataMap.pending_payments,
+                ...dataMap.completed,
+            ];
+            allItems.forEach((row) => {
+                if (
+                    row.orderId?.toLowerCase().includes(q) ||
+                    row.order?.orderId?.toLowerCase().includes(q) ||
+                    (row.purOrderNo && row.purOrderNo.toLowerCase().includes(q))
+                ) {
+                    map[row.id] = true;
+                }
+            });
+            setExpandedRows(map);
+        }
+    }, [selectedOrderOnly, dataMap]);
 
     // Toggle single row expansion
     const toggleRow = (id: string) => {
@@ -643,8 +822,13 @@ const PurchaseReport: React.FC = () => {
 
     // Filter counts for radio badges
     const filterCounts = useMemo(() => {
-        return getPurchaseFilterCounts();
-    }, []);
+        return {
+            today_arrival: dataMap.today_arrival.length,
+            pending_orders: dataMap.pending_orders.length,
+            pending_payments: dataMap.pending_payments.length,
+            completed: dataMap.completed.length,
+        };
+    }, [dataMap]);
 
     // Change radio filter immediately upon clicking itself (no apply button needed for radio)
     const handleFilterChange = (newFilter: PurchaseReportFilterType) => {
@@ -664,11 +848,31 @@ const PurchaseReport: React.FC = () => {
 
     // Base data based on selected Radio filter
     const rawData = useMemo(() => {
-        return getPurchaseDataByFilter(activeFilter);
-    }, [activeFilter]);
+        return dataMap[activeFilter] || [];
+    }, [dataMap, activeFilter]);
 
-    // Filter by Date Range (From Date & To Date)
+    // Filter by Date Range (From Date & To Date) or specific order
     const filteredData = useMemo(() => {
+        if (selectedOrderOnly) {
+            const q = selectedOrderOnly.toLowerCase().trim();
+            const allItems = [
+                ...dataMap.today_arrival,
+                ...dataMap.pending_orders,
+                ...dataMap.pending_payments,
+                ...dataMap.completed,
+            ];
+            const seen = new Set<string>();
+            return allItems.filter((row) => {
+                if (seen.has(row.id)) return false;
+                seen.add(row.id);
+                return (
+                    row.orderId?.toLowerCase().includes(q) ||
+                    row.order?.orderId?.toLowerCase().includes(q) ||
+                    (row.purOrderNo && row.purOrderNo.toLowerCase().includes(q))
+                );
+            });
+        }
+
         if (!fromDate && !toDate) return rawData;
 
         // When default today-to-today date filter is active, display full dataset for pending orders / payments / completed
@@ -886,8 +1090,53 @@ const PurchaseReport: React.FC = () => {
                     px: { xs: 2, md: 3 },
                     pt: 1.2,
                     pb: 1,
+                    gap: 1,
                 }}
             >
+                {/* ACTIVE ORDER FILTER BANNER (No top tabs) */}
+                {selectedOrderOnly && (
+                    <Box
+                        sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            bgcolor: "#eff6ff",
+                            border: "1px solid #bfdbfe",
+                            borderRadius: 1.5,
+                            px: 1.5,
+                            py: 0.8,
+                            mb: 1.2,
+                            flexShrink: 0,
+                            gap: 1,
+                        }}
+                    >
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <ReceiptLongIcon sx={{ color: "#1e3a8a", fontSize: 18 }} />
+                            <Typography sx={{ fontSize: "0.82rem", fontWeight: 700, color: "#1e3a8a" }}>
+                                Showing Purchase Detailed for Order: <strong>{selectedOrderOnly}</strong> ({filteredData.length} records)
+                            </Typography>
+                        </Box>
+                        <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => {
+                                setSelectedOrderOnly("");
+                                navigate("/purchasereport", { replace: true });
+                            }}
+                            sx={{
+                                textTransform: "none",
+                                fontSize: "0.72rem",
+                                fontWeight: 600,
+                                py: 0.3,
+                                px: 1.2,
+                                bgcolor: "#ffffff",
+                            }}
+                        >
+                            Clear Filter & View All Orders
+                        </Button>
+                    </Box>
+                )}
+
                 {/* OUTSIDE TABLE: TITLE & CONTROLS BAR */}
                 <Box
                     sx={{
@@ -942,6 +1191,7 @@ const PurchaseReport: React.FC = () => {
                         overflow: "hidden",
                     }}
                 >
+                    {loading && <LinearProgress sx={{ height: 3 }} />}
                     {/* TABLE CONTAINER (INTERNAL SCROLL ONLY - PAGINATION REMAINS PINNED) */}
                     <TableContainer
                         sx={{

@@ -97,8 +97,12 @@ const PurchasePaymentReport: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
     const currentMonthStart = dayjs().startOf("month").format("YYYY-MM-DD");
 
-    const initialFromDate = navFromDate && dayjs(navFromDate).isValid() ? navFromDate : currentMonthStart;
-    const initialToDate = navToDate && dayjs(navToDate).isValid() ? navToDate : today;
+    const initialFromDate = navFromDate && dayjs(navFromDate).isValid()
+        ? dayjs(navFromDate).format("YYYY-MM-DD")
+        : currentMonthStart;
+    const initialToDate = navToDate && dayjs(navToDate).isValid()
+        ? dayjs(navToDate).format("YYYY-MM-DD")
+        : today;
 
     const [selectedOrderOnly, setSelectedOrderOnly] = useState<string>(navOrderId);
 
@@ -108,6 +112,12 @@ const PurchasePaymentReport: React.FC = () => {
     const [toDate, setToDate] = useState<string>(initialToDate);
     const [tempFromDate, setTempFromDate] = useState<string>(initialFromDate);
     const [tempToDate, setTempToDate] = useState<string>(initialToDate);
+
+    // Keep temp drawer dates in sync whenever fromDate or toDate changes
+    useEffect(() => {
+        setTempFromDate(fromDate);
+        setTempToDate(toDate);
+    }, [fromDate, toDate]);
 
     // Keep selectedOrderOnly and dates synced if location.state or query changes
     useEffect(() => {
@@ -134,12 +144,14 @@ const PurchasePaymentReport: React.FC = () => {
             setPage(1);
         }
         if (fDate && dayjs(fDate).isValid()) {
-            setFromDate(fDate);
-            setTempFromDate(fDate);
+            const formatted = dayjs(fDate).format("YYYY-MM-DD");
+            setFromDate(formatted);
+            setTempFromDate(formatted);
         }
         if (tDate && dayjs(tDate).isValid()) {
-            setToDate(tDate);
-            setTempToDate(tDate);
+            const formatted = dayjs(tDate).format("YYYY-MM-DD");
+            setToDate(formatted);
+            setTempToDate(formatted);
         }
     }, [location.state, searchParams]);
 
@@ -568,11 +580,37 @@ const PurchasePaymentReport: React.FC = () => {
     const handleResetFilters = () => {
         setSearchQuery("");
         setActiveFilter("ALL");
-        setFromDate("2026-09-01");
+        setFromDate(currentMonthStart);
         setToDate(today);
-        setTempFromDate("2026-09-01");
+        setTempFromDate(currentMonthStart);
         setTempToDate(today);
         setPage(1);
+    };
+
+    // Filter Drawer Handlers
+    const handleToggleDrawer = () => {
+        setDrawerOpen((prev) => {
+            if (!prev) {
+                // When opening the drawer, always sync temp dates with current applied filtered dates
+                setTempFromDate(fromDate);
+                setTempToDate(toDate);
+            }
+            return !prev;
+        });
+    };
+
+    const handleCloseDrawer = () => {
+        setTempFromDate(fromDate);
+        setTempToDate(toDate);
+        setDrawerOpen(false);
+    };
+
+    const handleApplyFilters = () => {
+        setFromDate(tempFromDate);
+        setToDate(tempToDate);
+        setPage(1);
+        setDrawerOpen(false);
+        toast.success("Date filters applied successfully!");
     };
 
     /* ================= EXPORT HANDLERS ================= */
@@ -869,25 +907,15 @@ const PurchasePaymentReport: React.FC = () => {
             {/* 2. FILTER DRAWER */}
             <ReportFilterDrawer
                 open={drawerOpen}
-                onToggle={() => setDrawerOpen((prev) => !prev)}
-                onClose={() => {
-                    setTempFromDate(fromDate);
-                    setTempToDate(toDate);
-                    setDrawerOpen(false);
-                }}
+                onToggle={handleToggleDrawer}
+                onClose={handleCloseDrawer}
                 fromDate={tempFromDate}
                 onFromDateChange={setTempFromDate}
                 toDate={tempToDate}
                 onToDateChange={setTempToDate}
                 fromDateLabel="From Date"
                 toDateLabel="To Date"
-                onApply={() => {
-                    setFromDate(tempFromDate);
-                    setToDate(tempToDate);
-                    setPage(1);
-                    setDrawerOpen(false);
-                    toast.success("Date filters applied successfully!");
-                }}
+                onApply={handleApplyFilters}
             />
 
             {/* 3. MAIN CONTENT CONTAINER (CARDS REMOVED AS REQUESTED) */}
@@ -1359,20 +1387,15 @@ const PurchasePaymentReport: React.FC = () => {
                                                     >
                                                         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.3 }}>
                                                             <Box sx={{ display: "flex", alignItems: "center", gap: 0.8 }}>
-                                                                <Tooltip title="View Item & Invoice Payment details for this PO in new tab">
-                                                                    <Typography
-                                                                        onClick={() => window.open(`/purchaseItemPayment?orderId=${encodeURIComponent(row.purOrderNo)}`, "_blank")}
-                                                                        sx={{
-                                                                            fontWeight: 700,
-                                                                            color: "#1e3a8a",
-                                                                            fontSize: "0.82rem",
-                                                                            cursor: "pointer",
-                                                                            "&:hover": { textDecoration: "underline", color: "#2563eb" },
-                                                                        }}
-                                                                    >
-                                                                        {row.purOrderNo}
-                                                                    </Typography>
-                                                                </Tooltip>
+                                                                <Typography
+                                                                    sx={{
+                                                                        fontWeight: 700,
+                                                                        color: "#1e3a8a",
+                                                                        fontSize: "0.82rem",
+                                                                    }}
+                                                                >
+                                                                    {row.purOrderNo}
+                                                                </Typography>
 
                                                                 {/* Item count chip (e.g. 2 Items or 3 Items) */}
                                                                 <Chip
@@ -1659,31 +1682,19 @@ const PurchasePaymentReport: React.FC = () => {
                                                                     <Typography sx={{ fontSize: "0.74rem", fontWeight: 700, color: "#1e3a8a" }}>
                                                                         Item-Wise Tonnage & Arrival Breakdown for {row.purOrderNo}
                                                                         {orderInvoicesMap[row.id] && orderInvoicesMap[row.id].length > 0 ? (
-                                                                            <span> ({orderInvoicesMap[row.id].length} Items / Invoices via Live API)</span>
+                                                                            <span> ({orderInvoicesMap[row.id].length} Items / Invoices)</span>
                                                                         ) : (
                                                                             <span> ({row.items?.length || 1} Items)</span>
                                                                         )}:
                                                                     </Typography>
-                                                                    {orderInvoicesMap[row.id] && orderInvoicesMap[row.id].length > 0 && (
-                                                                        <Chip
-                                                                            size="small"
-                                                                            label="Live Order Item API"
-                                                                            sx={{
-                                                                                height: 18,
-                                                                                fontSize: "0.60rem",
-                                                                                fontWeight: 800,
-                                                                                bgcolor: "#e0f2fe",
-                                                                                color: "#0369a1",
-                                                                            }}
-                                                                        />
-                                                                    )}
+
                                                                 </Box>
 
                                                                 {orderLoadingMap[row.id] && (
                                                                     <Box sx={{ py: 1, mb: 1 }}>
                                                                         <LinearProgress sx={{ height: 4, borderRadius: 2 }} />
                                                                         <Typography sx={{ fontSize: "0.68rem", color: "#64748b", mt: 0.5, textAlign: "center" }}>
-                                                                            Fetching live invoice details from OnlinePurchaseReportItemByOrderId API...
+                                                                            Fetching invoice details from OnlinePurchaseReportItemByOrderId API...
                                                                         </Typography>
                                                                     </Box>
                                                                 )}
@@ -1789,117 +1800,117 @@ const PurchasePaymentReport: React.FC = () => {
                                                                         </TableBody>
                                                                     </Table>
                                                                 ) : (
-                                                                <Table size="small" sx={{ bgcolor: "#ffffff", borderRadius: 1.5, overflow: "hidden", border: "1px solid #e2e8f0" }}>
-                                                                    <TableHead>
-                                                                        <TableRow sx={{ bgcolor: "#f1f5f9" }}>
-                                                                            <TableCell sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
-                                                                                #
-                                                                            </TableCell>
-                                                                            <TableCell sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
-                                                                                Item Name & Stock Group
-                                                                            </TableCell>
-                                                                            <TableCell sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
-                                                                                Inward Batch
-                                                                            </TableCell>
-                                                                            <TableCell sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
-                                                                                Tons (Arrived / Ordered)
-                                                                            </TableCell>
-                                                                            <TableCell sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
-                                                                                Arrival Status
-                                                                            </TableCell>
-                                                                            <TableCell align="right" sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
-                                                                                Rate / Ton
-                                                                            </TableCell>
-                                                                            <TableCell align="right" sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
-                                                                                Item Value
-                                                                            </TableCell>
-                                                                        </TableRow>
-                                                                    </TableHead>
-                                                                    <TableBody>
-                                                                        {row.items?.map((item, itemIdx) => {
-                                                                            const isItemComplete = item.arrivedTons >= item.orderedTons;
-                                                                            const isItemPending = item.arrivedTons === 0;
+                                                                    <Table size="small" sx={{ bgcolor: "#ffffff", borderRadius: 1.5, overflow: "hidden", border: "1px solid #e2e8f0" }}>
+                                                                        <TableHead>
+                                                                            <TableRow sx={{ bgcolor: "#f1f5f9" }}>
+                                                                                <TableCell sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
+                                                                                    #
+                                                                                </TableCell>
+                                                                                <TableCell sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
+                                                                                    Item Name & Stock Group
+                                                                                </TableCell>
+                                                                                <TableCell sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
+                                                                                    Inward Batch
+                                                                                </TableCell>
+                                                                                <TableCell sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
+                                                                                    Tons (Arrived / Ordered)
+                                                                                </TableCell>
+                                                                                <TableCell sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
+                                                                                    Arrival Status
+                                                                                </TableCell>
+                                                                                <TableCell align="right" sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
+                                                                                    Rate / Ton
+                                                                                </TableCell>
+                                                                                <TableCell align="right" sx={{ fontSize: "0.70rem", fontWeight: 700, color: "#475569", py: 0.6 }}>
+                                                                                    Item Value
+                                                                                </TableCell>
+                                                                            </TableRow>
+                                                                        </TableHead>
+                                                                        <TableBody>
+                                                                            {row.items?.map((item, itemIdx) => {
+                                                                                const isItemComplete = item.arrivedTons >= item.orderedTons;
+                                                                                const isItemPending = item.arrivedTons === 0;
 
-                                                                            return (
-                                                                                <TableRow key={item.itemId || itemIdx} hover sx={{ "&:last-child td": { borderBottom: 0 } }}>
-                                                                                    <TableCell sx={{ fontSize: "0.72rem", color: "#64748b", py: 0.7 }}>
-                                                                                        {itemIdx + 1}
-                                                                                    </TableCell>
-                                                                                    <TableCell sx={{ py: 0.7 }}>
-                                                                                        <Typography sx={{ fontSize: "0.76rem", fontWeight: 700, color: "#0f172a" }}>
-                                                                                            {item.itemName}
-                                                                                        </Typography>
-                                                                                        <Typography sx={{ fontSize: "0.68rem", color: "#64748b" }}>
-                                                                                            Group: {item.stockGroup}
-                                                                                        </Typography>
-                                                                                    </TableCell>
-                                                                                    <TableCell sx={{ fontSize: "0.74rem", fontWeight: 600, color: "#334155", py: 0.7 }}>
-                                                                                        {item.inwardBatch || "-"}
-                                                                                    </TableCell>
-                                                                                    <TableCell sx={{ py: 0.7, width: 200 }}>
-                                                                                        <Box sx={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", mb: 0.3 }}>
-                                                                                            <Typography sx={{ fontSize: "0.78rem", fontWeight: 800, color: isItemComplete ? "#15803d" : "#0369a1" }}>
-                                                                                                {formatKgQuantityCompact(item.arrivedTons)} / {formatKgQuantityCompact(item.orderedTons)}
+                                                                                return (
+                                                                                    <TableRow key={item.itemId || itemIdx} hover sx={{ "&:last-child td": { borderBottom: 0 } }}>
+                                                                                        <TableCell sx={{ fontSize: "0.72rem", color: "#64748b", py: 0.7 }}>
+                                                                                            {itemIdx + 1}
+                                                                                        </TableCell>
+                                                                                        <TableCell sx={{ py: 0.7 }}>
+                                                                                            <Typography sx={{ fontSize: "0.76rem", fontWeight: 700, color: "#0f172a" }}>
+                                                                                                {item.itemName}
                                                                                             </Typography>
-                                                                                            <Typography sx={{ fontSize: "0.66rem", fontWeight: 700, color: "#64748b" }}>
-                                                                                                {item.deliveryPercentage}%
+                                                                                            <Typography sx={{ fontSize: "0.68rem", color: "#64748b" }}>
+                                                                                                Group: {item.stockGroup}
                                                                                             </Typography>
-                                                                                        </Box>
-                                                                                        <LinearProgress
-                                                                                            variant="determinate"
-                                                                                            value={item.deliveryPercentage}
-                                                                                            sx={{
-                                                                                                height: 5,
-                                                                                                borderRadius: 2.5,
-                                                                                                bgcolor: "#e2e8f0",
-                                                                                                "& .MuiLinearProgress-bar": {
+                                                                                        </TableCell>
+                                                                                        <TableCell sx={{ fontSize: "0.74rem", fontWeight: 600, color: "#334155", py: 0.7 }}>
+                                                                                            {item.inwardBatch || "-"}
+                                                                                        </TableCell>
+                                                                                        <TableCell sx={{ py: 0.7, width: 200 }}>
+                                                                                            <Box sx={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", mb: 0.3 }}>
+                                                                                                <Typography sx={{ fontSize: "0.78rem", fontWeight: 800, color: isItemComplete ? "#15803d" : "#0369a1" }}>
+                                                                                                    {formatKgQuantityCompact(item.arrivedTons)} / {formatKgQuantityCompact(item.orderedTons)}
+                                                                                                </Typography>
+                                                                                                <Typography sx={{ fontSize: "0.66rem", fontWeight: 700, color: "#64748b" }}>
+                                                                                                    {item.deliveryPercentage}%
+                                                                                                </Typography>
+                                                                                            </Box>
+                                                                                            <LinearProgress
+                                                                                                variant="determinate"
+                                                                                                value={item.deliveryPercentage}
+                                                                                                sx={{
+                                                                                                    height: 5,
+                                                                                                    borderRadius: 2.5,
+                                                                                                    bgcolor: "#e2e8f0",
+                                                                                                    "& .MuiLinearProgress-bar": {
+                                                                                                        bgcolor: isItemComplete
+                                                                                                            ? "#16a34a"
+                                                                                                            : item.arrivedTons > 0
+                                                                                                                ? "#0284c7"
+                                                                                                                : "#94a3b8",
+                                                                                                    },
+                                                                                                }}
+                                                                                            />
+                                                                                        </TableCell>
+                                                                                        <TableCell sx={{ py: 0.7 }}>
+                                                                                            <Chip
+                                                                                                size="small"
+                                                                                                label={
+                                                                                                    isItemComplete
+                                                                                                        ? "Delivered (100%)"
+                                                                                                        : isItemPending
+                                                                                                            ? "Pending Arrival"
+                                                                                                            : `Partially Arrived (${item.arrivedTons} T)`
+                                                                                                }
+                                                                                                sx={{
+                                                                                                    height: 20,
+                                                                                                    fontSize: "0.62rem",
+                                                                                                    fontWeight: 800,
                                                                                                     bgcolor: isItemComplete
-                                                                                                        ? "#16a34a"
-                                                                                                        : item.arrivedTons > 0
-                                                                                                            ? "#0284c7"
-                                                                                                            : "#94a3b8",
-                                                                                                },
-                                                                                            }}
-                                                                                        />
-                                                                                    </TableCell>
-                                                                                    <TableCell sx={{ py: 0.7 }}>
-                                                                                        <Chip
-                                                                                            size="small"
-                                                                                            label={
-                                                                                                isItemComplete
-                                                                                                    ? "Delivered (100%)"
-                                                                                                    : isItemPending
-                                                                                                        ? "Pending Arrival"
-                                                                                                        : `Partially Arrived (${item.arrivedTons} T)`
-                                                                                            }
-                                                                                            sx={{
-                                                                                                height: 20,
-                                                                                                fontSize: "0.62rem",
-                                                                                                fontWeight: 800,
-                                                                                                bgcolor: isItemComplete
-                                                                                                    ? "#dcfce7"
-                                                                                                    : isItemPending
-                                                                                                        ? "#fee2e2"
-                                                                                                        : "#fef3c7",
-                                                                                                color: isItemComplete
-                                                                                                    ? "#15803d"
-                                                                                                    : isItemPending
-                                                                                                        ? "#b91c1c"
-                                                                                                        : "#b45309",
-                                                                                            }}
-                                                                                        />
-                                                                                    </TableCell>
-                                                                                    <TableCell align="right" sx={{ fontSize: "0.74rem", color: "#475569", py: 0.7 }}>
-                                                                                        ₹ {item.ratePerTon.toLocaleString("en-IN")}/T
-                                                                                    </TableCell>
-                                                                                    <TableCell align="right" sx={{ fontSize: "0.76rem", fontWeight: 700, color: "#0f172a", py: 0.7 }}>
-                                                                                        {formatCurrency(item.itemAmount)}
-                                                                                    </TableCell>
-                                                                                </TableRow>
-                                                                            );
-                                                                        })}
-                                                                    </TableBody>
-                                                                </Table>
+                                                                                                        ? "#dcfce7"
+                                                                                                        : isItemPending
+                                                                                                            ? "#fee2e2"
+                                                                                                            : "#fef3c7",
+                                                                                                    color: isItemComplete
+                                                                                                        ? "#15803d"
+                                                                                                        : isItemPending
+                                                                                                            ? "#b91c1c"
+                                                                                                            : "#b45309",
+                                                                                                }}
+                                                                                            />
+                                                                                        </TableCell>
+                                                                                        <TableCell align="right" sx={{ fontSize: "0.74rem", color: "#475569", py: 0.7 }}>
+                                                                                            ₹ {item.ratePerTon.toLocaleString("en-IN")}/T
+                                                                                        </TableCell>
+                                                                                        <TableCell align="right" sx={{ fontSize: "0.76rem", fontWeight: 700, color: "#0f172a", py: 0.7 }}>
+                                                                                            {formatCurrency(item.itemAmount)}
+                                                                                        </TableCell>
+                                                                                    </TableRow>
+                                                                                );
+                                                                            })}
+                                                                        </TableBody>
+                                                                    </Table>
                                                                 )}
                                                             </Box>
                                                         </Collapse>

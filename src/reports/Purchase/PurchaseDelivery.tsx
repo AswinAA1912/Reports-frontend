@@ -52,6 +52,7 @@ import {
     cleanItemName,
     fetchRawPurchaseDatasets,
     formatKgQuantity,
+    parseNum,
 } from "../../services/purchaseDataIntegration.service";
 import {
     PurchaseOrderTripItemService,
@@ -101,8 +102,12 @@ const PurchaseDelivery: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
     const currentMonthStart = dayjs().startOf("month").format("YYYY-MM-DD");
 
-    const initialFromDate = navFromDate && dayjs(navFromDate).isValid() ? navFromDate : currentMonthStart;
-    const initialToDate = navToDate && dayjs(navToDate).isValid() ? navToDate : today;
+    const initialFromDate = navFromDate && dayjs(navFromDate).isValid()
+        ? dayjs(navFromDate).format("YYYY-MM-DD")
+        : currentMonthStart;
+    const initialToDate = navToDate && dayjs(navToDate).isValid()
+        ? dayjs(navToDate).format("YYYY-MM-DD")
+        : today;
 
     const [selectedOrderOnly, setSelectedOrderOnly] = useState<string>(navOrderId);
     const [data, setData] = useState<PurchaseDeliveryItem[]>([]);
@@ -116,6 +121,12 @@ const PurchaseDelivery: React.FC = () => {
     const [toDate, setToDate] = useState<string>(initialToDate);
     const [tempFromDate, setTempFromDate] = useState<string>(initialFromDate);
     const [tempToDate, setTempToDate] = useState<string>(initialToDate);
+
+    // Keep temp drawer dates in sync whenever fromDate or toDate changes
+    useEffect(() => {
+        setTempFromDate(fromDate);
+        setTempToDate(toDate);
+    }, [fromDate, toDate]);
 
     // Keep selectedOrderOnly and dates synced if location.state or query changes
     useEffect(() => {
@@ -142,12 +153,14 @@ const PurchaseDelivery: React.FC = () => {
             setPage(1);
         }
         if (fDate && dayjs(fDate).isValid()) {
-            setFromDate(fDate);
-            setTempFromDate(fDate);
+            const formatted = dayjs(fDate).format("YYYY-MM-DD");
+            setFromDate(formatted);
+            setTempFromDate(formatted);
         }
         if (tDate && dayjs(tDate).isValid()) {
-            setToDate(tDate);
-            setTempToDate(tDate);
+            const formatted = dayjs(tDate).format("YYYY-MM-DD");
+            setToDate(formatted);
+            setTempToDate(formatted);
         }
     }, [location.state, searchParams]);
 
@@ -294,10 +307,10 @@ const PurchaseDelivery: React.FC = () => {
                         const invK = invNo.toLowerCase();
                         const refK = String(item.Ref_Po_Inv_No || item.Trans_Id || "").trim().toLowerCase();
                         let matchedPay = (invK && payMap.get(invK)) ||
-                                         (refK && payMap.get(refK)) ||
-                                         (invK && payMap.get(invK.replace(/^mia\//, "ps/"))) ||
-                                         (invK && payMap.get(invK.replace(/^[a-z]+\//, ""))) ||
-                                         (refK && payMap.get(refK.replace(/^[a-z]+\//, "")));
+                            (refK && payMap.get(refK)) ||
+                            (invK && payMap.get(invK.replace(/^mia\//, "ps/"))) ||
+                            (invK && payMap.get(invK.replace(/^[a-z]+\//, ""))) ||
+                            (refK && payMap.get(refK.replace(/^[a-z]+\//, "")));
 
                         if (!matchedPay && cleanOrder) {
                             matchedPay = payMap.get(cleanOrder.toLowerCase());
@@ -320,6 +333,16 @@ const PurchaseDelivery: React.FC = () => {
                             paymentInvoiceNo = invNo;
                         }
 
+                        const isCancelled = Boolean(item.Cancel_status && item.Cancel_status !== "0");
+                        const numPaid = typeof paidAmt === "number" ? paidAmt : parseFloat(String(paidAmt || 0).replace(/,/g, "")) || 0;
+                        const isPaymentDone = Boolean(
+                            !isCancelled &&
+                            numPaid > 0 &&
+                            matchedPay &&
+                            parseNum(matchedPay.Debit_Amt) > 0 &&
+                            parseNum(matchedPay.Bal_Amount) <= 0
+                        );
+
                         return {
                             id: `pd-live-${item.invoice_no || idx}-${idx + 1}`,
                             sNo: idx + 1,
@@ -327,10 +350,10 @@ const PurchaseDelivery: React.FC = () => {
                             inwardBatchWithItemName: `${rawProd}${qtyText}${batchText}`,
                             purOrderNo: cleanOrder,
                             inwardJouNo: inwardJou,
-                            purInvNo: invNo || "-",
-                            paymentNo: paymentInvoiceNo,
+                            purInvNo: (paymentInvoiceNo && paymentInvoiceNo !== "-") ? paymentInvoiceNo : (invNo || "-"),
+                            paymentNo: "-",
                             paymentAmt: paidAmt,
-                            status: item.Cancel_status === "0" || !item.Cancel_status ? "COMPLETED" : "NOT COMPLETED",
+                            status: (!isCancelled && isPaymentDone) ? "COMPLETED" : "NOT COMPLETED",
                             orderDate: item.Ledger_Date ? dayjs(item.Ledger_Date).format("YYYY-MM-DD") : dayjs().format("YYYY-MM-DD"),
                         };
                     });
@@ -389,7 +412,8 @@ const PurchaseDelivery: React.FC = () => {
 
 
     // Filtered dataset
-    const filteredData = useMemo(() => {
+    // Base filtered dataset applying navigation order filter, search query, and date range (without status filter)
+    const baseFilteredData = useMemo(() => {
         // If specific order is passed from navigation, filter ONLY that exact order's records
         let list = data;
         if (selectedOrderOnly) {
@@ -432,14 +456,7 @@ const PurchaseDelivery: React.FC = () => {
                 }
             }
 
-            // 2. Status Quick Filter
-            if (activeStatusFilter === "COMPLETED") {
-                if (item.status !== "COMPLETED") return false;
-            } else if (activeStatusFilter === "NOT_COMPLETED") {
-                if (item.status === "COMPLETED") return false;
-            }
-
-            // 3. Date filter (Order Date) - only apply if NOT explicitly viewing a selected order
+            // 2. Date filter (Order Date) - only apply if NOT explicitly viewing a selected order
             if (!selectedOrderOnly && (fromDate || toDate)) {
                 if (item.orderDate) {
                     const itemDate = dayjs(item.orderDate);
@@ -452,7 +469,26 @@ const PurchaseDelivery: React.FC = () => {
 
             return true;
         });
-    }, [data, selectedOrderOnly, searchQuery, activeStatusFilter, fromDate, toDate]);
+    }, [data, selectedOrderOnly, liveOrderDeliveryMap, searchQuery, fromDate, toDate]);
+
+    // Quick status counts derived from baseFilteredData
+    const statusCounts = useMemo(() => {
+        const all = baseFilteredData.length;
+        const completed = baseFilteredData.filter((i) => i.status === "COMPLETED").length;
+        const notCompleted = all - completed;
+        return { all, completed, notCompleted };
+    }, [baseFilteredData]);
+
+    // Final filtered dataset applying the activeStatusFilter
+    const filteredData = useMemo(() => {
+        if (activeStatusFilter === "COMPLETED") {
+            return baseFilteredData.filter((item) => item.status === "COMPLETED");
+        }
+        if (activeStatusFilter === "NOT_COMPLETED") {
+            return baseFilteredData.filter((item) => item.status !== "COMPLETED");
+        }
+        return baseFilteredData;
+    }, [baseFilteredData, activeStatusFilter]);
 
     // Metrics summary
     const metrics = useMemo(() => {
@@ -496,6 +532,32 @@ const PurchaseDelivery: React.FC = () => {
         setTempFromDate(currentMonthStart);
         setTempToDate(today);
         setPage(1);
+    };
+
+    // Filter Drawer Handlers
+    const handleToggleDrawer = () => {
+        setDrawerOpen((prev) => {
+            if (!prev) {
+                // When opening the drawer, always sync temp dates with current applied filtered dates
+                setTempFromDate(fromDate);
+                setTempToDate(toDate);
+            }
+            return !prev;
+        });
+    };
+
+    const handleCloseDrawer = () => {
+        setTempFromDate(fromDate);
+        setTempToDate(toDate);
+        setDrawerOpen(false);
+    };
+
+    const handleApplyFilters = () => {
+        setFromDate(tempFromDate);
+        setToDate(tempToDate);
+        setPage(1);
+        setDrawerOpen(false);
+        toast.success("Filters applied successfully!");
     };
 
     /* ================= EXPORT HANDLERS ================= */
@@ -756,25 +818,15 @@ const PurchaseDelivery: React.FC = () => {
             {/* 2. FILTER DRAWER */}
             <ReportFilterDrawer
                 open={drawerOpen}
-                onToggle={() => setDrawerOpen((prev) => !prev)}
-                onClose={() => {
-                    setTempFromDate(fromDate);
-                    setTempToDate(toDate);
-                    setDrawerOpen(false);
-                }}
+                onToggle={handleToggleDrawer}
+                onClose={handleCloseDrawer}
                 fromDate={tempFromDate}
                 onFromDateChange={setTempFromDate}
                 toDate={tempToDate}
                 onToDateChange={setTempToDate}
                 fromDateLabel="From Date"
                 toDateLabel="To Date"
-                onApply={() => {
-                    setFromDate(tempFromDate);
-                    setToDate(tempToDate);
-                    setPage(1);
-                    setDrawerOpen(false);
-                    toast.success("Filters applied successfully!");
-                }}
+                onApply={handleApplyFilters}
             />
 
             {/* 3. MAIN CONTENT CONTAINER */}
@@ -892,7 +944,7 @@ const PurchaseDelivery: React.FC = () => {
                         {/* Quick Status Chips */}
                         <Chip
                             size="small"
-                            label={`All (${data.length})`}
+                            label={`All (${statusCounts.all})`}
                             onClick={() => {
                                 setActiveStatusFilter("ALL");
                                 setPage(1);
@@ -910,7 +962,7 @@ const PurchaseDelivery: React.FC = () => {
                         />
                         <Chip
                             size="small"
-                            label={`Completed (${data.filter((i) => i.status === "COMPLETED").length})`}
+                            label={`Completed (${statusCounts.completed})`}
                             onClick={() => {
                                 setActiveStatusFilter("COMPLETED");
                                 setPage(1);
@@ -928,7 +980,7 @@ const PurchaseDelivery: React.FC = () => {
                         />
                         <Chip
                             size="small"
-                            label={`Not Completed (${data.filter((i) => i.status !== "COMPLETED").length})`}
+                            label={`Not Completed (${statusCounts.notCompleted})`}
                             onClick={() => {
                                 setActiveStatusFilter("NOT_COMPLETED");
                                 setPage(1);

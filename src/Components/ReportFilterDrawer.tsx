@@ -1,4 +1,5 @@
 import React from "react";
+import dayjs from "dayjs";
 import {
     Box,
     Drawer,
@@ -16,6 +17,13 @@ import {
     Checkbox
 } from "@mui/material";
 import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
+
+const formatDateForInput = (val?: string): string => {
+    if (!val) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+    const parsed = dayjs(val);
+    return parsed.isValid() ? parsed.format("YYYY-MM-DD") : val;
+};
 
 export interface DropdownOption {
     label: string;
@@ -245,7 +253,7 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                             label={fromDateLabel}
                             fullWidth
                             InputLabelProps={{ shrink: true }}
-                            value={fromDate}
+                            value={formatDateForInput(fromDate)}
                             onChange={(e) => onFromDateChange(e.target.value)}
                             sx={{ mb: 2 }}
                         />
@@ -257,7 +265,7 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                             label={toDateLabel}
                             fullWidth
                             InputLabelProps={{ shrink: true }}
-                            value={toDate}
+                            value={formatDateForInput(toDate)}
                             onChange={(e) => onToDateChange(e.target.value)}
                             sx={{ mb: 2 }}
                         />

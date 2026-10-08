@@ -19,10 +19,14 @@ import {
     DialogContent,
     Chip,
     Button,
+    Popover,
+    TextField,
+    Tooltip,
 } from "@mui/material";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import CloseIcon from "@mui/icons-material/Close";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import dayjs from "dayjs";
 import AppLayout, { useToggleMode } from "../../Layout/appLayout";
 import PageHeader from "../../Layout/PageHeader";
@@ -89,6 +93,14 @@ const StockInHandReport: React.FC = () => {
     const [batchModalLoading, setBatchModalLoading] = useState(false);
     const [batchModalError, setBatchModalError] = useState<string | null>(null);
 
+    /* ===== BATCH-SPECIFIC DATE FILTER STATES ===== */
+    const [batchFromDate, setBatchFromDate] = useState<string>(today);
+    const [batchToDate, setBatchToDate] = useState<string>(today);
+    const [tempBatchFromDate, setTempBatchFromDate] = useState<string>(today);
+    const [tempBatchToDate, setTempBatchToDate] = useState<string>(today);
+    const [isBatchDateCustom, setIsBatchDateCustom] = useState<boolean>(false);
+    const [batchDateAnchorEl, setBatchDateAnchorEl] = useState<HTMLElement | null>(null);
+
     /* ===== FILTER STATES ===== */
 
     const [drawerOpen, setDrawerOpen] = useState(false);
@@ -102,7 +114,11 @@ const StockInHandReport: React.FC = () => {
 
     /* ===== FETCH BATCH TRANSACTIONS ===== */
     const loadBatchTransactions = useCallback(
-        async (selected: NonNullable<typeof selectedBatchItem>) => {
+        async (
+            selected: NonNullable<typeof selectedBatchItem>,
+            targetFromDate = batchFromDate,
+            targetToDate = batchToDate
+        ) => {
             const productId = selected.productId || selected.item.Product_Id || selected.item.Item_Id || "";
             if (!productId) {
                 setBatchModalError("Product ID is missing.");
@@ -115,20 +131,25 @@ const StockInHandReport: React.FC = () => {
 
             try {
                 let res;
+                const batchParam =
+                    selected.apiBatch !== undefined && selected.apiBatch !== null
+                        ? selected.apiBatch
+                        : (selected.batchNo === "Unassigned" ? "" : selected.batchNo);
+
                 if (selected.isGodownWise && selected.godownId) {
                     res = await transactionBatchStockService.getTransactionBatchStockByGodown({
-                        fromDate,
-                        toDate,
+                        fromDate: targetFromDate,
+                        toDate: targetToDate,
                         Product_Id: productId,
                         Godown_Id: selected.godownId,
-                        Batch: selected.apiBatch || selected.batchNo,
+                        Batch: batchParam,
                     });
                 } else {
                     res = await transactionBatchStockService.getTransactionBatchStock({
-                        fromDate,
-                        toDate,
+                        fromDate: targetFromDate,
+                        toDate: targetToDate,
                         Product_Id: productId,
-                        Batch: selected.apiBatch || selected.batchNo || "Unassigned",
+                        Batch: batchParam,
                     });
                 }
 
@@ -144,13 +165,13 @@ const StockInHandReport: React.FC = () => {
                 setBatchModalLoading(false);
             }
         },
-        [fromDate, toDate]
+        [batchFromDate, batchToDate]
     );
 
     useEffect(() => {
         if (!batchModalOpen || !selectedBatchItem) return;
-        loadBatchTransactions(selectedBatchItem);
-    }, [batchModalOpen, selectedBatchItem, loadBatchTransactions]);
+        loadBatchTransactions(selectedBatchItem, batchFromDate, batchToDate);
+    }, [batchModalOpen, selectedBatchItem, batchFromDate, batchToDate, loadBatchTransactions]);
 
     const qtyKeys = useMemo(() => {
         if (isExpanded) {
@@ -944,12 +965,20 @@ const StockInHandReport: React.FC = () => {
         });
     };
 
+    const getBatchInfo = (rawBatch: any): { displayBatch: string; apiBatch: string } => {
+        if (rawBatch === null || rawBatch === undefined || String(rawBatch).trim().toLowerCase() === "null") {
+            return { displayBatch: "null", apiBatch: "null" };
+        }
+        const trimmed = String(rawBatch).trim();
+        if (trimmed === "" || trimmed.toLowerCase() === "unassigned") {
+            return { displayBatch: "Unassigned", apiBatch: "" };
+        }
+        return { displayBatch: trimmed, apiBatch: trimmed };
+    };
+
     const handleBatchClick = (item: stockWiseReport, batch: any) => {
-        const batchNo = String(batch?.Batch_No || "Unassigned").trim() || "Unassigned";
-        const apiBatch =
-            batch?.Batch_No !== undefined && batch?.Batch_No !== null && String(batch.Batch_No).trim() !== ""
-                ? String(batch.Batch_No).trim()
-                : String(batch?.Batch_No ?? "Unassigned");
+        const { displayBatch, apiBatch } = getBatchInfo(batch?.Batch_No);
+        const batchNo = displayBatch;
 
         const isGodown = Boolean(isExpanded || batch?.Godown_Id || item?.Godown_Id);
         const godownId = isGodown
@@ -974,6 +1003,12 @@ const StockInHandReport: React.FC = () => {
             godownName,
             isGodownWise: Boolean(isGodown && godownId),
         });
+        setBatchFromDate(fromDate);
+        setBatchToDate(toDate);
+        setTempBatchFromDate(fromDate);
+        setTempBatchToDate(toDate);
+        setIsBatchDateCustom(false);
+        setBatchDateAnchorEl(null);
         setBatchModalOpen(true);
     };
 
@@ -1289,7 +1324,7 @@ const StockInHandReport: React.FC = () => {
                         ) : (
                             batches.map((batch, idx) => (
                                 <TableRow
-                                    key={`batch-${itemKey}-${batch.Batch_No || idx}-${idx}`}
+                                    key={`batch-${itemKey}-${getBatchInfo(batch.Batch_No).displayBatch}-${idx}`}
                                     hover
                                     sx={{
                                         background: "#F8FAFC",
@@ -1351,7 +1386,7 @@ const StockInHandReport: React.FC = () => {
                                                     }}
                                                     title="Click to view batch transactions"
                                                 >
-                                                    {batch.Batch_No || "Unassigned"}
+                                                    {getBatchInfo(batch.Batch_No).displayBatch}
                                                 </strong>
                                             </Typography>
                                         </Box>
@@ -1795,7 +1830,10 @@ const StockInHandReport: React.FC = () => {
             {/* ===== BATCH TRANSACTION MODAL POPUP (EMBEDDED) ===== */}
             <Dialog
                 open={batchModalOpen}
-                onClose={() => setBatchModalOpen(false)}
+                onClose={() => {
+                    setBatchModalOpen(false);
+                    setBatchDateAnchorEl(null);
+                }}
                 maxWidth="lg"
                 fullWidth
                 PaperProps={{
@@ -1843,7 +1881,7 @@ const StockInHandReport: React.FC = () => {
                             </Typography>
 
                             <Chip
-                                label={`Batch: ${selectedBatchItem?.batchNo || "Unassigned"}`}
+                                label={`Batch: ${selectedBatchItem?.batchNo ?? "Unassigned"}`}
                                 size="small"
                                 sx={{
                                     bgcolor: "rgba(255, 255, 255, 0.2)",
@@ -1882,11 +1920,74 @@ const StockInHandReport: React.FC = () => {
                             />
                         </Box>
 
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 2, mt: 0.6, flexWrap: "wrap" }}>
-                            <Typography variant="caption" sx={{ color: "rgba(255, 255, 255, 0.85)", fontSize: "0.75rem" }}>
-                                From: <strong>{dayjs(fromDate).format("DD/MM/YYYY")}</strong> | To:{" "}
-                                <strong>{dayjs(toDate).format("DD/MM/YYYY")}</strong>
-                            </Typography>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mt: 0.8, flexWrap: "wrap" }}>
+                            {/* Interactive Date Filter Badge */}
+                            <Tooltip title="Click to change From & To Date for this Batch" arrow>
+                                <Box
+                                    component="button"
+                                    type="button"
+                                    onClick={(e) => {
+                                        setTempBatchFromDate(batchFromDate);
+                                        setTempBatchToDate(batchToDate);
+                                        setBatchDateAnchorEl(e.currentTarget);
+                                    }}
+                                    sx={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: 0.8,
+                                        px: 1.2,
+                                        py: 0.45,
+                                        borderRadius: "6px",
+                                        bgcolor: isBatchDateCustom ? "rgba(245, 158, 11, 0.28)" : "rgba(255, 255, 255, 0.16)",
+                                        border: isBatchDateCustom ? "1.5px solid #F59E0B" : "1px solid rgba(255, 255, 255, 0.35)",
+                                        color: "#FFFFFF",
+                                        cursor: "pointer",
+                                        outline: "none",
+                                        boxShadow: isBatchDateCustom ? "0 0 12px rgba(245, 158, 11, 0.35)" : "none",
+                                        transition: "all 0.2s ease-in-out",
+                                        "&:hover": {
+                                            bgcolor: isBatchDateCustom ? "rgba(245, 158, 11, 0.4)" : "rgba(255, 255, 255, 0.28)",
+                                            borderColor: "#FFFFFF",
+                                            transform: "translateY(-1px)",
+                                            boxShadow: "0 3px 8px rgba(0,0,0,0.25)",
+                                        },
+                                    }}
+                                >
+                                    <CalendarMonthIcon sx={{ fontSize: 16, color: isBatchDateCustom ? "#FDE047" : "#93C5FD" }} />
+                                    <Typography variant="caption" sx={{ color: "#FFFFFF", fontSize: "0.76rem", fontWeight: 500, letterSpacing: "0.2px" }}>
+                                        From: <strong>{dayjs(batchFromDate).format("DD/MM/YYYY")}</strong> | To:{" "}
+                                        <strong>{dayjs(batchToDate).format("DD/MM/YYYY")}</strong>
+                                    </Typography>
+                                    {isBatchDateCustom && (
+                                        <Chip
+                                            label="Custom Date"
+                                            size="small"
+                                            sx={{
+                                                height: 18,
+                                                fontSize: "0.65rem",
+                                                fontWeight: 700,
+                                                bgcolor: "#F59E0B",
+                                                color: "#1F2937",
+                                                lineHeight: 1,
+                                                px: 0.3,
+                                            }}
+                                        />
+                                    )}
+                                    <Chip
+                                        label="Change Date"
+                                        size="small"
+                                        sx={{
+                                            height: 18,
+                                            fontSize: "0.65rem",
+                                            fontWeight: 600,
+                                            bgcolor: "rgba(255, 255, 255, 0.22)",
+                                            color: "#FFFFFF",
+                                            lineHeight: 1,
+                                            px: 0.4,
+                                        }}
+                                    />
+                                </Box>
+                            </Tooltip>
 
                             {(selectedBatchItem?.godownName || batchTransactions[0]?.Godown_Name || selectedBatchItem?.item?.Godown_Name) && (
                                 <Typography variant="caption" sx={{ color: "rgba(255, 255, 255, 0.85)", fontSize: "0.75rem" }}>
@@ -1902,7 +2003,10 @@ const StockInHandReport: React.FC = () => {
 
                     <IconButton
                         aria-label="close"
-                        onClick={() => setBatchModalOpen(false)}
+                        onClick={() => {
+                            setBatchModalOpen(false);
+                            setBatchDateAnchorEl(null);
+                        }}
                         sx={{
                             color: "#FFFFFF",
                             bgcolor: "rgba(255, 255, 255, 0.08)",
@@ -1913,6 +2017,139 @@ const StockInHandReport: React.FC = () => {
                         <CloseIcon sx={{ fontSize: 20 }} />
                     </IconButton>
                 </DialogTitle>
+
+                {/* Batch-specific Date Filter Popover */}
+                <Popover
+                    open={Boolean(batchDateAnchorEl)}
+                    anchorEl={batchDateAnchorEl}
+                    onClose={() => setBatchDateAnchorEl(null)}
+                    anchorOrigin={{
+                        vertical: "bottom",
+                        horizontal: "left",
+                    }}
+                    transformOrigin={{
+                        vertical: "top",
+                        horizontal: "left",
+                    }}
+                    PaperProps={{
+                        sx: {
+                            mt: 1,
+                            p: 2.2,
+                            width: 340,
+                            borderRadius: 2.5,
+                            boxShadow: "0 12px 30px rgba(0, 0, 0, 0.25)",
+                            border: "1px solid #E2E8F0",
+                        },
+                    }}
+                    sx={{ zIndex: 1400 }}
+                >
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.8 }}>
+                        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                <CalendarMonthIcon sx={{ color: "#1E3A8A", fontSize: 20 }} />
+                                <Typography sx={{ fontSize: "0.95rem", fontWeight: 700, color: "#1E293B" }}>
+                                    Batch Date Filter
+                                </Typography>
+                            </Box>
+                            {isBatchDateCustom && (
+                                <Chip
+                                    label="Custom Active"
+                                    size="small"
+                                    sx={{
+                                        height: 20,
+                                        fontSize: "0.68rem",
+                                        fontWeight: 700,
+                                        bgcolor: "#FEF3C7",
+                                        color: "#B45309",
+                                    }}
+                                />
+                            )}
+                        </Box>
+
+                        {/* Date Inputs */}
+                        <Box sx={{ display: "flex", gap: 1.5 }}>
+                            <TextField
+                                label="From Date"
+                                type="date"
+                                size="small"
+                                fullWidth
+                                value={tempBatchFromDate}
+                                onChange={(e) => setTempBatchFromDate(e.target.value)}
+                                InputLabelProps={{ shrink: true }}
+                                inputProps={{ max: tempBatchToDate || undefined }}
+                            />
+                            <TextField
+                                label="To Date"
+                                type="date"
+                                size="small"
+                                fullWidth
+                                value={tempBatchToDate}
+                                onChange={(e) => setTempBatchToDate(e.target.value)}
+                                InputLabelProps={{ shrink: true }}
+                                inputProps={{ min: tempBatchFromDate || undefined }}
+                            />
+                        </Box>
+
+                        {dayjs(tempBatchFromDate).isAfter(dayjs(tempBatchToDate)) && (
+                            <Typography sx={{ color: "#DC2626", fontSize: "0.75rem", fontWeight: 500 }}>
+                                * From Date cannot be after To Date.
+                            </Typography>
+                        )}
+
+                        {/* Actions */}
+                        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", pt: 1, borderTop: "1px solid #E2E8F0" }}>
+                            <Button
+                                size="small"
+                                color="inherit"
+                                onClick={() => {
+                                    setBatchFromDate(fromDate);
+                                    setBatchToDate(toDate);
+                                    setTempBatchFromDate(fromDate);
+                                    setTempBatchToDate(toDate);
+                                    setIsBatchDateCustom(false);
+                                    setBatchDateAnchorEl(null);
+                                }}
+                                sx={{ textTransform: "none", fontSize: "0.75rem", color: "#64748B" }}
+                            >
+                                Reset to Report
+                            </Button>
+
+                            <Box sx={{ display: "flex", gap: 1 }}>
+                                <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => setBatchDateAnchorEl(null)}
+                                    sx={{ textTransform: "none", fontSize: "0.75rem" }}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    size="small"
+                                    variant="contained"
+                                    disabled={
+                                        !tempBatchFromDate ||
+                                        !tempBatchToDate ||
+                                        dayjs(tempBatchFromDate).isAfter(dayjs(tempBatchToDate))
+                                    }
+                                    onClick={() => {
+                                        setBatchFromDate(tempBatchFromDate);
+                                        setBatchToDate(tempBatchToDate);
+                                        setIsBatchDateCustom(tempBatchFromDate !== fromDate || tempBatchToDate !== toDate);
+                                        setBatchDateAnchorEl(null);
+                                    }}
+                                    sx={{
+                                        textTransform: "none",
+                                        fontSize: "0.75rem",
+                                        bgcolor: "#1E3A8A",
+                                        "&:hover": { bgcolor: "#1E40AF" },
+                                    }}
+                                >
+                                    Apply Filter
+                                </Button>
+                            </Box>
+                        </Box>
+                    </Box>
+                </Popover>
 
                 {/* Dialog Content: Table with Invoice No & Date as Separate Columns & No Horizontal Bottom Scroll */}
                 <DialogContent sx={{ p: 0, bgcolor: "#FFFFFF", overflowX: "hidden" }}>
@@ -1940,7 +2177,7 @@ const StockInHandReport: React.FC = () => {
                                 size="small"
                                 onClick={() => {
                                     if (selectedBatchItem) {
-                                        loadBatchTransactions(selectedBatchItem);
+                                        loadBatchTransactions(selectedBatchItem, batchFromDate, batchToDate);
                                     }
                                 }}
                             >

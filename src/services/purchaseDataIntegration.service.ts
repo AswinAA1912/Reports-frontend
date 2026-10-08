@@ -39,7 +39,7 @@ import {
 
 const cleanStr = (val: any): string => (val !== undefined && val !== null ? String(val).trim() : "");
 
-const parseNum = (val: any): number => {
+export const parseNum = (val: any): number => {
     if (val === undefined || val === null || val === "") return 0;
     const n = typeof val === "number" ? val : parseFloat(String(val).replace(/,/g, "").trim());
     return isNaN(n) ? 0 : n;
@@ -1268,6 +1268,36 @@ export const buildPurchaseDeliveryDataset = (
 
                         const effectivePayNo = (inv as any).paymentNo || (pMatch ? pMatch.invoice_no : "") || order.paymentNo || (inv.paymentStatus === "PAID" || inv.paymentStatus === "PARTIALLY_PAID" ? inv.invoiceNo : "-");
 
+                        const numPaid = parseNum(effectivePaid);
+                        const isPaymentDone = ((): boolean => {
+                            if (numPaid <= 0) return false;
+
+                            if (pMatch) {
+                                return parseNum(pMatch.Debit_Amt) > 0 && parseNum(pMatch.Bal_Amount) <= 0;
+                            }
+
+                            if (inv.paymentStatus === "PAID") return true;
+                            if (inv.paymentStatus === "PARTIALLY_PAID" || inv.paymentStatus === "PENDING" || inv.paymentStatus === "OVERDUE") {
+                                return false;
+                            }
+                            if (inv.pendingPayment !== undefined && parseNum(inv.pendingPayment) > 0) {
+                                return false;
+                            }
+                            if (inv.amount && numPaid < inv.amount) {
+                                return false;
+                            }
+
+                            if (order.paymentStatus === "PAID") return true;
+                            if (order.paymentStatus === "PARTIALLY_PAID" || order.paymentStatus === "PENDING" || order.paymentStatus === "OVERDUE") {
+                                return false;
+                            }
+                            if (order.pendingPayment !== undefined && parseNum(order.pendingPayment) > 0) {
+                                return false;
+                            }
+
+                            return numPaid > 0;
+                        })();
+
                         records.push({
                             id: `pd-inv-${order.id}-${inv.invoiceId || sNoCounter}`,
                             sNo: sNoCounter++,
@@ -1275,10 +1305,10 @@ export const buildPurchaseDeliveryDataset = (
                             inwardBatchWithItemName: `${rawName}${qtyText}${batchText}`,
                             purOrderNo: order.purOrderNo,
                             inwardJouNo: (inv as any).inwardJouNo || cleanStr((inv as any).TR_INV_ID) || order.inwardJouNo || "-",
-                            purInvNo: inv.invoiceNo || "-",
-                            paymentNo: effectivePayNo,
+                            purInvNo: (effectivePayNo && effectivePayNo !== "-") ? effectivePayNo : (inv.invoiceNo || "-"),
+                            paymentNo: "-",
                             paymentAmt: effectivePaid,
-                            status: "COMPLETED",
+                            status: isPaymentDone ? "COMPLETED" : "NOT COMPLETED",
                             orderDate: inv.invoiceDate || order.orderDate,
                         });
                     });
@@ -1343,6 +1373,11 @@ export const buildPurchaseDeliveryDataset = (
             );
             const qtyText = qty > 0 ? ` (${formatKgQuantity(qty)})` : "";
             const matchedPay = purInvNo ? paymentsMap?.get(purInvNo.toLowerCase()) : undefined;
+            const isPaymentDone = Boolean(
+                matchedPay &&
+                parseNum(matchedPay.Debit_Amt) > 0 &&
+                parseNum(matchedPay.Bal_Amount) <= 0
+            );
 
             records.push({
                 id: `pd-inv-${sNoCounter}`,
@@ -1351,10 +1386,10 @@ export const buildPurchaseDeliveryDataset = (
                 inwardBatchWithItemName: `${rawProduct}${qtyText}`,
                 purOrderNo,
                 inwardJouNo: 1,
-                purInvNo,
-                paymentNo: matchedPay ? (matchedPay.Bal_Amount === 0 ? "PAID" : matchedPay.Debit_Amt > 0 ? "PARTIAL" : "PENDING") : "",
+                purInvNo: matchedPay?.invoice_no || purInvNo || "-",
+                paymentNo: "-",
                 paymentAmt: matchedPay ? matchedPay.Debit_Amt : "",
-                status: "COMPLETED",
+                status: isPaymentDone ? "COMPLETED" : "NOT COMPLETED",
                 orderDate: cleanStr((inv as any).Ledger_Date || (inv as any).Ledger_date),
             });
         });

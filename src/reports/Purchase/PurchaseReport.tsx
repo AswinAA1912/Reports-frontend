@@ -464,7 +464,14 @@ const PurchaseRow: React.FC<RowProps> = ({
                                         startIcon={<LocalShippingOutlinedIcon sx={{ fontSize: 13 }} />}
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            window.open(`/purchaseDelivery?orderId=${encodeURIComponent(row.order.orderId)}`, "_blank");
+                                            const effectiveFrom = row.order?.orderDate && dayjs(row.order.orderDate).isValid()
+                                                ? dayjs(row.order.orderDate).format("YYYY-MM-DD")
+                                                : "";
+                                            const today = dayjs().format("YYYY-MM-DD");
+                                            const url = effectiveFrom
+                                                ? `/purchaseDelivery?orderId=${encodeURIComponent(row.order.orderId)}&fromDate=${encodeURIComponent(effectiveFrom)}&toDate=${encodeURIComponent(today)}`
+                                                : `/purchaseDelivery?orderId=${encodeURIComponent(row.order.orderId)}`;
+                                            window.open(url, "_blank");
                                         }}
                                         sx={{
                                             textTransform: "none",
@@ -486,7 +493,14 @@ const PurchaseRow: React.FC<RowProps> = ({
                                         startIcon={<PaymentOutlinedIcon sx={{ fontSize: 13 }} />}
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            window.open(`/purchasePayment?orderId=${encodeURIComponent(row.order.orderId)}`, "_blank");
+                                            const effectiveFrom = row.order?.orderDate && dayjs(row.order.orderDate).isValid()
+                                                ? dayjs(row.order.orderDate).format("YYYY-MM-DD")
+                                                : "";
+                                            const today = dayjs().format("YYYY-MM-DD");
+                                            const url = effectiveFrom
+                                                ? `/purchasePayment?orderId=${encodeURIComponent(row.order.orderId)}&fromDate=${encodeURIComponent(effectiveFrom)}&toDate=${encodeURIComponent(today)}`
+                                                : `/purchasePayment?orderId=${encodeURIComponent(row.order.orderId)}`;
+                                            window.open(url, "_blank");
                                         }}
                                         sx={{
                                             textTransform: "none",

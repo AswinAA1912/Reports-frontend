@@ -50,6 +50,7 @@ import {
 import {
     deriveStockGroup,
     cleanItemName,
+    cleanStr,
     fetchRawPurchaseDatasets,
     formatKgQuantity,
     parseNum,
@@ -58,18 +59,6 @@ import {
     PurchaseOrderTripItemService,
     PurchaseOrderTripItem,
 } from "../../services/purchaseOrderTripItem.service";
-
-/* ================= HELPER FORMATTERS ================= */
-
-const formatCurrency = (val: number | string): string => {
-    if (!val && val !== 0) return "";
-    const num = typeof val === "string" ? parseFloat(val.replace(/,/g, "")) : val;
-    if (isNaN(num)) return String(val);
-    return "₹\u00A0" + num.toLocaleString("en-IN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
-};
 
 /* ================= COMPONENT ================= */
 
@@ -302,7 +291,7 @@ const PurchaseDelivery: React.FC = () => {
                             (t.Product_Name && item.Product_Name && cleanItemName(t.Product_Name).toLowerCase() === rawProd.toLowerCase())
                         ) || orderTrips[idx];
 
-                        const inwardJou = matchedTrip?.TR_INV_ID || (item as any).TR_INV_ID || item.Ref_Po_Inv_No || item.Trans_Id || "-";
+                        const inwardJou = cleanStr(matchedTrip?.TR_INV_ID || (item as any).TR_INV_ID || item.Ref_Po_Inv_No || item.Trans_Id || "-").replace(/[\r\n]+/g, ", ");
 
                         const invK = invNo.toLowerCase();
                         const refK = String(item.Ref_Po_Inv_No || item.Trans_Id || "").trim().toLowerCase();
@@ -343,10 +332,27 @@ const PurchaseDelivery: React.FC = () => {
                             parseNum(matchedPay.Bal_Amount) <= 0
                         );
 
+                        const rawStockGroup = cleanStr(
+                            item.Stock_Group ||
+                            (item as any).stockGroup ||
+                            (matchedTrip as any)?.Stock_Group ||
+                            (matchedTrip as any)?.stockGroup
+                        );
+                        const finalStockGroup = (rawStockGroup && rawStockGroup.toLowerCase() !== "general items")
+                            ? rawStockGroup
+                            : deriveStockGroup(rawProd);
+
+                        const batchStr = item.Batch ? String(item.Batch).trim() : (matchedTrip?.Batch_No ? String(matchedTrip.Batch_No).trim() : "-");
+                        const tonnageStr = qty > 0 ? formatKgQuantity(qty) : "-";
+
                         return {
                             id: `pd-live-${item.invoice_no || idx}-${idx + 1}`,
                             sNo: idx + 1,
-                            stockGroup: item.Stock_Group || deriveStockGroup(rawProd),
+                            stockGroup: finalStockGroup,
+                            inwardItem: rawProd,
+                            batch: batchStr,
+                            tonnage: tonnageStr,
+                            tonnageKg: qty || 0,
                             inwardBatchWithItemName: `${rawProd}${qtyText}${batchText}`,
                             purOrderNo: cleanOrder,
                             inwardJouNo: inwardJou,
@@ -426,6 +432,8 @@ const PurchaseDelivery: React.FC = () => {
                 list = data.filter((item) =>
                     item.purOrderNo?.toLowerCase().includes(q) ||
                     item.purInvNo?.toLowerCase().includes(q) ||
+                    item.inwardItem?.toLowerCase().includes(q) ||
+                    item.batch?.toLowerCase().includes(q) ||
                     item.inwardBatchWithItemName?.toLowerCase().includes(q)
                 );
             }
@@ -436,7 +444,9 @@ const PurchaseDelivery: React.FC = () => {
             if (searchQuery.trim() !== "") {
                 const q = searchQuery.toLowerCase().trim();
                 const matchStockGroup = item.stockGroup?.toLowerCase().includes(q);
-                const matchBatch = item.inwardBatchWithItemName?.toLowerCase().includes(q);
+                const matchInwardItem = item.inwardItem?.toLowerCase().includes(q);
+                const matchBatch = item.batch?.toLowerCase().includes(q) || item.inwardBatchWithItemName?.toLowerCase().includes(q);
+                const matchTonnage = item.tonnage?.toLowerCase().includes(q);
                 const matchPurOrder = item.purOrderNo?.toLowerCase().includes(q);
                 const matchInwardJou = String(item.inwardJouNo).toLowerCase().includes(q);
                 const matchPurInv = item.purInvNo?.toLowerCase().includes(q);
@@ -445,7 +455,9 @@ const PurchaseDelivery: React.FC = () => {
 
                 if (
                     !matchStockGroup &&
+                    !matchInwardItem &&
                     !matchBatch &&
+                    !matchTonnage &&
                     !matchPurOrder &&
                     !matchInwardJou &&
                     !matchPurInv &&
@@ -497,8 +509,30 @@ const PurchaseDelivery: React.FC = () => {
         const notCompleted = total - completed;
         const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
+        let totalTonnageKg = 0;
         let totalPaymentAmt = 0;
         filteredData.forEach((item) => {
+            if (item.tonnageKg !== undefined && item.tonnageKg > 0) {
+                totalTonnageKg += item.tonnageKg;
+            } else if (item.tonnage && item.tonnage !== "-") {
+                const match = item.tonnage.match(/([\d,.]+)\s*(?:T|KG)/i);
+                if (match) {
+                    const n = parseFloat(match[1].replace(/,/g, "")) || 0;
+                    if (/T/i.test(item.tonnage) && !item.tonnage.includes("KG")) {
+                        totalTonnageKg += n * 1000;
+                    } else if (item.tonnage.includes("KG")) {
+                        const kgMatch = item.tonnage.match(/\(([\d,.]+)\s*KG\)/i) || item.tonnage.match(/([\d,.]+)\s*KG/i);
+                        if (kgMatch) {
+                            totalTonnageKg += parseFloat(kgMatch[1].replace(/,/g, "")) || 0;
+                        } else {
+                            totalTonnageKg += n;
+                        }
+                    } else {
+                        totalTonnageKg += n;
+                    }
+                }
+            }
+
             if (item.paymentAmt) {
                 const num =
                     typeof item.paymentAmt === "string"
@@ -513,6 +547,7 @@ const PurchaseDelivery: React.FC = () => {
             completed,
             notCompleted,
             completionRate,
+            totalTonnageKg,
             totalPaymentAmt,
         };
     }, [filteredData]);
@@ -578,16 +613,17 @@ const PurchaseDelivery: React.FC = () => {
             ]);
             excelRows.push([]);
 
-            // Table Header row (matching user's image exactly)
+            // Table Header row (matching user's request)
             excelRows.push([
                 "S.no",
                 "Stock group",
-                "Inward Batch with item name",
+                "Inward Item",
+                "Batch",
+                "Tonnage",
                 "Pur .order no",
                 "Inward Jou no",
                 "Pur Inv no",
                 "Payment invoice",
-                "Payment amt",
                 "status",
             ]);
 
@@ -596,12 +632,13 @@ const PurchaseDelivery: React.FC = () => {
                 excelRows.push([
                     idx + 1,
                     row.stockGroup,
-                    row.inwardBatchWithItemName,
+                    row.inwardItem || row.inwardBatchWithItemName || "-",
+                    row.batch || "-",
+                    row.tonnage || "-",
                     row.purOrderNo,
                     row.inwardJouNo,
                     row.purInvNo,
                     row.paymentNo,
-                    row.paymentAmt || "",
                     row.status,
                 ]);
             });
@@ -612,10 +649,11 @@ const PurchaseDelivery: React.FC = () => {
                 "-",
                 `${filteredData.length} Records`,
                 "-",
+                metrics.totalTonnageKg > 0 ? formatKgQuantity(metrics.totalTonnageKg) : "-",
                 "-",
                 "-",
                 "-",
-                metrics.totalPaymentAmt > 0 ? metrics.totalPaymentAmt : "-",
+                "-",
                 `${metrics.completionRate}% Done`,
             ]);
 
@@ -655,7 +693,7 @@ const PurchaseDelivery: React.FC = () => {
                             cell.s.font = { name: "Arial", sz: 10, bold: true, color: { rgb: "0F172A" } };
                             cell.s.fill = { fgColor: { rgb: "E2E8F0" } };
                         } else if (R > 3) {
-                            if (C === 8) {
+                            if (C === 9) {
                                 const isCompleted = cell.v === "COMPLETED";
                                 cell.s.font = {
                                     name: "Arial",
@@ -675,12 +713,13 @@ const PurchaseDelivery: React.FC = () => {
             ws["!cols"] = [
                 { wch: 8 },  // S.no
                 { wch: 16 }, // Stock group
-                { wch: 36 }, // Inward Batch with item name
+                { wch: 28 }, // Inward Item
+                { wch: 16 }, // Batch
+                { wch: 20 }, // Tonnage
                 { wch: 18 }, // Pur .order no
                 { wch: 15 }, // Inward Jou no
                 { wch: 18 }, // Pur Inv no
-                { wch: 18 }, // Payment no
-                { wch: 16 }, // Payment amt
+                { wch: 18 }, // Payment invoice
                 { wch: 16 }, // status
             ];
 
@@ -720,12 +759,13 @@ const PurchaseDelivery: React.FC = () => {
                 [
                     "S.no",
                     "Stock group",
-                    "Inward Batch with item name",
+                    "Inward Item",
+                    "Batch",
+                    "Tonnage",
                     "Pur .order no",
                     "Inward Jou no",
                     "Pur Inv no",
                     "Payment invoice",
-                    "Payment amt",
                     "status",
                 ],
             ];
@@ -733,12 +773,13 @@ const PurchaseDelivery: React.FC = () => {
             const tableBody = filteredData.map((row, idx) => [
                 idx + 1,
                 row.stockGroup,
-                row.inwardBatchWithItemName,
+                row.inwardItem || row.inwardBatchWithItemName || "-",
+                row.batch || "-",
+                row.tonnage || "-",
                 row.purOrderNo,
                 row.inwardJouNo,
                 row.purInvNo,
                 row.paymentNo,
-                row.paymentAmt ? formatCurrency(row.paymentAmt) : "",
                 row.status,
             ]);
 
@@ -747,10 +788,11 @@ const PurchaseDelivery: React.FC = () => {
                 "-",
                 `${filteredData.length} Records`,
                 "-",
+                metrics.totalTonnageKg > 0 ? formatKgQuantity(metrics.totalTonnageKg) : "-",
                 "-",
                 "-",
                 "-",
-                metrics.totalPaymentAmt > 0 ? formatCurrency(metrics.totalPaymentAmt) : "-",
+                "-",
                 `${metrics.completionRate}% Done`,
             ]);
 
@@ -767,7 +809,7 @@ const PurchaseDelivery: React.FC = () => {
                 },
                 alternateRowStyles: { fillColor: [248, 250, 252] },
                 didParseCell: (cellData) => {
-                    if (cellData.section === "body" && cellData.column.index === 8) {
+                    if (cellData.section === "body" && cellData.column.index === 9) {
                         const val = String(cellData.cell.raw);
                         if (val === "COMPLETED") {
                             cellData.cell.styles.textColor = [21, 128, 61];
@@ -1066,14 +1108,14 @@ const PurchaseDelivery: React.FC = () => {
                             flex: 1,
                             minHeight: 0,
                             overflowY: "auto",
-                            overflowX: "hidden",
+                            overflowX: "auto",
                         }}
                     >
                         <Table
                             size="small"
                             stickyHeader
                             aria-label="purchase delivery table"
-                            sx={{ width: "100%", tableLayout: "fixed" }}
+                            sx={{ width: "100%", minWidth: 1100, tableLayout: "fixed" }}
                         >
                             {/* TABLE HEAD */}
                             <TableHead>
@@ -1084,9 +1126,9 @@ const PurchaseDelivery: React.FC = () => {
                                             bgcolor: "#1E3A8A",
                                             fontWeight: 700,
                                             color: "#ffffff",
-                                            fontSize: "0.78rem",
+                                            fontSize: "0.76rem",
                                             borderRight: "1px solid rgba(255, 255, 255, 0.15)",
-                                            py: 0.9,
+                                            py: 0.8,
                                             px: 0.8,
                                             position: "sticky",
                                             top: 0,
@@ -1097,34 +1139,37 @@ const PurchaseDelivery: React.FC = () => {
                                         },
                                     }}
                                 >
-                                    <TableCell align="center" sx={{ width: "4%" }}>
+                                    <TableCell align="center" sx={{ width: "3.5%" }}>
                                         S.no
                                     </TableCell>
-                                    <TableCell sx={{ width: "9.5%" }}>
+                                    <TableCell sx={{ width: "9%" }}>
                                         Stock group
                                     </TableCell>
-                                    <TableCell sx={{ width: "21.5%" }}>
-                                        Inward Batch with item name
+                                    <TableCell sx={{ width: "18%" }}>
+                                        Inward Item
                                     </TableCell>
-                                    <TableCell sx={{ width: "12%" }}>
+                                    <TableCell align="center" sx={{ width: "8.5%" }}>
+                                        Batch
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ width: "10.5%" }}>
+                                        Tonnage
+                                    </TableCell>
+                                    <TableCell sx={{ width: "10.5%" }}>
                                         Pur .order no
                                     </TableCell>
-                                    <TableCell align="center" sx={{ width: "10%" }}>
+                                    <TableCell align="center" sx={{ width: "10.5%" }}>
                                         Inward Jou no
                                     </TableCell>
-                                    <TableCell sx={{ width: "12%" }}>
+                                    <TableCell sx={{ width: "10.5%" }}>
                                         Pur Inv no
                                     </TableCell>
-                                    <TableCell sx={{ width: "12%" }}>
+                                    <TableCell sx={{ width: "9.5%" }}>
                                         Payment invoice
                                     </TableCell>
-                                    <TableCell align="right" sx={{ width: "11%" }}>
-                                        Payment amt
-                                    </TableCell>
-                                    <TableCell align="center" sx={{ width: "9%" }}>
+                                    <TableCell align="center" sx={{ width: "7.5%" }}>
                                         status
                                     </TableCell>
-                                    <TableCell align="center" sx={{ width: "8%", borderRight: "none" }}>
+                                    <TableCell align="center" sx={{ width: "5%", borderRight: "none" }}>
                                         Actions
                                     </TableCell>
                                 </TableRow>
@@ -1137,16 +1182,17 @@ const PurchaseDelivery: React.FC = () => {
                                         "& th, & td": {
                                             fontWeight: 800,
                                             fontSize: "0.76rem",
-                                            py: 0.8,
+                                            py: 0.7,
                                             px: 0.8,
                                             color: "#0f172a",
                                             borderRight: "1px solid #e2e8f0",
                                             position: "sticky",
-                                            top: "37px",
+                                            top: "35px",
                                             zIndex: 4,
                                             bgcolor: "#f1f5f9",
                                             overflow: "hidden",
                                             textOverflow: "ellipsis",
+                                            whiteSpace: "nowrap",
                                         },
                                     }}
                                 >
@@ -1155,10 +1201,7 @@ const PurchaseDelivery: React.FC = () => {
                                     <TableCell sx={{ color: "#1e3a8a", fontWeight: 800 }}>
                                         {filteredData.length} Records
                                     </TableCell>
-                                    <TableCell> </TableCell>
                                     <TableCell align="center"> </TableCell>
-                                    <TableCell> </TableCell>
-                                    <TableCell> </TableCell>
                                     <TableCell
                                         align="right"
                                         sx={{
@@ -1168,8 +1211,12 @@ const PurchaseDelivery: React.FC = () => {
                                             whiteSpace: "nowrap",
                                         }}
                                     >
-                                        {metrics.totalPaymentAmt > 0 ? formatCurrency(metrics.totalPaymentAmt) : "-"}
+                                        {metrics.totalTonnageKg > 0 ? formatKgQuantity(metrics.totalTonnageKg) : "-"}
                                     </TableCell>
+                                    <TableCell> </TableCell>
+                                    <TableCell align="center"> </TableCell>
+                                    <TableCell> </TableCell>
+                                    <TableCell> </TableCell>
                                     <TableCell align="center">
                                         <Chip
                                             size="small"
@@ -1180,6 +1227,7 @@ const PurchaseDelivery: React.FC = () => {
                                                 fontWeight: 800,
                                                 fontSize: "0.68rem",
                                                 height: 20,
+                                                whiteSpace: "nowrap",
                                             }}
                                         />
                                     </TableCell>
@@ -1203,6 +1251,12 @@ const PurchaseDelivery: React.FC = () => {
                                                     "&:hover": {
                                                         bgcolor: "#f1f5f9 !important",
                                                     },
+                                                    "& td": {
+                                                        py: 0.6,
+                                                        px: 0.8,
+                                                        verticalAlign: "middle",
+                                                        whiteSpace: "nowrap",
+                                                    },
                                                 }}
                                             >
                                                 {/* S.NO */}
@@ -1211,9 +1265,7 @@ const PurchaseDelivery: React.FC = () => {
                                                     sx={{
                                                         fontWeight: 700,
                                                         color: "#475569",
-                                                        fontSize: "0.78rem",
-                                                        py: 0.8,
-                                                        px: 0.8,
+                                                        fontSize: "0.76rem",
                                                         borderRight: "1px solid #eef2f6",
                                                     }}
                                                 >
@@ -1223,135 +1275,234 @@ const PurchaseDelivery: React.FC = () => {
                                                 {/* STOCK GROUP */}
                                                 <TableCell
                                                     sx={{
-                                                        fontSize: "0.78rem",
+                                                        fontSize: "0.76rem",
                                                         color: "#334155",
                                                         fontWeight: 600,
-                                                        py: 0.8,
-                                                        px: 0.8,
                                                         borderRight: "1px solid #eef2f6",
-                                                        wordBreak: "break-word",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
                                                     }}
                                                 >
-                                                    {row.stockGroup}
+                                                    <Tooltip title={row.stockGroup || ""} arrow placement="top-start">
+                                                        <Typography
+                                                            component="span"
+                                                            sx={{
+                                                                fontSize: "0.76rem",
+                                                                fontWeight: 600,
+                                                                color: "#334155",
+                                                                whiteSpace: "nowrap",
+                                                                overflow: "hidden",
+                                                                textOverflow: "ellipsis",
+                                                                display: "block",
+                                                            }}
+                                                        >
+                                                            {row.stockGroup}
+                                                        </Typography>
+                                                    </Tooltip>
                                                 </TableCell>
 
-                                                {/* INWARD BATCH WITH ITEM NAME */}
+                                                {/* INWARD ITEM */}
                                                 <TableCell
                                                     sx={{
-                                                        py: 0.8,
-                                                        px: 0.8,
+                                                        borderRight: "1px solid #eef2f6",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                    }}
+                                                >
+                                                    <Tooltip title={row.inwardItem || row.inwardBatchWithItemName || "-"} arrow placement="top-start">
+                                                        <Typography
+                                                            sx={{
+                                                                fontSize: "0.78rem",
+                                                                fontWeight: 700,
+                                                                color: "#0f172a",
+                                                                whiteSpace: "nowrap",
+                                                                overflow: "hidden",
+                                                                textOverflow: "ellipsis",
+                                                                display: "block",
+                                                            }}
+                                                        >
+                                                            {row.inwardItem || row.inwardBatchWithItemName || "-"}
+                                                        </Typography>
+                                                    </Tooltip>
+                                                </TableCell>
+
+                                                {/* BATCH */}
+                                                <TableCell
+                                                    align="center"
+                                                    sx={{
                                                         borderRight: "1px solid #eef2f6",
                                                     }}
                                                 >
-                                                    <Typography
-                                                        sx={{
-                                                            fontSize: "0.80rem",
-                                                            fontWeight: 700,
-                                                            color: "#0f172a",
-                                                            wordBreak: "break-word",
-                                                            lineHeight: 1.25,
-                                                        }}
-                                                    >
-                                                        {row.inwardBatchWithItemName}
-                                                    </Typography>
+                                                    {row.batch && row.batch !== "-" ? (
+                                                        <Tooltip title={`Batch: ${row.batch}`} arrow placement="top">
+                                                            <Chip
+                                                                size="small"
+                                                                label={row.batch}
+                                                                sx={{
+                                                                    fontSize: "0.70rem",
+                                                                    fontWeight: 600,
+                                                                    height: 20,
+                                                                    bgcolor: "#f1f5f9",
+                                                                    color: "#334155",
+                                                                    border: "1px solid #e2e8f0",
+                                                                    maxWidth: "100%",
+                                                                    "& .MuiChip-label": {
+                                                                        px: 0.8,
+                                                                        whiteSpace: "nowrap",
+                                                                        overflow: "hidden",
+                                                                        textOverflow: "ellipsis",
+                                                                    },
+                                                                }}
+                                                            />
+                                                        </Tooltip>
+                                                    ) : (
+                                                        <Typography sx={{ fontSize: "0.76rem", color: "#94a3b8" }}>-</Typography>
+                                                    )}
+                                                </TableCell>
+
+                                                {/* TONNAGE */}
+                                                <TableCell
+                                                    align="right"
+                                                    sx={{
+                                                        borderRight: "1px solid #eef2f6",
+                                                        fontWeight: 700,
+                                                        color: "#0f172a",
+                                                        fontSize: "0.76rem",
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                >
+                                                    <Tooltip title={row.tonnage || "-"} arrow placement="top-end">
+                                                        <Typography
+                                                            component="span"
+                                                            sx={{
+                                                                fontWeight: 700,
+                                                                color: "#0f172a",
+                                                                fontSize: "0.76rem",
+                                                                whiteSpace: "nowrap",
+                                                                display: "inline-block",
+                                                            }}
+                                                        >
+                                                            {row.tonnage || "-"}
+                                                        </Typography>
+                                                    </Tooltip>
                                                 </TableCell>
 
                                                 {/* PUR .ORDER NO */}
                                                 <TableCell
                                                     sx={{
-                                                        py: 0.8,
-                                                        px: 0.8,
                                                         borderRight: "1px solid #eef2f6",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
                                                     }}
                                                 >
-                                                    <Typography
-                                                        sx={{
-                                                            fontWeight: 700,
-                                                            color: "#1e3a8a",
-                                                            fontSize: "0.78rem",
-                                                            wordBreak: "break-word",
-                                                        }}
-                                                    >
-                                                        {row.purOrderNo || "-"}
-                                                    </Typography>
+                                                    <Tooltip title={row.purOrderNo || "-"} arrow placement="top-start">
+                                                        <Typography
+                                                            sx={{
+                                                                fontWeight: 700,
+                                                                color: "#1e3a8a",
+                                                                fontSize: "0.76rem",
+                                                                whiteSpace: "nowrap",
+                                                                overflow: "hidden",
+                                                                textOverflow: "ellipsis",
+                                                                display: "block",
+                                                            }}
+                                                        >
+                                                            {row.purOrderNo || "-"}
+                                                        </Typography>
+                                                    </Tooltip>
                                                 </TableCell>
 
                                                 {/* INWARD JOU NO */}
                                                 <TableCell
                                                     align="center"
                                                     sx={{
-                                                        fontWeight: 600,
-                                                        color: "#475569",
-                                                        fontSize: "0.78rem",
-                                                        py: 0.8,
-                                                        px: 0.8,
                                                         borderRight: "1px solid #eef2f6",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        whiteSpace: "nowrap",
                                                     }}
                                                 >
-                                                    {row.inwardJouNo || "-"}
+                                                    {row.inwardJouNo && row.inwardJouNo !== "-" ? (
+                                                        <Tooltip title={`Inward Jou No: ${String(row.inwardJouNo)}`} arrow placement="top">
+                                                            <Typography
+                                                                component="span"
+                                                                sx={{
+                                                                    fontWeight: 600,
+                                                                    color: "#475569",
+                                                                    fontSize: "0.76rem",
+                                                                    whiteSpace: "nowrap",
+                                                                    overflow: "hidden",
+                                                                    textOverflow: "ellipsis",
+                                                                    display: "inline-block",
+                                                                    maxWidth: "100%",
+                                                                }}
+                                                            >
+                                                                {String(row.inwardJouNo).replace(/[\r\n]+/g, ", ")}
+                                                            </Typography>
+                                                        </Tooltip>
+                                                    ) : (
+                                                        <Typography sx={{ fontSize: "0.76rem", color: "#94a3b8" }}>-</Typography>
+                                                    )}
                                                 </TableCell>
 
                                                 {/* PUR INV NO */}
                                                 <TableCell
                                                     sx={{
-                                                        fontWeight: 600,
-                                                        color: "#0369a1",
-                                                        fontSize: "0.78rem",
-                                                        py: 0.8,
-                                                        px: 0.8,
                                                         borderRight: "1px solid #eef2f6",
-                                                        wordBreak: "break-word",
-                                                    }}
-                                                >
-                                                    {row.purInvNo || "-"}
-                                                </TableCell>
-
-                                                {/* PAYMENT NO */}
-                                                <TableCell
-                                                    sx={{
-                                                        fontWeight: 600,
-                                                        color: "#475569",
-                                                        fontSize: "0.78rem",
-                                                        py: 0.8,
-                                                        px: 0.8,
-                                                        borderRight: "1px solid #eef2f6",
-                                                        wordBreak: "break-word",
-                                                    }}
-                                                >
-                                                    {row.paymentNo || "-"}
-                                                </TableCell>
-
-                                                {/* PAYMENT AMT */}
-                                                <TableCell
-                                                    align="right"
-                                                    sx={{
-                                                        fontWeight: 700,
-                                                        color: row.paymentAmt ? "#0f172a" : "#94a3b8",
-                                                        fontSize: "0.78rem",
-                                                        py: 0.8,
-                                                        px: 0.8,
-                                                        borderRight: "1px solid #eef2f6",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
                                                         whiteSpace: "nowrap",
                                                     }}
                                                 >
-                                                    {row.paymentAmt ? (
-                                                        typeof row.paymentAmt === "number" ? (
-                                                            formatCurrency(row.paymentAmt)
-                                                        ) : (
-                                                            row.paymentAmt
-                                                        )
-                                                    ) : (
-                                                        "-"
-                                                    )}
+                                                    <Tooltip title={row.purInvNo || "-"} arrow placement="top-start">
+                                                        <Typography
+                                                            sx={{
+                                                                fontWeight: 600,
+                                                                color: "#0369a1",
+                                                                fontSize: "0.76rem",
+                                                                whiteSpace: "nowrap",
+                                                                overflow: "hidden",
+                                                                textOverflow: "ellipsis",
+                                                                display: "block",
+                                                            }}
+                                                        >
+                                                            {row.purInvNo || "-"}
+                                                        </Typography>
+                                                    </Tooltip>
+                                                </TableCell>
+
+                                                {/* PAYMENT INVOICE */}
+                                                <TableCell
+                                                    sx={{
+                                                        borderRight: "1px solid #eef2f6",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                >
+                                                    <Tooltip title={row.paymentNo || "-"} arrow placement="top-start">
+                                                        <Typography
+                                                            sx={{
+                                                                fontWeight: 600,
+                                                                color: "#475569",
+                                                                fontSize: "0.76rem",
+                                                                whiteSpace: "nowrap",
+                                                                overflow: "hidden",
+                                                                textOverflow: "ellipsis",
+                                                                display: "block",
+                                                            }}
+                                                        >
+                                                            {row.paymentNo || "-"}
+                                                        </Typography>
+                                                    </Tooltip>
                                                 </TableCell>
 
                                                 {/* STATUS */}
                                                 <TableCell
                                                     align="center"
                                                     sx={{
-                                                        py: 0.8,
-                                                        px: 0.8,
                                                         borderRight: "1px solid #eef2f6",
+                                                        whiteSpace: "nowrap",
                                                     }}
                                                 >
                                                     <Chip
@@ -1366,14 +1517,19 @@ const PurchaseDelivery: React.FC = () => {
                                                         label={row.status}
                                                         sx={{
                                                             fontWeight: 800,
-                                                            fontSize: "0.66rem",
-                                                            height: 22,
+                                                            fontSize: "0.64rem",
+                                                            height: 20,
                                                             bgcolor: isCompleted ? "#dcfce7" : "#fee2e2",
                                                             color: isCompleted ? "#15803d" : "#b91c1c",
                                                             border: "1px solid",
                                                             borderColor: isCompleted ? "#86efac" : "#fca5a5",
+                                                            whiteSpace: "nowrap",
                                                             "& .MuiChip-icon": {
                                                                 color: isCompleted ? "#16a34a" : "#dc2626",
+                                                            },
+                                                            "& .MuiChip-label": {
+                                                                px: 0.6,
+                                                                whiteSpace: "nowrap",
                                                             },
                                                         }}
                                                     />
@@ -1383,12 +1539,13 @@ const PurchaseDelivery: React.FC = () => {
                                                 <TableCell
                                                     align="center"
                                                     sx={{
-                                                        py: 0.8,
+                                                        py: 0.4,
                                                         px: 0.5,
                                                         borderRight: "none",
+                                                        whiteSpace: "nowrap",
                                                     }}
                                                 >
-                                                    <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 0.5 }}>
+                                                    <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 0.5, flexWrap: "nowrap" }}>
                                                         {/* Item & Invoice Payment */}
                                                         <Tooltip title={`Item & Invoice Payment (${row.purOrderNo || row.purInvNo}) - Open in New Tab`}>
                                                             <IconButton
@@ -1404,11 +1561,11 @@ const PurchaseDelivery: React.FC = () => {
                                                                     bgcolor: "#f0f9ff",
                                                                     color: "#0369a1",
                                                                     border: "1px solid #bae6fd",
-                                                                    p: 0.5,
+                                                                    p: 0.4,
                                                                     "&:hover": { bgcolor: "#e0f2fe" },
                                                                 }}
                                                             >
-                                                                <TableViewOutlinedIcon sx={{ fontSize: 15 }} />
+                                                                <TableViewOutlinedIcon sx={{ fontSize: 14 }} />
                                                             </IconButton>
                                                         </Tooltip>
 
@@ -1427,11 +1584,11 @@ const PurchaseDelivery: React.FC = () => {
                                                                     bgcolor: "#fdf4ff",
                                                                     color: "#a21caf",
                                                                     border: "1px solid #f0abfc",
-                                                                    p: 0.5,
+                                                                    p: 0.4,
                                                                     "&:hover": { bgcolor: "#fae8ff" },
                                                                 }}
                                                             >
-                                                                <PaymentOutlinedIcon sx={{ fontSize: 15 }} />
+                                                                <PaymentOutlinedIcon sx={{ fontSize: 14 }} />
                                                             </IconButton>
                                                         </Tooltip>
 
@@ -1442,7 +1599,7 @@ const PurchaseDelivery: React.FC = () => {
                                     })
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
+                                        <TableCell colSpan={11} align="center" sx={{ py: 6 }}>
                                             <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                                                 <ErrorOutlineIcon sx={{ fontSize: 36, color: "#94a3b8" }} />
                                                 <Typography sx={{ color: "#64748b", fontWeight: 600, fontSize: "0.9rem" }}>

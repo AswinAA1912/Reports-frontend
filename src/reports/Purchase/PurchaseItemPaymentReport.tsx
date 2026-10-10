@@ -440,7 +440,11 @@ const PurchaseItemPaymentReport: React.FC = () => {
                         invoiceDate: invDate,
                         itemId: `item-${item.Product_Id || idx + 1}`,
                         itemName: prodName,
-                        stockGroup: String(item.Stock_Group || deriveStockGroup(prodName)).trim(),
+                        stockGroup: String(
+                            (item.Stock_Group && item.Stock_Group !== "General Items")
+                                ? item.Stock_Group
+                                : (matchingTrip?.stockGroup || (matchingTrip as any)?.Stock_Group || deriveStockGroup(prodName))
+                        ).trim(),
                         batchNo: batch,
                         batchLocation: godown || matchingTrip?.batchLocation || "",
                         arrivedQty: qty,
@@ -871,13 +875,11 @@ const PurchaseItemPaymentReport: React.FC = () => {
                             "PO ID / Trans ID": idx === 0 ? (cleanPoId(order.transId) || "") : "",
                             "Supplier Name": idx === 0 ? order.supplierName : "",
                             "Order Date": idx === 0 ? (order.orderDate && dayjs(order.orderDate).isValid() ? dayjs(order.orderDate).format("DD/MM/YYYY") : order.orderDate) : "",
-                            "Due Date": idx === 0 ? (order.dueDate && dayjs(order.dueDate).isValid() ? dayjs(order.dueDate).format("DD/MM/YYYY") : order.dueDate) : "",
                             "Item Details (Ordered Qty)": idx === 0 ? itemNamesWithQty : "",
                             "Order Value (₹)": idx === 0 ? pay.totalValue : "",
                             "Order Paid (₹)": idx === 0 ? pay.paidAmount : "",
                             "Order Pending Payment (₹)": idx === 0 ? pay.pendingPayment : "",
                             "Order Payment Status": idx === 0 ? pay.paymentStatus : "",
-                            // Arrived Invoice Details (No Godown)
                             "Arrived Invoice No": inv.invoiceNo,
                             "Invoice Date": inv.invoiceDate && dayjs(inv.invoiceDate).isValid() ? dayjs(inv.invoiceDate).format("DD/MM/YYYY") : inv.invoiceDate,
                             "Batch": inv.batchNo || "-",
@@ -898,7 +900,6 @@ const PurchaseItemPaymentReport: React.FC = () => {
                         "PO ID / Trans ID": cleanPoId(order.transId) || "",
                         "Supplier Name": order.supplierName,
                         "Order Date": order.orderDate && dayjs(order.orderDate).isValid() ? dayjs(order.orderDate).format("DD/MM/YYYY") : order.orderDate,
-                        "Due Date": order.dueDate && dayjs(order.dueDate).isValid() ? dayjs(order.dueDate).format("DD/MM/YYYY") : order.dueDate,
                         "Item Details (Ordered Qty)": itemNamesWithQty,
                         "Order Value (₹)": pay.totalValue,
                         "Order Paid (₹)": pay.paidAmount,
@@ -1435,8 +1436,7 @@ const PurchaseItemPaymentReport: React.FC = () => {
                                                             {order.supplierName}
                                                         </Typography>
                                                         <Typography sx={{ fontSize: "0.68rem", color: "#64748b", mt: 0.2 }}>
-                                                            Order: <strong>{order.orderDate && dayjs(order.orderDate).isValid() ? dayjs(order.orderDate).format("DD/MM/YY") : order.orderDate}</strong>
-                                                            {order.dueDate && dayjs(order.dueDate).isValid() && <> • Due: <strong>{dayjs(order.dueDate).format("DD/MM/YY")}</strong></>}
+                                                            Order Date: <strong>{order.orderDate && dayjs(order.orderDate).isValid() ? dayjs(order.orderDate).format("DD/MM/YYYY") : (order.orderDate || "-")}</strong>
                                                         </Typography>
                                                     </TableCell>
 

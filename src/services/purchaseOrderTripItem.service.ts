@@ -36,6 +36,7 @@ export interface PurchaseOrderTripItem {
     BillType?: string;
     Narration?: string;
     TripStatus?: string;
+    Stock_Group?: string;
 }
 
 export interface PurchaseOrderTripItemResponse {

@@ -66,12 +66,16 @@ export interface PurchaseDeliveryItem {
   id: string;
   sNo: number;
   stockGroup: string;
-  inwardBatchWithItemName: string;
+  inwardItem: string;
+  batch: string;
+  tonnage: string;
+  tonnageKg?: number;
+  inwardBatchWithItemName?: string;
   purOrderNo: string;
   inwardJouNo: string | number;
   purInvNo: string;
   paymentNo: string;
-  paymentAmt: number | string;
+  paymentAmt?: number | string;
   status: "COMPLETED" | "NOT COMPLETED" | "PENDING";
   orderDate: string;
 }

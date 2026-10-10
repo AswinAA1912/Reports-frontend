@@ -1751,7 +1751,7 @@ const PurchasePaymentReport: React.FC = () => {
                                                                                                 {rawProd}
                                                                                             </Typography>
                                                                                             <Typography sx={{ fontSize: "0.68rem", color: "#64748b" }}>
-                                                                                                Group: {inv.Stock_Group || deriveStockGroup(rawProd)}
+                                                                                                Group: {(inv.Stock_Group && inv.Stock_Group !== "General Items") ? inv.Stock_Group : (deriveStockGroup(rawProd) || "-")}
                                                                                             </Typography>
                                                                                         </TableCell>
                                                                                         <TableCell sx={{ fontSize: "0.74rem", fontWeight: 600, color: "#334155", py: 0.7 }}>

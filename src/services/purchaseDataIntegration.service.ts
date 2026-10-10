@@ -37,7 +37,7 @@ import {
    HELPER UTILITIES
 ========================================================================= */
 
-const cleanStr = (val: any): string => (val !== undefined && val !== null ? String(val).trim() : "");
+export const cleanStr = (val: any): string => (val !== undefined && val !== null ? String(val).trim() : "");
 
 export const parseNum = (val: any): number => {
     if (val === undefined || val === null || val === "") return 0;
@@ -80,13 +80,80 @@ export const formatKgQuantityCompact = (qtyInKg: number | string): string => {
 
 export const deriveStockGroup = (productName: string): string => {
     const p = (productName || "").toUpperCase();
-    if (p.includes("CHANA") || p.includes("MALDA") || p.includes("DESI")) return "2.Desi cp";
-    if (p.includes("BEAN") || p.includes("RAJMA") || p.includes("VARI")) return "1.Beans";
-    if (p.includes("DHAL") || p.includes("TOOR") || p.includes("URAD") || p.includes("GRAM") || p.includes("MOONG")) {
-        return "3.Dhall";
+    if (!p) return "";
+    if (p.includes("PEAS") || p.includes("VATANA")) return "11.PEAS";
+    if (p.includes("MOONG") || p.includes("PASI") || p.includes("GREEN GRAM")) return "10.Moong";
+    if (p.includes("MASOOR")) return "7.MASOOR";
+    if (p.includes("KABULI") || p.includes("WHITEGRAM")) return "5.Kabuli cp";
+    if (p.includes("CHANA") || p.includes("MALDA") || p.includes("DESI") || p.includes("BENGAL")) return "2.Desi cp";
+    if (p.includes("RICE") || p.includes("PADDY") || p.includes("PONNI") || p.includes("SONA") || p.includes("BASMATI")) return "12.RICE";
+    if (p.includes("MOCHAI")) return "9.Mochai";
+    if (p.includes("THATTAI") || p.includes("COWPEN") || p.includes("KARAMANI")) return "13.Thattai";
+    if (p.includes("KANAM") || p.includes("BLACKKANAM")) return "6.KANAM";
+    if (p.includes("MILLET") || p.includes("RAGI") || p.includes("JOWAR") || p.includes("BAJRA") || p.includes("VARAGU") || p.includes("SAMAI") || p.includes("THINAI") || p.includes("KUDO")) return "8.MILLETS";
+    if (p.includes("BEAN") || p.includes("RAJMA") || p.includes("VARI") || p.includes("SOYA")) return "1.BEANS";
+    if (p.includes("BAG") || p.includes("GUNNY") || p.includes("PACKING")) return "14.BAGS";
+    if (p.includes("RETAIL")) return "15.Retail";
+    if (p.includes("II ") || p.includes("II-") || p.includes("II ITEM")) return "4.II Item";
+    if (p.includes("DHAL") || p.includes("DHALL") || p.includes("TOOR") || p.includes("URAD") || p.includes("GRAM") || p.includes("PARCHED")) {
+        return "3.DHALL";
     }
-    if (p.includes("OIL") || p.includes("GHEE")) return "4.Oils";
-    return "General Items";
+    return "";
+};
+
+/**
+ * Builds a stock group catalog across all dataset rows (PO, invoices, trips)
+ * and provides a resolver that prioritizes backend-defined Stock_Group.
+ */
+export const buildStockGroupCatalog = (
+    poRows: any[] = [],
+    invRows: any[] = [],
+    tripRows: any[] = []
+) => {
+    const byId = new Map<number, string>();
+    const byName = new Map<string, string>();
+
+    const register = (prodId?: any, prodName?: string, sg?: string) => {
+        const cleanSg = cleanStr(sg);
+        if (!cleanSg || cleanSg.toLowerCase() === "general items") return;
+        const pIdNum = Number(prodId);
+        if (pIdNum && !isNaN(pIdNum)) {
+            byId.set(pIdNum, cleanSg);
+        }
+        const normName = normalizeName(prodName || "");
+        if (normName) {
+            byName.set(normName, cleanSg);
+        }
+    };
+
+    (poRows || []).forEach((r) => {
+        register(r?.Product_Id, r?.Product_name || r?.Product_Name || r?.Stock_Item, r?.Stock_Group || r?.stockGroup);
+    });
+    (invRows || []).forEach((r) => {
+        register(r?.Product_Id, r?.Product_Name || r?.Product_name || r?.Stock_Item, r?.Stock_Group || r?.stockGroup);
+    });
+    (tripRows || []).forEach((t) => {
+        register(t?.Product_Id, t?.Product_Name, t?.Stock_Group || t?.stockGroup);
+    });
+
+    const resolve = (itemObj: any, prodName: string, prodId?: any): string => {
+        const explicit = cleanStr(itemObj?.Stock_Group || itemObj?.stockGroup);
+        if (explicit && explicit.toLowerCase() !== "general items") return explicit;
+
+        const pIdNum = Number(prodId || itemObj?.Product_Id);
+        if (pIdNum && !isNaN(pIdNum) && byId.has(pIdNum)) {
+            return byId.get(pIdNum)!;
+        }
+
+        const norm = normalizeName(prodName);
+        if (norm && byName.has(norm)) {
+            return byName.get(norm)!;
+        }
+
+        return deriveStockGroup(prodName);
+    };
+
+    return { byId, byName, resolve };
 };
 
 /* =========================================================================
@@ -219,6 +286,7 @@ export const buildPurchasePaymentDataset = (
 
     const result: PurchasePaymentItem[] = [];
     let sNoCounter = 1;
+    const { resolve: resolveGroup } = buildStockGroupCatalog(poRows, invRows);
 
     // Group PO items by invoice_no (PO Number)
     const poGroupMap: Record<string, PurchaseOrderItem[]> = {};
@@ -512,7 +580,7 @@ export const buildPurchasePaymentDataset = (
             return {
                 itemId: `item-${poNo}-${idx + 1}`,
                 itemName: rawItemName,
-                stockGroup: cleanStr((it as any).Stock_Group || (it as any).stockGroup) || deriveStockGroup(rawItemName),
+                stockGroup: resolveGroup(it, rawItemName, (it as any).Product_Id),
                 orderedTons: itOrderedTons,
                 arrivedTons: itArrivedTons,
                 pendingTons,
@@ -670,7 +738,7 @@ export const buildPurchasePaymentDataset = (
                     itemDetails.push({
                         itemId: `item-inv-${invIdx + 1}-${rIdx + 1}`,
                         itemName: rawProduct,
-                        stockGroup: cleanStr((r as any).Stock_Group) || deriveStockGroup(rawProduct),
+                        stockGroup: resolveGroup(r, rawProduct, (r as any).Product_Id),
                         orderedTons: q,
                         arrivedTons: q,
                         pendingTons: 0,
@@ -730,6 +798,8 @@ export const buildPurchaseItemPaymentDataset = (
     if ((!poRows || poRows.length === 0) && (!invRows || invRows.length === 0) && (!tripRows || tripRows.length === 0)) {
         return [];
     }
+
+    const { resolve: resolveGroup } = buildStockGroupCatalog(poRows, invRows, tripRows);
 
     // PRIMARY PATH: If tripRows from purchaseOrderTripItemDetails are available, map by OrderId === Trans_Id
     if (tripRows && tripRows.length > 0) {
@@ -881,7 +951,7 @@ export const buildPurchaseItemPaymentDataset = (
                 return {
                     itemId: `item-${poNo}-${itIdx + 1}`,
                     itemName: rawItemName,
-                    stockGroup: cleanStr((it as any).Stock_Group || (it as any).stockGroup) || deriveStockGroup(rawItemName),
+                    stockGroup: resolveGroup(it, rawItemName, itProdId),
                     orderedTons: itOrderedTons,
                     arrivedTons: itArrivedTons,
                     pendingTons,
@@ -903,9 +973,23 @@ export const buildPurchaseItemPaymentDataset = (
                 const unit = cleanStr(t.Units) || "kg";
                 const totalVal = parseNum(t.Total_Value ?? t.Taxable_Value);
                 const rate = parseNum(t.Gst_Rate ?? (qty > 0 ? totalVal / qty : 0));
-                const batchNo = cleanStr(t.Batch_No); // The Batch details!
+                const batchNo = cleanStr(t.Batch_No);
                 const batchLocation = cleanStr(t.BatchLocation);
                 const vehicle = cleanStr(t.Vehicle_No);
+
+                const matchedPoItem = poItems.find(
+                    (p) => (p.Product_Id && t.Product_Id && Number(p.Product_Id) === Number(t.Product_Id)) ||
+                        (p.Product_Name && t.Product_Name && normalizeName(p.Product_Name) === normalizeName(t.Product_Name))
+                );
+
+                const explicitTripGroup = cleanStr((t as any).Stock_Group || (t as any).stockGroup);
+                const matchedPoGroup = cleanStr((matchedPoItem as any)?.Stock_Group || (matchedPoItem as any)?.stockGroup);
+
+                const itemStockGroup = (explicitTripGroup && explicitTripGroup.toLowerCase() !== "general items")
+                    ? explicitTripGroup
+                    : ((matchedPoGroup && matchedPoGroup.toLowerCase() !== "general items")
+                        ? matchedPoGroup
+                        : resolveGroup(t, prodName, t.Product_Id));
 
                 return {
                     invoiceId: `trip-${t.Trip_Id}-${t.Product_Id}-${invIdx + 1}`,
@@ -913,7 +997,7 @@ export const buildPurchaseItemPaymentDataset = (
                     invoiceDate: invDate,
                     itemId: `item-inv-${t.Product_Id || invIdx + 1}`,
                     itemName: prodName,
-                    stockGroup: deriveStockGroup(prodName),
+                    stockGroup: itemStockGroup,
                     batchNo: batchNo, // Batch Details
                     batchLocation: batchLocation,
                     arrivedQty: qty,
@@ -1240,6 +1324,8 @@ export const buildPurchaseDeliveryDataset = (
     tripRows: PurchaseOrderTripItem[] = [],
     paymentsMap?: Map<string, PurchaseOrderPaymentItem>
 ): PurchaseDeliveryItem[] => {
+    const { resolve: resolveGroup } = buildStockGroupCatalog(poRows, invRows, tripRows);
+
     // If tripRows are available, build unified dataset from trips & POs
     if (tripRows && tripRows.length > 0) {
         const itemOrders = buildPurchaseItemPaymentDataset(poRows, invRows, tripRows, paymentsMap);
@@ -1298,10 +1384,18 @@ export const buildPurchaseDeliveryDataset = (
                             return numPaid > 0;
                         })();
 
+                        const itemStockGroup = (inv.stockGroup && inv.stockGroup.toLowerCase() !== "general items")
+                            ? inv.stockGroup
+                            : resolveGroup(inv, rawName, (inv as any).Product_Id);
+
                         records.push({
                             id: `pd-inv-${order.id}-${inv.invoiceId || sNoCounter}`,
                             sNo: sNoCounter++,
-                            stockGroup: inv.stockGroup || deriveStockGroup(rawName),
+                            stockGroup: itemStockGroup,
+                            inwardItem: rawName,
+                            batch: inv.batchNo ? String(inv.batchNo).trim() : "-",
+                            tonnage: inv.arrivedQty > 0 ? formatKgQuantity(inv.arrivedQty) : "-",
+                            tonnageKg: inv.arrivedQty || 0,
                             inwardBatchWithItemName: `${rawName}${qtyText}${batchText}`,
                             purOrderNo: order.purOrderNo,
                             inwardJouNo: (inv as any).inwardJouNo || cleanStr((inv as any).TR_INV_ID) || order.inwardJouNo || "-",
@@ -1322,10 +1416,18 @@ export const buildPurchaseDeliveryDataset = (
                             const qtyText = pendingQty > 0 ? ` (${formatKgQuantity(pendingQty)})` : "";
                             const rawName = cleanItemName(it.itemName);
 
+                            const itemStockGroup = (it.stockGroup && it.stockGroup.toLowerCase() !== "general items")
+                                ? it.stockGroup
+                                : resolveGroup(it, rawName, (it as any).Product_Id);
+
                             records.push({
                                 id: `pd-pending-${order.id}-${it.itemId || sNoCounter}`,
                                 sNo: sNoCounter++,
-                                stockGroup: it.stockGroup || deriveStockGroup(rawName),
+                                stockGroup: itemStockGroup,
+                                inwardItem: rawName,
+                                batch: cleanStr((it as any).batchNo || (it as any).batch || (it as any).Batch) || "-",
+                                tonnage: pendingQty > 0 ? formatKgQuantity(pendingQty) : "-",
+                                tonnageKg: pendingQty || 0,
                                 inwardBatchWithItemName: `${rawName}${qtyText}`,
                                 purOrderNo: order.purOrderNo,
                                 inwardJouNo: "-",
@@ -1382,7 +1484,11 @@ export const buildPurchaseDeliveryDataset = (
             records.push({
                 id: `pd-inv-${sNoCounter}`,
                 sNo: sNoCounter++,
-                stockGroup: cleanStr((inv as any).Stock_Group) || deriveStockGroup(rawProduct),
+                stockGroup: resolveGroup(inv, rawProduct, (inv as any).Product_Id),
+                inwardItem: rawProduct,
+                batch: cleanStr((inv as any).Batch || (inv as any).batch_no || (inv as any).Batch_No) || "-",
+                tonnage: qty > 0 ? formatKgQuantity(qty) : "-",
+                tonnageKg: qty || 0,
                 inwardBatchWithItemName: `${rawProduct}${qtyText}`,
                 purOrderNo,
                 inwardJouNo: 1,
@@ -1423,7 +1529,11 @@ export const buildPurchaseDeliveryDataset = (
                 records.push({
                     id: `pd-po-${sNoCounter}`,
                     sNo: sNoCounter++,
-                    stockGroup: cleanStr((po as any).Stock_Group) || deriveStockGroup(rawProduct),
+                    stockGroup: resolveGroup(po, rawProduct, (po as any).Product_Id),
+                    inwardItem: rawProduct,
+                    batch: cleanStr((po as any).Batch || (po as any).batch_no || (po as any).Batch_No) || "-",
+                    tonnage: poQty > 0 ? formatKgQuantity(poQty) : "-",
+                    tonnageKg: poQty || 0,
                     inwardBatchWithItemName: `${rawProduct}${qtyText}`,
                     purOrderNo,
                     inwardJouNo: "-",

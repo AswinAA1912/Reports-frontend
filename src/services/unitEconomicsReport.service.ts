@@ -40,6 +40,8 @@ export interface AdminUnitEconomicsReport {
   TGP_COGS: number;
   GP_Percentage_MR: number;
   GP_Percentage_COGS: number;
+  Retailer_Id?: number | string;
+  [key: string]: any;
 }
 
 /* =========================
@@ -74,6 +76,7 @@ export const AdminUnitEconomicsReportService = {
     axios.get<{
       success: boolean; data: {
         rows: AdminUnitEconomicsReport[];
+        lolFields?: any[];
         lastStockValueDate?: {
           Last_Stock_Value_Date: string;
         };

@@ -85,7 +85,9 @@ export const itemwisestockvaluereportservice = {
 
 export const godownwisestockvaluereportservice = {
     getGodownwiseReports: (params?: {
-        Godown_Id: number | string;
+        Godown_Id?: number | string | (number | string)[];
+        godown_Id?: number | string;
+        [key: string]: any;
         Fromdate?: string;
         Todate?: string;
     }) =>

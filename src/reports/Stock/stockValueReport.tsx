@@ -247,14 +247,17 @@ const StockValueReport: React.FC = () => {
                     selectedFilters["Godown_Name"] ||
                     selectedFilters[godownFilter?.columnName];
 
-                if (!godownId) {
+                if (!godownId || (Array.isArray(godownId) && godownId.length === 0)) {
                     setRawData([]);
                     setExpanded({});
                     setPage(1);
                     return;
                 }
 
-                payload.Godown_Id = godownId;
+                const resolvedGodownId = Array.isArray(godownId) ? godownId[0] : godownId;
+
+                payload.Godown_Id = resolvedGodownId;
+                payload.godown_Id = resolvedGodownId;
 
                 const res =
                     await godownwisestockvaluereportservice.getGodownwiseReports(
@@ -320,13 +323,20 @@ const StockValueReport: React.FC = () => {
                 .flat()
                 .find((f: any) => f.columnName === col);
 
-            const label = filter?.options?.find(
-                (opt: any) => String(opt.value) === String(value)
-            )?.label;
+            const valuesArr = Array.isArray(value) ? value : (value !== undefined && value !== null && value !== "" ? [value] : []);
 
-            if (label) {
+            const labels = valuesArr
+                .map((v: any) => {
+                    const opt = filter?.options?.find(
+                        (o: any) => String(o.value) === String(v)
+                    );
+                    return opt ? opt.label : v;
+                })
+                .filter(Boolean);
+
+            if (labels.length > 0) {
                 filtered = filtered.filter(
-                    (r) => String(r[col]) === String(label)
+                    (r) => labels.some((lbl: any) => String(r[col]) === String(lbl))
                 );
             }
         });
@@ -403,6 +413,8 @@ const StockValueReport: React.FC = () => {
     const level1FilteredData = useMemo(() => {
         let filtered = rawData;
 
+        // LEVEL 1 FILTER
+        // ✅ DYNAMIC FILTERS
         Object.keys(selectedFilters).forEach((col) => {
             const value = selectedFilters[col];
 
@@ -410,13 +422,20 @@ const StockValueReport: React.FC = () => {
                 .flat()
                 .find((f: any) => f.columnName === col);
 
-            const label = filter?.options?.find(
-                (opt: any) => String(opt.value) === String(value)
-            )?.label;
+            const valuesArr = Array.isArray(value) ? value : (value !== undefined && value !== null && value !== "" ? [value] : []);
 
-            if (label) {
+            const labels = valuesArr
+                .map((v: any) => {
+                    const opt = filter?.options?.find(
+                        (o: any) => String(o.value) === String(v)
+                    );
+                    return opt ? opt.label : v;
+                })
+                .filter(Boolean);
+
+            if (labels.length > 0) {
                 filtered = filtered.filter(
-                    (r) => String(r[col]) === String(label)
+                    (r) => labels.some((lbl: any) => String(r[col]) === String(lbl))
                 );
             }
         });

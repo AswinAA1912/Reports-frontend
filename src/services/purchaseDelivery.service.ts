@@ -78,6 +78,33 @@ export interface PurchaseDeliveryItem {
   paymentAmt?: number | string;
   status: "COMPLETED" | "NOT COMPLETED" | "PENDING";
   orderDate: string;
+
+  // Combining and transaction details modal fields
+  transId?: string;
+  retailerName?: string;
+  partyAddress?: string;
+  brokerName?: string;
+  ownerName?: string;
+  loadingDate?: string;
+  tradeConfirmDate?: string;
+  paymentCondition?: string;
+  remarks?: string;
+
+  inwardCount?: number;
+  invoiceCount?: number;
+  paymentCount?: number;
+  batchCount?: number;
+
+  allBatches?: string[];
+  allInwardJous?: string[];
+  allPurInvNos?: string[];
+  allPaymentNos?: string[];
+
+  poItems?: any[];
+  inwardDetails?: any[];
+  invoiceDetails?: any[];
+  paymentDetails?: any[];
+  transportDetails?: any;
 }
 
 export const computeItemStatus = (

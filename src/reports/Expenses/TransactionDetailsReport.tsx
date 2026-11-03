@@ -61,24 +61,13 @@ const TransactionDetailsReport:
 
         /* ================= DEFAULT LAST 30 DAYS ================= */
 
-        const [fromDate, setFromDate] =
-            useState(
-                dayjs()
-                    .subtract(
-                        30,
-                        "day"
-                    )
-                    .format(
-                        "YYYY-MM-DD"
-                    )
-            );
+        const defaultFromDate = dayjs().subtract(30, "day").format("YYYY-MM-DD");
+        const defaultToDate = dayjs().format("YYYY-MM-DD");
 
-        const [toDate, setToDate] =
-            useState(
-                dayjs().format(
-                    "YYYY-MM-DD"
-                )
-            );
+        const [fromDate, setFromDate] = useState(defaultFromDate);
+        const [toDate, setToDate] = useState(defaultToDate);
+        const [tempFromDate, setTempFromDate] = useState(defaultFromDate);
+        const [tempToDate, setTempToDate] = useState(defaultToDate);
 
         /* ================= STATES ================= */
 
@@ -149,6 +138,29 @@ const TransactionDetailsReport:
             fromDate,
             toDate,
         ]);
+
+        const handleToggleDrawer = () => {
+            setDrawerOpen((prev) => {
+                if (!prev) {
+                    setTempFromDate(fromDate);
+                    setTempToDate(toDate);
+                }
+                return !prev;
+            });
+        };
+
+        const handleCloseDrawer = () => {
+            setTempFromDate(fromDate);
+            setTempToDate(toDate);
+            setDrawerOpen(false);
+        };
+
+        const handleApplyFilters = () => {
+            setFromDate(tempFromDate);
+            setToDate(tempToDate);
+            setPage(1);
+            setDrawerOpen(false);
+        };
 
         const {
             sortConfig: numSortConfig,
@@ -675,19 +687,15 @@ const TransactionDetailsReport:
 
                         <ReportFilterDrawer
                             open={drawerOpen}
-                            onToggle={() =>
-                                setDrawerOpen(
-                                    prev => !prev
-                                )
-                            }
-                            onClose={() =>
-                                setDrawerOpen(false)
-                            }
-                            fromDate={fromDate}
-                            toDate={toDate}
-                            onFromDateChange={setFromDate}
-                            onToDateChange={setToDate}
-                            onApply={() => loadData()}
+                            onToggle={handleToggleDrawer}
+                            onClose={handleCloseDrawer}
+                            fromDate={tempFromDate}
+                            toDate={tempToDate}
+                            onFromDateChange={setTempFromDate}
+                            onToDateChange={setTempToDate}
+                            fromDateLabel="From Date"
+                            toDateLabel="To Date"
+                            onApply={handleApplyFilters}
                         />
 
                         <Paper

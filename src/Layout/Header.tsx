@@ -125,7 +125,7 @@ const Header: React.FC<HeaderProps> = ({
             <Typography fontWeight={600}>
               {user?.Company_Name || "Select Company"}
             </Typography>
-           
+
           </Box>
         )}
 

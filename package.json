@@ -6,11 +6,14 @@
   "author": "Your Name",
   "license": "MIT",
   "scripts": {
+    "dev": "vite",
     "start": "vite --open",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "format": "prettier --write \"./**/*.ts\"  \"./**/*.tsx\"  \"./**/*.css\" \"./**/*.html\"",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -44,6 +47,8 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^14.3.1",
     "@types/crypto-js": "^4.2.2",
     "@types/file-saver": "^2.0.7",
     "@types/react": "^18.2.21",
@@ -51,12 +56,15 @@
     "@typescript-eslint/eslint-plugin": "^6.5.0",
     "@typescript-eslint/parser": "^6.5.0",
     "@vitejs/plugin-react-swc": "^3.3.2",
+    "docx": "^9.13.0",
     "eslint": "^8.48.0",
     "eslint-plugin-react": "^7.33.2",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.3",
+    "jsdom": "^22.1.0",
     "prettier": "^3.0.3",
     "typescript": "^5.2.2",
-    "vite": "^4.4.9"
+    "vite": "^4.4.9",
+    "vitest": "^0.34.6"
   }
 }

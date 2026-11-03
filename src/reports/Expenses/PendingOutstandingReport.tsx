@@ -22,6 +22,7 @@ import {
 
 import { useParams, useSearchParams } from "react-router-dom";
 import PageHeader from "../../Layout/PageHeader";
+import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import CommonPagination from "../../Components/CommonPagination";
 
 import dayjs from "dayjs";
@@ -40,9 +41,11 @@ const PendingOutstandingReport: React.FC = () => {
     const [rows, setRows] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
 
-    const [fromDate] = useState(today);
-
-    const [toDate] = useState(today);
+    const [drawerOpen, setDrawerOpen] = useState(false);
+    const [fromDate, setFromDate] = useState(today);
+    const [toDate, setToDate] = useState(today);
+    const [tempFromDate, setTempFromDate] = useState(today);
+    const [tempToDate, setTempToDate] = useState(today);
 
     const [page, setPage] = useState(1);
 
@@ -92,6 +95,29 @@ const PendingOutstandingReport: React.FC = () => {
         fromDate,
         toDate,
     ]);
+
+    const handleToggleDrawer = () => {
+        setDrawerOpen((prev) => {
+            if (!prev) {
+                setTempFromDate(fromDate);
+                setTempToDate(toDate);
+            }
+            return !prev;
+        });
+    };
+
+    const handleCloseDrawer = () => {
+        setTempFromDate(fromDate);
+        setTempToDate(toDate);
+        setDrawerOpen(false);
+    };
+
+    const handleApplyFilters = () => {
+        setFromDate(tempFromDate);
+        setToDate(tempToDate);
+        setPage(1);
+        setDrawerOpen(false);
+    };
 
     const getPendingDays = (date: string) => {
         if (!date) return "";
@@ -279,6 +305,19 @@ const PendingOutstandingReport: React.FC = () => {
                 onExportExcel={
                     handleExportExcel
                 }
+            />
+
+            <ReportFilterDrawer
+                open={drawerOpen}
+                onToggle={handleToggleDrawer}
+                onClose={handleCloseDrawer}
+                fromDate={tempFromDate}
+                toDate={tempToDate}
+                onFromDateChange={setTempFromDate}
+                onToDateChange={setTempToDate}
+                fromDateLabel="From Date"
+                toDateLabel="To Date"
+                onApply={handleApplyFilters}
             />
 
             <AppLayout fullWidth>

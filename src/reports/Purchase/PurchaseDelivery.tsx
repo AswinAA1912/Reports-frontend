@@ -28,6 +28,8 @@ import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
 import TableViewOutlinedIcon from "@mui/icons-material/TableViewOutlined";
 import PaymentOutlinedIcon from "@mui/icons-material/PaymentOutlined";
+import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
+import PurchaseTransactionDetailsDialog from "./PurchaseTransactionDetailsDialog";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
@@ -53,6 +55,9 @@ import {
     cleanStr,
     fetchRawPurchaseDatasets,
     formatKgQuantity,
+    formatTonsOnly,
+    formatKgOnly,
+    extractTonsAndKg,
     parseNum,
 } from "../../services/purchaseDataIntegration.service";
 import {
@@ -156,6 +161,23 @@ const PurchaseDelivery: React.FC = () => {
     // Pagination State
     const [page, setPage] = useState<number>(1);
     const [rowsPerPage, setRowsPerPage] = useState<number>(100);
+
+    // Transaction Details Dialog State
+    const [selectedItemForDialog, setSelectedItemForDialog] = useState<PurchaseDeliveryItem | null>(null);
+    const [dialogOpen, setDialogOpen] = useState<boolean>(false);
+    const [dialogInitialTab, setDialogInitialTab] = useState<number>(0);
+
+    const handleOpenDetails = (it: PurchaseDeliveryItem, tab: number = 0) => {
+        setSelectedItemForDialog(it);
+        setDialogInitialTab(tab);
+        setDialogOpen(true);
+    };
+
+    const handleCloseDetails = () => {
+        setDialogOpen(false);
+        setSelectedItemForDialog(null);
+        setDialogInitialTab(0);
+    };
 
     // Payment lookup map from purchaseOrderPayment API
     const paymentsMapRef = React.useRef<Map<string, PurchaseOrderPaymentItem>>(new Map());
@@ -278,7 +300,7 @@ const PurchaseDelivery: React.FC = () => {
                         return acc + a;
                     }, 0);
 
-                    const liveRows: PurchaseDeliveryItem[] = fetchedItems.map((item, idx) => {
+                    const rawLiveRows: PurchaseDeliveryItem[] = fetchedItems.map((item, idx) => {
                         const rawProd = cleanItemName(item.Product_Name || item.Stock_Item || item.POS_Item_Name || "Item");
                         const qty = typeof item.Bill_Qty === "number" ? item.Bill_Qty : parseFloat(String(item.Bill_Qty || 0).replace(/,/g, "")) || 0;
                         const qtyText = qty > 0 ? ` (${formatKgQuantity(qty)})` : "";
@@ -310,7 +332,7 @@ const PurchaseDelivery: React.FC = () => {
                         let paymentInvoiceNo = "-";
 
                         if (matchedPay) {
-                            paymentInvoiceNo = matchedPay.invoice_no || invNo || "-";
+                            paymentInvoiceNo = matchedPay.invoice_no || "-";
                             if (matchedPay.Debit_Amt > 0) {
                                 if (totalBatchAmount > 0 && fetchedItems.length > 1) {
                                     paidAmt = Math.round(matchedPay.Debit_Amt * (itemAmt / totalBatchAmount));
@@ -318,8 +340,6 @@ const PurchaseDelivery: React.FC = () => {
                                     paidAmt = matchedPay.Debit_Amt;
                                 }
                             }
-                        } else if (invNo) {
-                            paymentInvoiceNo = invNo;
                         }
 
                         const isCancelled = Boolean(item.Cancel_status && item.Cancel_status !== "0");
@@ -356,17 +376,94 @@ const PurchaseDelivery: React.FC = () => {
                             inwardBatchWithItemName: `${rawProd}${qtyText}${batchText}`,
                             purOrderNo: cleanOrder,
                             inwardJouNo: inwardJou,
-                            purInvNo: (paymentInvoiceNo && paymentInvoiceNo !== "-") ? paymentInvoiceNo : (invNo || "-"),
+                            purInvNo: (paymentInvoiceNo && paymentInvoiceNo !== "-") ? paymentInvoiceNo : "-",
                             paymentNo: "-",
                             paymentAmt: paidAmt,
                             status: (!isCancelled && isPaymentDone) ? "COMPLETED" : "NOT COMPLETED",
                             orderDate: item.Ledger_Date ? dayjs(item.Ledger_Date).format("YYYY-MM-DD") : dayjs().format("YYYY-MM-DD"),
+
+                            retailerName: item.Retailer_Name || item.Party_Name || "-",
+                            partyAddress: item.Reatailer_Address || item.Party_Address || "-",
+                            remarks: item.Narration || "-",
                         };
+                    });
+
+                    // Combine live rows for identical products in this order
+                    const liveProdMap = new Map<string, PurchaseDeliveryItem[]>();
+                    rawLiveRows.forEach((r) => {
+                        const key = cleanItemName(r.inwardItem).toLowerCase();
+                        if (!liveProdMap.has(key)) liveProdMap.set(key, []);
+                        liveProdMap.get(key)!.push(r);
+                    });
+
+                    const combinedLiveRows: PurchaseDeliveryItem[] = [];
+                    let cIdx = 1;
+                    liveProdMap.forEach((rows) => {
+                        const first = rows[0];
+                        let sumKg = 0;
+                        const inwardJous: string[] = [];
+                        const invNos: string[] = [];
+                        const batches: string[] = [];
+                        let sumPaid = 0;
+                        let allDone = rows.length > 0;
+
+                        rows.forEach((r) => {
+                            sumKg += (r.tonnageKg || 0);
+                            if (r.inwardJouNo && r.inwardJouNo !== "-" && !inwardJous.includes(String(r.inwardJouNo))) {
+                                inwardJous.push(String(r.inwardJouNo));
+                            }
+                            if (r.purInvNo && r.purInvNo !== "-" && !invNos.includes(r.purInvNo)) {
+                                invNos.push(r.purInvNo);
+                            }
+                            if (r.batch && r.batch !== "-" && !batches.includes(r.batch)) {
+                                batches.push(r.batch);
+                            }
+                            if (r.paymentAmt) sumPaid += parseNum(r.paymentAmt);
+                            if (r.status !== "COMPLETED") allDone = false;
+                        });
+
+                        const inwardCount = inwardJous.length > 0 ? inwardJous.length : rows.length;
+                        const invoiceCount = invNos.length;
+                        const batchCount = batches.length;
+
+                        const livePoItems = fetchedItems.map((it, pIdx) => ({
+                            sNo: pIdx + 1,
+                            itemName: cleanItemName(it.Product_Name || it.Stock_Item || "Item"),
+                            orderedQty: it.Bill_Qty || 0,
+                            tonnage: it.Bill_Qty ? formatKgQuantity(it.Bill_Qty) : "-",
+                            rate: it.Rate || "As recorded",
+                            amount: it.Amount || 0,
+                            unit: it.Bag || "Bags",
+                            discount: it.Discount || "-",
+                            qualityCondition: it.Grade_Item_Group || "Standard",
+                        }));
+
+                        combinedLiveRows.push({
+                            ...first,
+                            sNo: cIdx++,
+                            tonnage: sumKg > 0 ? formatKgQuantity(sumKg) : first.tonnage,
+                            tonnageKg: sumKg,
+                            inwardJouNo: inwardCount > 1 ? `${inwardCount} Inwards` : (inwardJous[0] || "-"),
+                            purInvNo: invoiceCount > 1 ? `${invoiceCount} Invoices` : (invNos[0] || "-"),
+                            paymentNo: "-",
+                            paymentAmt: sumPaid > 0 ? sumPaid : "",
+                            batch: batchCount > 1 ? `${batchCount} Batches` : (batches[0] || "-"),
+                            status: allDone ? "COMPLETED" : "NOT COMPLETED",
+                            inwardCount,
+                            invoiceCount,
+                            paymentCount: 0,
+                            batchCount,
+                            allBatches: batches,
+                            allInwardJous: inwardJous,
+                            allPurInvNos: invNos,
+                            allPaymentNos: [],
+                            poItems: livePoItems,
+                        });
                     });
 
                     setLiveOrderDeliveryMap((prev) => ({
                         ...prev,
-                        [cleanOrder]: liveRows,
+                        [cleanOrder]: combinedLiveRows,
                     }));
                 }
             }
@@ -445,12 +542,21 @@ const PurchaseDelivery: React.FC = () => {
                 const q = searchQuery.toLowerCase().trim();
                 const matchStockGroup = item.stockGroup?.toLowerCase().includes(q);
                 const matchInwardItem = item.inwardItem?.toLowerCase().includes(q);
-                const matchBatch = item.batch?.toLowerCase().includes(q) || item.inwardBatchWithItemName?.toLowerCase().includes(q);
+                const matchBatch =
+                    item.batch?.toLowerCase().includes(q) ||
+                    item.inwardBatchWithItemName?.toLowerCase().includes(q) ||
+                    Boolean(item.allBatches?.some((b) => b.toLowerCase().includes(q)));
                 const matchTonnage = item.tonnage?.toLowerCase().includes(q);
                 const matchPurOrder = item.purOrderNo?.toLowerCase().includes(q);
-                const matchInwardJou = String(item.inwardJouNo).toLowerCase().includes(q);
-                const matchPurInv = item.purInvNo?.toLowerCase().includes(q);
-                const matchPaymentNo = item.paymentNo?.toLowerCase().includes(q);
+                const matchInwardJou =
+                    String(item.inwardJouNo).toLowerCase().includes(q) ||
+                    Boolean(item.allInwardJous?.some((j) => j.toLowerCase().includes(q)));
+                const matchPurInv =
+                    item.purInvNo?.toLowerCase().includes(q) ||
+                    Boolean(item.allPurInvNos?.some((p) => p.toLowerCase().includes(q)));
+                const matchPaymentNo =
+                    item.paymentNo?.toLowerCase().includes(q) ||
+                    Boolean(item.allPaymentNos?.some((p) => p.toLowerCase().includes(q)));
                 const matchStatus = item.status?.toLowerCase().includes(q);
 
                 if (
@@ -620,6 +726,7 @@ const PurchaseDelivery: React.FC = () => {
                 "Inward Item",
                 "Batch",
                 "Tonnage",
+                "Qty (KG)",
                 "Pur .order no",
                 "Inward Jou no",
                 "Pur Inv no",
@@ -629,12 +736,14 @@ const PurchaseDelivery: React.FC = () => {
 
             // Data Rows
             filteredData.forEach((row, idx) => {
+                const { tons, kg } = extractTonsAndKg(row.tonnage, row.tonnageKg);
                 excelRows.push([
                     idx + 1,
                     row.stockGroup,
                     row.inwardItem || row.inwardBatchWithItemName || "-",
                     row.batch || "-",
-                    row.tonnage || "-",
+                    tons,
+                    kg,
                     row.purOrderNo,
                     row.inwardJouNo,
                     row.purInvNo,
@@ -649,7 +758,8 @@ const PurchaseDelivery: React.FC = () => {
                 "-",
                 `${filteredData.length} Records`,
                 "-",
-                metrics.totalTonnageKg > 0 ? formatKgQuantity(metrics.totalTonnageKg) : "-",
+                metrics.totalTonnageKg > 0 ? formatTonsOnly(metrics.totalTonnageKg) : "-",
+                metrics.totalTonnageKg > 0 ? formatKgOnly(metrics.totalTonnageKg) : "-",
                 "-",
                 "-",
                 "-",
@@ -693,7 +803,7 @@ const PurchaseDelivery: React.FC = () => {
                             cell.s.font = { name: "Arial", sz: 10, bold: true, color: { rgb: "0F172A" } };
                             cell.s.fill = { fgColor: { rgb: "E2E8F0" } };
                         } else if (R > 3) {
-                            if (C === 9) {
+                            if (C === 10) {
                                 const isCompleted = cell.v === "COMPLETED";
                                 cell.s.font = {
                                     name: "Arial",
@@ -715,7 +825,8 @@ const PurchaseDelivery: React.FC = () => {
                 { wch: 16 }, // Stock group
                 { wch: 28 }, // Inward Item
                 { wch: 16 }, // Batch
-                { wch: 20 }, // Tonnage
+                { wch: 14 }, // Tonnage
+                { wch: 14 }, // Qty (KG)
                 { wch: 18 }, // Pur .order no
                 { wch: 15 }, // Inward Jou no
                 { wch: 18 }, // Pur Inv no
@@ -762,6 +873,7 @@ const PurchaseDelivery: React.FC = () => {
                     "Inward Item",
                     "Batch",
                     "Tonnage",
+                    "Qty (KG)",
                     "Pur .order no",
                     "Inward Jou no",
                     "Pur Inv no",
@@ -770,25 +882,30 @@ const PurchaseDelivery: React.FC = () => {
                 ],
             ];
 
-            const tableBody = filteredData.map((row, idx) => [
-                idx + 1,
-                row.stockGroup,
-                row.inwardItem || row.inwardBatchWithItemName || "-",
-                row.batch || "-",
-                row.tonnage || "-",
-                row.purOrderNo,
-                row.inwardJouNo,
-                row.purInvNo,
-                row.paymentNo,
-                row.status,
-            ]);
+            const tableBody = filteredData.map((row, idx) => {
+                const { tons, kg } = extractTonsAndKg(row.tonnage, row.tonnageKg);
+                return [
+                    idx + 1,
+                    row.stockGroup,
+                    row.inwardItem || row.inwardBatchWithItemName || "-",
+                    row.batch || "-",
+                    tons,
+                    kg,
+                    row.purOrderNo,
+                    row.inwardJouNo,
+                    row.purInvNo,
+                    row.paymentNo,
+                    row.status,
+                ];
+            });
 
             tableBody.push([
                 "TOTAL",
                 "-",
                 `${filteredData.length} Records`,
                 "-",
-                metrics.totalTonnageKg > 0 ? formatKgQuantity(metrics.totalTonnageKg) : "-",
+                metrics.totalTonnageKg > 0 ? formatTonsOnly(metrics.totalTonnageKg) : "-",
+                metrics.totalTonnageKg > 0 ? formatKgOnly(metrics.totalTonnageKg) : "-",
                 "-",
                 "-",
                 "-",
@@ -1108,14 +1225,15 @@ const PurchaseDelivery: React.FC = () => {
                             flex: 1,
                             minHeight: 0,
                             overflowY: "auto",
-                            overflowX: "auto",
+                            overflowX: "hidden",
+                            width: "100%",
                         }}
                     >
                         <Table
                             size="small"
                             stickyHeader
                             aria-label="purchase delivery table"
-                            sx={{ width: "100%", minWidth: 1100, tableLayout: "fixed" }}
+                            sx={{ width: "100%", tableLayout: "fixed" }}
                         >
                             {/* TABLE HEAD */}
                             <TableHead>
@@ -1129,7 +1247,7 @@ const PurchaseDelivery: React.FC = () => {
                                             fontSize: "0.76rem",
                                             borderRight: "1px solid rgba(255, 255, 255, 0.15)",
                                             py: 0.8,
-                                            px: 0.8,
+                                            px: 0.6,
                                             position: "sticky",
                                             top: 0,
                                             zIndex: 5,
@@ -1142,34 +1260,37 @@ const PurchaseDelivery: React.FC = () => {
                                     <TableCell align="center" sx={{ width: "3.5%" }}>
                                         S.no
                                     </TableCell>
-                                    <TableCell sx={{ width: "9%" }}>
+                                    <TableCell sx={{ width: "8%" }}>
                                         Stock group
                                     </TableCell>
-                                    <TableCell sx={{ width: "18%" }}>
+                                    <TableCell sx={{ width: "18.5%" }}>
                                         Inward Item
                                     </TableCell>
-                                    <TableCell align="center" sx={{ width: "8.5%" }}>
+                                    <TableCell align="center" sx={{ width: "7%" }}>
                                         Batch
                                     </TableCell>
-                                    <TableCell align="right" sx={{ width: "10.5%" }}>
+                                    <TableCell align="right" sx={{ width: "6.5%" }}>
                                         Tonnage
                                     </TableCell>
-                                    <TableCell sx={{ width: "10.5%" }}>
+                                    <TableCell align="right" sx={{ width: "7.5%" }}>
+                                        Qty (KG)
+                                    </TableCell>
+                                    <TableCell sx={{ width: "10%" }}>
                                         Pur .order no
                                     </TableCell>
-                                    <TableCell align="center" sx={{ width: "10.5%" }}>
+                                    <TableCell align="center" sx={{ width: "10%" }}>
                                         Inward Jou no
                                     </TableCell>
                                     <TableCell sx={{ width: "10.5%" }}>
                                         Pur Inv no
                                     </TableCell>
-                                    <TableCell sx={{ width: "9.5%" }}>
+                                    <TableCell sx={{ width: "6.5%" }}>
                                         Payment invoice
                                     </TableCell>
                                     <TableCell align="center" sx={{ width: "7.5%" }}>
                                         status
                                     </TableCell>
-                                    <TableCell align="center" sx={{ width: "5%", borderRight: "none" }}>
+                                    <TableCell align="center" sx={{ width: "4.5%", borderRight: "none" }}>
                                         Actions
                                     </TableCell>
                                 </TableRow>
@@ -1211,7 +1332,18 @@ const PurchaseDelivery: React.FC = () => {
                                             whiteSpace: "nowrap",
                                         }}
                                     >
-                                        {metrics.totalTonnageKg > 0 ? formatKgQuantity(metrics.totalTonnageKg) : "-"}
+                                        {metrics.totalTonnageKg > 0 ? formatTonsOnly(metrics.totalTonnageKg) : "-"}
+                                    </TableCell>
+                                    <TableCell
+                                        align="right"
+                                        sx={{
+                                            color: "#15803d",
+                                            fontWeight: 800,
+                                            fontSize: "0.78rem",
+                                            whiteSpace: "nowrap",
+                                        }}
+                                    >
+                                        {metrics.totalTonnageKg > 0 ? formatKgOnly(metrics.totalTonnageKg) : "-"}
                                     </TableCell>
                                     <TableCell> </TableCell>
                                     <TableCell align="center"> </TableCell>
@@ -1240,22 +1372,25 @@ const PurchaseDelivery: React.FC = () => {
                                 {paginatedData.length > 0 ? (
                                     paginatedData.map((row, idx) => {
                                         const isCompleted = row.status === "COMPLETED";
+                                        const { tons: rowTons, kg: rowKg } = extractTonsAndKg(row.tonnage, row.tonnageKg);
 
                                         return (
                                             <TableRow
                                                 key={row.id}
                                                 hover
+                                                onClick={() => handleOpenDetails(row)}
                                                 sx={{
+                                                    cursor: "pointer",
                                                     bgcolor: idx % 2 === 1 ? "#fafbfc" : "#ffffff",
                                                     borderBottom: "1px solid #e2e8f0",
+                                                    transition: "background-color 0.15s ease",
                                                     "&:hover": {
                                                         bgcolor: "#f1f5f9 !important",
                                                     },
                                                     "& td": {
-                                                        py: 0.6,
+                                                        py: 0.5,
                                                         px: 0.8,
                                                         verticalAlign: "middle",
-                                                        whiteSpace: "nowrap",
                                                     },
                                                 }}
                                             >
@@ -1267,6 +1402,7 @@ const PurchaseDelivery: React.FC = () => {
                                                         color: "#475569",
                                                         fontSize: "0.76rem",
                                                         borderRight: "1px solid #eef2f6",
+                                                        whiteSpace: "nowrap",
                                                     }}
                                                 >
                                                     {(page - 1) * rowsPerPage + idx + 1}
@@ -1281,6 +1417,7 @@ const PurchaseDelivery: React.FC = () => {
                                                         borderRight: "1px solid #eef2f6",
                                                         overflow: "hidden",
                                                         textOverflow: "ellipsis",
+                                                        whiteSpace: "nowrap",
                                                     }}
                                                 >
                                                     <Tooltip title={row.stockGroup || ""} arrow placement="top-start">
@@ -1305,20 +1442,24 @@ const PurchaseDelivery: React.FC = () => {
                                                 <TableCell
                                                     sx={{
                                                         borderRight: "1px solid #eef2f6",
-                                                        overflow: "hidden",
-                                                        textOverflow: "ellipsis",
+                                                        py: 0.4,
+                                                        px: 0.8,
                                                     }}
                                                 >
-                                                    <Tooltip title={row.inwardItem || row.inwardBatchWithItemName || "-"} arrow placement="top-start">
+                                                    <Tooltip title={`${row.inwardItem || row.inwardBatchWithItemName || "-"} (Click to view full 4-tab details)`} arrow placement="top-start">
                                                         <Typography
                                                             sx={{
-                                                                fontSize: "0.78rem",
+                                                                fontSize: "0.76rem",
                                                                 fontWeight: 700,
                                                                 color: "#0f172a",
-                                                                whiteSpace: "nowrap",
+                                                                display: "-webkit-box",
+                                                                WebkitLineClamp: 2,
+                                                                WebkitBoxOrient: "vertical",
                                                                 overflow: "hidden",
                                                                 textOverflow: "ellipsis",
-                                                                display: "block",
+                                                                lineHeight: 1.25,
+                                                                wordBreak: "break-word",
+                                                                whiteSpace: "normal",
                                                             }}
                                                         >
                                                             {row.inwardItem || row.inwardBatchWithItemName || "-"}
@@ -1331,20 +1472,26 @@ const PurchaseDelivery: React.FC = () => {
                                                     align="center"
                                                     sx={{
                                                         borderRight: "1px solid #eef2f6",
+                                                        whiteSpace: "nowrap",
                                                     }}
                                                 >
                                                     {row.batch && row.batch !== "-" ? (
-                                                        <Tooltip title={`Batch: ${row.batch}`} arrow placement="top">
+                                                        <Tooltip
+                                                            title={`Batch (${row.batchCount || 1}): ${row.allBatches && row.allBatches.length > 0 ? row.allBatches.join(", ") : row.batch}`}
+                                                            arrow
+                                                            placement="top"
+                                                        >
                                                             <Chip
                                                                 size="small"
-                                                                label={row.batch}
+                                                                label={row.batchCount && row.batchCount > 1 ? `${row.batchCount} Batches` : row.batch}
                                                                 sx={{
                                                                     fontSize: "0.70rem",
-                                                                    fontWeight: 600,
+                                                                    fontWeight: row.batchCount && row.batchCount > 1 ? 700 : 600,
                                                                     height: 20,
-                                                                    bgcolor: "#f1f5f9",
-                                                                    color: "#334155",
-                                                                    border: "1px solid #e2e8f0",
+                                                                    bgcolor: row.batchCount && row.batchCount > 1 ? "#f1f5f9" : "#f8fafc",
+                                                                    color: row.batchCount && row.batchCount > 1 ? "#0f172a" : "#334155",
+                                                                    border: "1px solid",
+                                                                    borderColor: row.batchCount && row.batchCount > 1 ? "#94a3b8" : "#e2e8f0",
                                                                     maxWidth: "100%",
                                                                     "& .MuiChip-label": {
                                                                         px: 0.8,
@@ -1371,7 +1518,7 @@ const PurchaseDelivery: React.FC = () => {
                                                         whiteSpace: "nowrap",
                                                     }}
                                                 >
-                                                    <Tooltip title={row.tonnage || "-"} arrow placement="top-end">
+                                                    <Tooltip title={`Tonnage: ${rowTons}`} arrow placement="top-end">
                                                         <Typography
                                                             component="span"
                                                             sx={{
@@ -1382,20 +1529,55 @@ const PurchaseDelivery: React.FC = () => {
                                                                 display: "inline-block",
                                                             }}
                                                         >
-                                                            {row.tonnage || "-"}
+                                                            {rowTons}
+                                                        </Typography>
+                                                    </Tooltip>
+                                                </TableCell>
+
+                                                {/* QTY (KG) */}
+                                                <TableCell
+                                                    align="right"
+                                                    sx={{
+                                                        borderRight: "1px solid #eef2f6",
+                                                        fontWeight: 700,
+                                                        color: "#15803d",
+                                                        fontSize: "0.76rem",
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                >
+                                                    <Tooltip title={`Quantity in KG: ${rowKg}`} arrow placement="top-end">
+                                                        <Typography
+                                                            component="span"
+                                                            sx={{
+                                                                fontWeight: 700,
+                                                                color: "#15803d",
+                                                                fontSize: "0.76rem",
+                                                                whiteSpace: "nowrap",
+                                                                display: "inline-block",
+                                                            }}
+                                                        >
+                                                            {rowKg}
                                                         </Typography>
                                                     </Tooltip>
                                                 </TableCell>
 
                                                 {/* PUR .ORDER NO */}
                                                 <TableCell
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleOpenDetails(row, 0);
+                                                    }}
                                                     sx={{
                                                         borderRight: "1px solid #eef2f6",
                                                         overflow: "hidden",
                                                         textOverflow: "ellipsis",
+                                                        cursor: "pointer",
+                                                        "&:hover": {
+                                                            bgcolor: "#f0f7ff",
+                                                        },
                                                     }}
                                                 >
-                                                    <Tooltip title={row.purOrderNo || "-"} arrow placement="top-start">
+                                                    <Tooltip title={`Open Purchase Order (${row.purOrderNo || "-"})`} arrow placement="top-start">
                                                         <Typography
                                                             sx={{
                                                                 fontWeight: 700,
@@ -1405,6 +1587,10 @@ const PurchaseDelivery: React.FC = () => {
                                                                 overflow: "hidden",
                                                                 textOverflow: "ellipsis",
                                                                 display: "block",
+                                                                cursor: "pointer",
+                                                                "&:hover": {
+                                                                    color: "#2563eb",
+                                                                },
                                                             }}
                                                         >
                                                             {row.purOrderNo || "-"}
@@ -1415,86 +1601,210 @@ const PurchaseDelivery: React.FC = () => {
                                                 {/* INWARD JOU NO */}
                                                 <TableCell
                                                     align="center"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleOpenDetails(row, 1);
+                                                    }}
                                                     sx={{
                                                         borderRight: "1px solid #eef2f6",
                                                         overflow: "hidden",
                                                         textOverflow: "ellipsis",
                                                         whiteSpace: "nowrap",
+                                                        cursor: "pointer",
+                                                        "&:hover": {
+                                                            bgcolor: "#eff6ff",
+                                                        },
                                                     }}
                                                 >
                                                     {row.inwardJouNo && row.inwardJouNo !== "-" ? (
-                                                        <Tooltip title={`Inward Jou No: ${String(row.inwardJouNo)}`} arrow placement="top">
-                                                            <Typography
-                                                                component="span"
-                                                                sx={{
-                                                                    fontWeight: 600,
-                                                                    color: "#475569",
-                                                                    fontSize: "0.76rem",
-                                                                    whiteSpace: "nowrap",
-                                                                    overflow: "hidden",
-                                                                    textOverflow: "ellipsis",
-                                                                    display: "inline-block",
-                                                                    maxWidth: "100%",
-                                                                }}
-                                                            >
-                                                                {String(row.inwardJouNo).replace(/[\r\n]+/g, ", ")}
-                                                            </Typography>
+                                                        <Tooltip
+                                                            title={`Open Inward Tab: Inwards (${row.inwardCount || 1}): ${row.allInwardJous && row.allInwardJous.length > 0 ? row.allInwardJous.join(", ") : String(row.inwardJouNo)}`}
+                                                            arrow
+                                                            placement="top"
+                                                        >
+                                                            {row.inwardCount && row.inwardCount > 1 ? (
+                                                                <Chip
+                                                                    size="small"
+                                                                    label={`${row.inwardCount} Inwards`}
+                                                                    sx={{
+                                                                        fontSize: "0.70rem",
+                                                                        fontWeight: 700,
+                                                                        height: 20,
+                                                                        bgcolor: "#eff6ff",
+                                                                        color: "#1d4ed8",
+                                                                        border: "1px solid #bfdbfe",
+                                                                        cursor: "pointer",
+                                                                        "&:hover": {
+                                                                            bgcolor: "#dbeafe",
+                                                                            borderColor: "#93c5fd",
+                                                                        },
+                                                                    }}
+                                                                />
+                                                            ) : (
+                                                                <Typography
+                                                                    component="span"
+                                                                    sx={{
+                                                                        fontWeight: 600,
+                                                                        color: "#1d4ed8",
+                                                                        fontSize: "0.76rem",
+                                                                        whiteSpace: "nowrap",
+                                                                        overflow: "hidden",
+                                                                        textOverflow: "ellipsis",
+                                                                        display: "inline-block",
+                                                                        maxWidth: "100%",
+                                                                        cursor: "pointer",
+                                                                        "&:hover": {
+                                                                            color: "#1e40af",
+                                                                        },
+                                                                    }}
+                                                                >
+                                                                    {String(row.inwardJouNo).replace(/[\r\n]+/g, ", ")}
+                                                                </Typography>
+                                                            )}
                                                         </Tooltip>
                                                     ) : (
-                                                        <Typography sx={{ fontSize: "0.76rem", color: "#94a3b8" }}>-</Typography>
+                                                        <Tooltip title="Open Inward Tab" arrow placement="top">
+                                                            <Typography sx={{ fontSize: "0.76rem", color: "#94a3b8", cursor: "pointer" }}>-</Typography>
+                                                        </Tooltip>
                                                     )}
                                                 </TableCell>
 
                                                 {/* PUR INV NO */}
                                                 <TableCell
+                                                    align={row.invoiceCount && row.invoiceCount > 1 ? "center" : "left"}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleOpenDetails(row, 2);
+                                                    }}
                                                     sx={{
                                                         borderRight: "1px solid #eef2f6",
                                                         overflow: "hidden",
                                                         textOverflow: "ellipsis",
                                                         whiteSpace: "nowrap",
+                                                        cursor: "pointer",
+                                                        "&:hover": {
+                                                            bgcolor: "#f0fdf4",
+                                                        },
                                                     }}
                                                 >
-                                                    <Tooltip title={row.purInvNo || "-"} arrow placement="top-start">
-                                                        <Typography
-                                                            sx={{
-                                                                fontWeight: 600,
-                                                                color: "#0369a1",
-                                                                fontSize: "0.76rem",
-                                                                whiteSpace: "nowrap",
-                                                                overflow: "hidden",
-                                                                textOverflow: "ellipsis",
-                                                                display: "block",
-                                                            }}
+                                                    {row.purInvNo && row.purInvNo !== "-" ? (
+                                                        <Tooltip
+                                                            title={`Open Purchase Invoice Tab: Invoices (${row.invoiceCount || 1}): ${row.allPurInvNos && row.allPurInvNos.length > 0 ? row.allPurInvNos.join(", ") : row.purInvNo}`}
+                                                            arrow
+                                                            placement="top-start"
                                                         >
-                                                            {row.purInvNo || "-"}
-                                                        </Typography>
-                                                    </Tooltip>
+                                                            {row.invoiceCount && row.invoiceCount > 1 ? (
+                                                                <Chip
+                                                                    size="small"
+                                                                    label={`${row.invoiceCount} Invoices`}
+                                                                    sx={{
+                                                                        fontSize: "0.70rem",
+                                                                        fontWeight: 700,
+                                                                        height: 20,
+                                                                        bgcolor: "#f0fdf4",
+                                                                        color: "#15803d",
+                                                                        border: "1px solid #bbf7d0",
+                                                                        cursor: "pointer",
+                                                                        "&:hover": {
+                                                                            bgcolor: "#dcfce7",
+                                                                            borderColor: "#86efac",
+                                                                        },
+                                                                    }}
+                                                                />
+                                                            ) : (
+                                                                <Typography
+                                                                    sx={{
+                                                                        fontWeight: 600,
+                                                                        color: "#0369a1",
+                                                                        fontSize: "0.76rem",
+                                                                        whiteSpace: "nowrap",
+                                                                        overflow: "hidden",
+                                                                        textOverflow: "ellipsis",
+                                                                        display: "block",
+                                                                        cursor: "pointer",
+                                                                        "&:hover": {
+                                                                            color: "#0284c7",
+                                                                        },
+                                                                    }}
+                                                                >
+                                                                    {row.purInvNo}
+                                                                </Typography>
+                                                            )}
+                                                        </Tooltip>
+                                                    ) : (
+                                                        <Tooltip title="Open Purchase Invoice Tab" arrow placement="top">
+                                                            <Typography sx={{ fontSize: "0.76rem", color: "#94a3b8", cursor: "pointer" }}>-</Typography>
+                                                        </Tooltip>
+                                                    )}
                                                 </TableCell>
 
                                                 {/* PAYMENT INVOICE */}
                                                 <TableCell
+                                                    align={row.paymentCount && row.paymentCount > 1 ? "center" : "left"}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleOpenDetails(row, 3);
+                                                    }}
                                                     sx={{
                                                         borderRight: "1px solid #eef2f6",
                                                         overflow: "hidden",
                                                         textOverflow: "ellipsis",
                                                         whiteSpace: "nowrap",
+                                                        cursor: "pointer",
+                                                        "&:hover": {
+                                                            bgcolor: "#faf5ff",
+                                                        },
                                                     }}
                                                 >
-                                                    <Tooltip title={row.paymentNo || "-"} arrow placement="top-start">
-                                                        <Typography
-                                                            sx={{
-                                                                fontWeight: 600,
-                                                                color: "#475569",
-                                                                fontSize: "0.76rem",
-                                                                whiteSpace: "nowrap",
-                                                                overflow: "hidden",
-                                                                textOverflow: "ellipsis",
-                                                                display: "block",
-                                                            }}
+                                                    {row.paymentNo && row.paymentNo !== "-" ? (
+                                                        <Tooltip
+                                                            title={`Open Payment Tab: Payments (${row.paymentCount || 1}): ${row.allPaymentNos && row.allPaymentNos.length > 0 ? row.allPaymentNos.join(", ") : row.paymentNo}`}
+                                                            arrow
+                                                            placement="top-start"
                                                         >
-                                                            {row.paymentNo || "-"}
-                                                        </Typography>
-                                                    </Tooltip>
+                                                            {row.paymentCount && row.paymentCount > 1 ? (
+                                                                <Chip
+                                                                    size="small"
+                                                                    label={`${row.paymentCount} Payments`}
+                                                                    sx={{
+                                                                        fontSize: "0.70rem",
+                                                                        fontWeight: 700,
+                                                                        height: 20,
+                                                                        bgcolor: "#faf5ff",
+                                                                        color: "#7e22ce",
+                                                                        border: "1px solid #e9d5ff",
+                                                                        cursor: "pointer",
+                                                                        "&:hover": {
+                                                                            bgcolor: "#f3e8ff",
+                                                                            borderColor: "#d8b4fe",
+                                                                        },
+                                                                    }}
+                                                                />
+                                                            ) : (
+                                                                <Typography
+                                                                    sx={{
+                                                                        fontWeight: 600,
+                                                                        color: "#7e22ce",
+                                                                        fontSize: "0.76rem",
+                                                                        whiteSpace: "nowrap",
+                                                                        overflow: "hidden",
+                                                                        textOverflow: "ellipsis",
+                                                                        display: "block",
+                                                                        cursor: "pointer",
+                                                                        "&:hover": {
+                                                                            color: "#9333ea",
+                                                                        },
+                                                                    }}
+                                                                >
+                                                                    {row.paymentNo}
+                                                                </Typography>
+                                                            )}
+                                                        </Tooltip>
+                                                    ) : (
+                                                        <Tooltip title="Open Payment Tab" arrow placement="top">
+                                                            <Typography sx={{ fontSize: "0.76rem", color: "#94a3b8", cursor: "pointer" }}>-</Typography>
+                                                        </Tooltip>
+                                                    )}
                                                 </TableCell>
 
                                                 {/* STATUS */}
@@ -1546,11 +1856,32 @@ const PurchaseDelivery: React.FC = () => {
                                                     }}
                                                 >
                                                     <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 0.5, flexWrap: "nowrap" }}>
+                                                        {/* View 4-Tab Transaction Details */}
+                                                        <Tooltip title="View Transaction Details (PO, Inwards, Invoices, Payments)">
+                                                            <IconButton
+                                                                size="small"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleOpenDetails(row);
+                                                                }}
+                                                                sx={{
+                                                                    bgcolor: "#eff6ff",
+                                                                    color: "#1d4ed8",
+                                                                    border: "1px solid #bfdbfe",
+                                                                    p: 0.4,
+                                                                    "&:hover": { bgcolor: "#dbeafe" },
+                                                                }}
+                                                            >
+                                                                <VisibilityOutlinedIcon sx={{ fontSize: 14 }} />
+                                                            </IconButton>
+                                                        </Tooltip>
+
                                                         {/* Item & Invoice Payment */}
                                                         <Tooltip title={`Item & Invoice Payment (${row.purOrderNo || row.purInvNo}) - Open in New Tab`}>
                                                             <IconButton
                                                                 size="small"
-                                                                onClick={() => {
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
                                                                     const effectiveFrom = row.orderDate && dayjs(row.orderDate).isValid() && dayjs(row.orderDate).isBefore(dayjs(fromDate))
                                                                         ? dayjs(row.orderDate).format("YYYY-MM-DD")
                                                                         : fromDate;
@@ -1573,7 +1904,8 @@ const PurchaseDelivery: React.FC = () => {
                                                         <Tooltip title={`Payment Details (${row.purOrderNo || row.purInvNo}) - Open in New Tab`}>
                                                             <IconButton
                                                                 size="small"
-                                                                onClick={() => {
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
                                                                     const effectiveFrom = row.orderDate && dayjs(row.orderDate).isValid() && dayjs(row.orderDate).isBefore(dayjs(fromDate))
                                                                         ? dayjs(row.orderDate).format("YYYY-MM-DD")
                                                                         : fromDate;
@@ -1591,7 +1923,6 @@ const PurchaseDelivery: React.FC = () => {
                                                                 <PaymentOutlinedIcon sx={{ fontSize: 14 }} />
                                                             </IconButton>
                                                         </Tooltip>
-
                                                     </Box>
                                                 </TableCell>
                                             </TableRow>
@@ -1635,6 +1966,15 @@ const PurchaseDelivery: React.FC = () => {
                         }}
                     />
                 </Box>
+
+                {/* 6. TRANSACTION DETAILS DIALOG (4 TABS) */}
+                <PurchaseTransactionDetailsDialog
+                    open={dialogOpen}
+                    onClose={handleCloseDetails}
+                    item={selectedItemForDialog}
+                    allDeliveryItems={data && data.length > 0 ? data : filteredData}
+                    initialTab={dialogInitialTab}
+                />
             </Box>
         </Box>
     );

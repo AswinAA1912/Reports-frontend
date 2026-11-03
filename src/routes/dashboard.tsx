@@ -6,12 +6,12 @@ import {
   CircularProgress,
   Card,
   CardContent,
-  useTheme,
   useMediaQuery,
   TextField,
   InputAdornment,
   IconButton,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
 import {

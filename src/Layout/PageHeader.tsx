@@ -12,9 +12,9 @@ import {
   Tooltip,
   Button,
   alpha,
-  useTheme,
   useMediaQuery,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import MenuIcon from "@mui/icons-material/Menu";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import PowerSettingsNewIcon from "@mui/icons-material/PowerSettingsNew";

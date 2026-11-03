@@ -30,6 +30,7 @@ import LOSStaffBasedReport from "../reports/StaffBased/LOSstaffBasedReport";
 import ExpensesReport from "../reports/Expenses/ExpensesReport";
 import CostingReport from "../reports/Expenses/CostingReport";
 import OutstandingReport from "../reports/Expenses/outstandingReport";
+import AccountingOutstandingReport from "../reports/Expenses/AccountingOutstandingReport";
 import PendingOutstandingReport from "../reports/Expenses/PendingOutstandingReport";
 import TransactionDetailsReport from "../reports/Expenses/TransactionDetailsReport";
 import StaffBasedGroupingReport from "../reports/StaffBased/staffBasedGroupingReport";
@@ -438,6 +439,17 @@ const AppRouting: React.FC<AppRoutingProps> = ({
         />
 
         <Route
+          path="/accountingOutstanding"
+          element={
+            <RequireAuth>
+              <AppLayout>
+                <AccountingOutstandingReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
           path="/recievablePayable"
           element={
             <RequireAuth>
@@ -703,6 +715,17 @@ const AppRouting: React.FC<AppRoutingProps> = ({
             <RequireAuth>
               <AppLayout fullWidth>
                 <OverallItemwise />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/accountOutstanding"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <AccountingOutstandingReport />
               </AppLayout>
             </RequireAuth>
           }

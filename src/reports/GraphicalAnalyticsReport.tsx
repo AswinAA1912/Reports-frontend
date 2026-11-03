@@ -15,9 +15,9 @@ import {
   CircularProgress,
   TableContainer,
   Paper,
-  useTheme,
   useMediaQuery
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import BarChartIcon from "@mui/icons-material/BarChart";
 import ShowChartIcon from "@mui/icons-material/ShowChart";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";

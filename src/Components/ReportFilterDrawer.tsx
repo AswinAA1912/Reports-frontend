@@ -46,6 +46,7 @@ interface ReportFilterDrawerProps {
     dropdownValue?: string | number | (string | number)[];
     dropdownOptions?: DropdownOption[];
     dropdownMultiple?: boolean;
+    dropdownSearchable?: boolean;
     onDropdownChange?: (value: any) => void;
 
     // NEW ✅
@@ -123,6 +124,7 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
     dropdownValue,
     dropdownOptions,
     dropdownMultiple = false,
+    dropdownSearchable = false,
     onDropdownChange,
 
     // NEW ✅
@@ -559,6 +561,46 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                                     )}
                                     sx={{ mb: 2 }}
                                 />
+                            ) : dropdownSearchable ? (
+                                (() => {
+                                    const hasAllOption = dropdownOptions.some(
+                                        (opt) => opt.value === "" || opt.value === 0 || opt.label.toLowerCase() === "all"
+                                    );
+                                    const singleOptions = hasAllOption
+                                        ? dropdownOptions
+                                        : [{ label: "All", value: "" }, ...dropdownOptions];
+
+                                    const currentSelected =
+                                        singleOptions.find((opt) => String(opt.value) === String(dropdownValue)) ||
+                                        (String(dropdownValue) === "0" || dropdownValue === "" || dropdownValue === undefined
+                                            ? singleOptions[0]
+                                            : null);
+
+                                    return (
+                                        <Autocomplete
+                                            options={singleOptions}
+                                            getOptionLabel={(option) =>
+                                                typeof option === "string" ? option : option.label || ""
+                                            }
+                                            isOptionEqualToValue={(option, val) => {
+                                                const valValue = val && typeof val === "object" ? val.value : val;
+                                                return String(option.value) === String(valValue);
+                                            }}
+                                            value={currentSelected}
+                                            onChange={(_, newValue) => {
+                                                onDropdownChange?.(newValue ? newValue.value : singleOptions[0]?.value ?? "");
+                                            }}
+                                            renderInput={(params) => (
+                                                <TextField
+                                                    {...params}
+                                                    label={dropdownLabel}
+                                                    placeholder={`Search ${dropdownLabel || "options"}...`}
+                                                />
+                                            )}
+                                            sx={{ mb: 2 }}
+                                        />
+                                    );
+                                })()
                             ) : (
                                 <TextField
                                     select

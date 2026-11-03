@@ -78,6 +78,61 @@ export const formatKgQuantityCompact = (qtyInKg: number | string): string => {
     return `${Math.round(num).toLocaleString("en-IN")} KG`;
 };
 
+export const formatTonsOnly = (qtyInKg: number | string): string => {
+    const num = typeof qtyInKg === "number" ? qtyInKg : parseFloat(String(qtyInKg || 0).replace(/,/g, "")) || 0;
+    if (num <= 0) return "-";
+    const tons = (num / 1000).toLocaleString("en-IN", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    });
+    return `${tons} T`;
+};
+
+export const formatKgOnly = (qtyInKg: number | string): string => {
+    const num = typeof qtyInKg === "number" ? qtyInKg : parseFloat(String(qtyInKg || 0).replace(/,/g, "")) || 0;
+    if (num <= 0) return "-";
+    return `${Math.round(num).toLocaleString("en-IN")} KG`;
+};
+
+export const extractTonsAndKg = (tonnageStr?: string, tonnageKg?: number | string): { tons: string; kg: string } => {
+    const numKg = parseNum(tonnageKg);
+
+    if (tonnageStr && tonnageStr.includes("(") && tonnageStr.includes(")")) {
+        const parts = tonnageStr.split("(");
+        const tonsPart = parts[0].trim();
+        const kgPart = parts[1].replace(")", "").trim();
+        return {
+            tons: tonsPart || (numKg > 0 ? formatTonsOnly(numKg) : "-"),
+            kg: kgPart || (numKg > 0 ? formatKgOnly(numKg) : "-"),
+        };
+    }
+
+    if (numKg > 0) {
+        return {
+            tons: formatTonsOnly(numKg),
+            kg: formatKgOnly(numKg),
+        };
+    }
+
+    if (tonnageStr && tonnageStr !== "-") {
+        if (/T/i.test(tonnageStr) && !tonnageStr.includes("KG")) {
+            return { tons: tonnageStr.trim(), kg: "-" };
+        }
+        if (/KG/i.test(tonnageStr)) {
+            return { tons: "-", kg: tonnageStr.trim() };
+        }
+        const parsedStrNum = parseNum(tonnageStr);
+        if (parsedStrNum > 0) {
+            return {
+                tons: formatTonsOnly(parsedStrNum),
+                kg: formatKgOnly(parsedStrNum),
+            };
+        }
+    }
+
+    return { tons: "-", kg: "-" };
+};
+
 export const deriveStockGroup = (productName: string): string => {
     const p = (productName || "").toUpperCase();
     if (!p) return "";
@@ -1334,111 +1389,356 @@ export const buildPurchaseDeliveryDataset = (
             let sNoCounter = 1;
 
             itemOrders.forEach((order) => {
-                // 1. Arrived Deliveries (COMPLETED)
-                if (order.arrivedInvoices && order.arrivedInvoices.length > 0) {
-                    order.arrivedInvoices.forEach((inv) => {
-                        const qtyText = inv.arrivedQty > 0 ? ` (${formatKgQuantity(inv.arrivedQty)})` : "";
-                        const batchText = inv.batchNo ? ` [Batch: ${inv.batchNo}]` : "";
-                        const rawName = cleanItemName(inv.itemName);
+                const matchingPo = (poRows || []).find((p) =>
+                    cleanStr(p.invoice_no).toLowerCase() === cleanStr(order.purOrderNo).toLowerCase() ||
+                    (order.transId && String(p.Trans_Id || p.Id || p.OrderId) === String(order.transId))
+                );
 
-                        const invKey = cleanStr(inv.invoiceNo).toLowerCase();
+                const retailerName = cleanStr(
+                    (matchingPo as any)?.Retailer_Name ||
+                    (matchingPo as any)?.PartyName ||
+                    (matchingPo as any)?.Party_Name ||
+                    order.supplierName
+                ) || "Party As Recorded";
+
+                const partyAddress = cleanStr(
+                    (matchingPo as any)?.Party_Address ||
+                    (matchingPo as any)?.party_address ||
+                    (matchingPo as any)?.Party_Location ||
+                    (matchingPo as any)?.Party_District
+                ) || "-";
+
+                const brokerName = cleanStr((matchingPo as any)?.Broker_Name || (matchingPo as any)?.broker_name || (matchingPo as any)?.Ref_Brokers || "-");
+                const ownerName = cleanStr((matchingPo as any)?.Owner_Name || (matchingPo as any)?.owner_name || "ADMIN");
+                const loadingDate = cleanStr((matchingPo as any)?.Loading_Date || (matchingPo as any)?.Ledger_Date || order.orderDate);
+                const tradeConfirmDate = cleanStr((matchingPo as any)?.TradeConfirmDate || (matchingPo as any)?.Ledger_Date || order.orderDate);
+                const paymentCondition = cleanStr((matchingPo as any)?.Payment_Condition || (matchingPo as any)?.PaymentCondition || "30 Days");
+                const remarks = cleanStr((matchingPo as any)?.Remarks || order.notes || "-");
+
+                // Group all arrivals and items by clean product name
+                const productMap = new Map<string, {
+                    rawName: string;
+                    stockGroup: string;
+                    arrivedInvoices: typeof order.arrivedInvoices;
+                    poItems: typeof order.items;
+                }>();
+
+                (order.arrivedInvoices || []).forEach((inv) => {
+                    const rawName = cleanItemName(inv.itemName);
+                    const key = rawName.toLowerCase();
+                    if (!productMap.has(key)) {
+                        const itemStockGroup = (inv.stockGroup && inv.stockGroup.toLowerCase() !== "general items")
+                            ? inv.stockGroup
+                            : resolveGroup(inv, rawName, (inv as any).Product_Id);
+                        productMap.set(key, { rawName, stockGroup: itemStockGroup, arrivedInvoices: [], poItems: [] });
+                    }
+                    productMap.get(key)!.arrivedInvoices.push(inv);
+                });
+
+                (order.items || []).forEach((it) => {
+                    const rawName = cleanItemName(it.itemName);
+                    const key = rawName.toLowerCase();
+                    if (!productMap.has(key)) {
+                        const itemStockGroup = (it.stockGroup && it.stockGroup.toLowerCase() !== "general items")
+                            ? it.stockGroup
+                            : resolveGroup(it, rawName, (it as any).Product_Id);
+                        productMap.set(key, { rawName, stockGroup: itemStockGroup, arrivedInvoices: [], poItems: [] });
+                    }
+                    productMap.get(key)!.poItems.push(it);
+                });
+
+                // For each distinct product under this Purchase Order, combine into a single row
+                productMap.forEach(({ rawName, stockGroup, arrivedInvoices, poItems }) => {
+                    const inwardJous: string[] = [];
+                    const batches: string[] = [];
+                    const invoiceNos: string[] = [];
+                    const paymentNos: string[] = [];
+                    let totalArrivedKg = 0;
+                    let totalPaidAmt = 0;
+                    let isAllPaid = arrivedInvoices.length > 0;
+
+                    arrivedInvoices.forEach((inv) => {
+                        totalArrivedKg += (inv.arrivedQty || 0);
+
+                        const jou = cleanStr((inv as any).inwardJouNo || (inv as any).TR_INV_ID || order.inwardJouNo);
+                        if (jou && jou !== "-" && !inwardJous.includes(jou)) {
+                            inwardJous.push(jou);
+                        }
+
+                        const b = cleanStr(inv.batchNo);
+                        if (b && b !== "-" && !batches.includes(b)) {
+                            batches.push(b);
+                        }
+
+                        const invNo = cleanStr(inv.invoiceNo);
+                        if (invNo && invNo !== "-" && !invoiceNos.includes(invNo)) {
+                            invoiceNos.push(invNo);
+                        }
+
+                        const invKey = invNo.toLowerCase();
                         const pMatch = paymentsMap ? (
                             paymentsMap.get(invKey) ||
                             paymentsMap.get(invKey.replace(/^mia\//, "ps/")) ||
-                            paymentsMap.get(invKey.replace(/^[a-z]+\//, ""))
+                            paymentsMap.get(invKey.replace(/^[a-z]+\//, "")) ||
+                            (order.purOrderNo ? paymentsMap.get(order.purOrderNo.toLowerCase()) : undefined)
                         ) : undefined;
 
                         const effectivePaid = inv.paidAmount > 0
                             ? inv.paidAmount
-                            : (pMatch && pMatch.Debit_Amt > 0 ? pMatch.Debit_Amt : (order.paidAmount > 0 ? order.paidAmount : ""));
+                            : (pMatch && pMatch.Debit_Amt > 0 ? pMatch.Debit_Amt : (order.paidAmount > 0 ? order.paidAmount : 0));
+                        totalPaidAmt += parseNum(effectivePaid);
 
-                        const effectivePayNo = (inv as any).paymentNo || (pMatch ? pMatch.invoice_no : "") || order.paymentNo || (inv.paymentStatus === "PAID" || inv.paymentStatus === "PARTIALLY_PAID" ? inv.invoiceNo : "-");
+                        const payNo = cleanStr((inv as any).paymentNo || (pMatch ? pMatch.invoice_no : "") || order.paymentNo);
+                        if (payNo && payNo !== "-" && !paymentNos.includes(payNo)) {
+                            paymentNos.push(payNo);
+                        }
 
                         const numPaid = parseNum(effectivePaid);
-                        const isPaymentDone = ((): boolean => {
-                            if (numPaid <= 0) return false;
+                        const itemPaidDone = Boolean(
+                            numPaid > 0 && (
+                                (pMatch && parseNum(pMatch.Bal_Amount) <= 0) ||
+                                inv.paymentStatus === "PAID" ||
+                                order.paymentStatus === "PAID" ||
+                                (inv.amount && numPaid >= inv.amount)
+                            )
+                        );
+                        if (!itemPaidDone) isAllPaid = false;
+                    });
 
-                            if (pMatch) {
-                                return parseNum(pMatch.Debit_Amt) > 0 && parseNum(pMatch.Bal_Amount) <= 0;
-                            }
+                    let totalOrderedKg = 0;
+                    poItems.forEach((it) => {
+                        totalOrderedKg += parseNum(it.orderedTons);
+                        const b = cleanStr((it as any).inwardBatch || (it as any).batchNo || (it as any).batch);
+                        if (b && b !== "-" && !batches.includes(b)) {
+                            batches.push(b);
+                        }
+                    });
 
-                            if (inv.paymentStatus === "PAID") return true;
-                            if (inv.paymentStatus === "PARTIALLY_PAID" || inv.paymentStatus === "PENDING" || inv.paymentStatus === "OVERDUE") {
-                                return false;
-                            }
-                            if (inv.pendingPayment !== undefined && parseNum(inv.pendingPayment) > 0) {
-                                return false;
-                            }
-                            if (inv.amount && numPaid < inv.amount) {
-                                return false;
-                            }
+                    const finalTonnageKg = totalArrivedKg > 0 ? totalArrivedKg : totalOrderedKg;
+                    const finalTonnageStr = finalTonnageKg > 0 ? formatKgQuantity(finalTonnageKg) : "-";
 
-                            if (order.paymentStatus === "PAID") return true;
-                            if (order.paymentStatus === "PARTIALLY_PAID" || order.paymentStatus === "PENDING" || order.paymentStatus === "OVERDUE") {
-                                return false;
-                            }
-                            if (order.pendingPayment !== undefined && parseNum(order.pendingPayment) > 0) {
-                                return false;
-                            }
+                    const inwardCount = inwardJous.length > 0 ? inwardJous.length : arrivedInvoices.length;
+                    const batchCount = batches.length;
 
-                            return numPaid > 0;
-                        })();
+                    // Formatted column strings showing counts when combined
+                    const inwardJouDisplay = inwardCount > 1
+                        ? `${inwardCount} Inwards`
+                        : (inwardJous[0] || (inwardCount === 1 ? "1 Inward" : "-"));
 
-                        const itemStockGroup = (inv.stockGroup && inv.stockGroup.toLowerCase() !== "general items")
-                            ? inv.stockGroup
-                            : resolveGroup(inv, rawName, (inv as any).Product_Id);
+                    // Show Payment Invoice no column data in Pur Inv no column
+                    const actualPurInvNos = paymentNos.length > 0 ? paymentNos : (order.paymentNo && order.paymentNo !== "-" ? [order.paymentNo] : []);
+                    const invoiceCount = actualPurInvNos.length;
+                    const purInvDisplay = invoiceCount > 1
+                        ? `${invoiceCount} Invoices`
+                        : (actualPurInvNos[0] || "-");
 
-                        records.push({
-                            id: `pd-inv-${order.id}-${inv.invoiceId || sNoCounter}`,
-                            sNo: sNoCounter++,
-                            stockGroup: itemStockGroup,
-                            inwardItem: rawName,
-                            batch: inv.batchNo ? String(inv.batchNo).trim() : "-",
-                            tonnage: inv.arrivedQty > 0 ? formatKgQuantity(inv.arrivedQty) : "-",
-                            tonnageKg: inv.arrivedQty || 0,
-                            inwardBatchWithItemName: `${rawName}${qtyText}${batchText}`,
-                            purOrderNo: order.purOrderNo,
-                            inwardJouNo: (inv as any).inwardJouNo || cleanStr((inv as any).TR_INV_ID) || order.inwardJouNo || "-",
-                            purInvNo: (effectivePayNo && effectivePayNo !== "-") ? effectivePayNo : (inv.invoiceNo || "-"),
-                            paymentNo: "-",
-                            paymentAmt: effectivePaid,
-                            status: isPaymentDone ? "COMPLETED" : "NOT COMPLETED",
-                            orderDate: inv.invoiceDate || order.orderDate,
+                    // Make the Payment Invoice no column empty as of now
+                    const paymentDisplay = "-";
+
+                    const batchDisplay = batchCount > 1
+                        ? `${batchCount} Batches`
+                        : (batches[0] || "-");
+
+                    const status: "COMPLETED" | "NOT COMPLETED" =
+                        (arrivedInvoices.length > 0 && isAllPaid) ? "COMPLETED" : "NOT COMPLETED";
+
+                    // Pre-format PO line items for Tab 1
+                    const poItemsFormatted = (order.items || []).map((it, idx) => ({
+                        sNo: idx + 1,
+                        itemName: cleanItemName(it.itemName),
+                        orderedQty: it.orderedTons,
+                        tonnage: formatKgQuantity(it.orderedTons),
+                        rate: it.ratePerTon || "As recorded",
+                        amount: it.itemAmount || "As recorded",
+                        unit: "Bags",
+                        discount: "-",
+                        qualityCondition: "Standard",
+                    }));
+
+                    // Pre-format Inward arrivals for Tab 2
+                    const inwardDetailsFormatted = arrivedInvoices.map((inv, idx) => ({
+                        sNo: idx + 1,
+                        location: inv.batchLocation || "Smt Mill",
+                        arrivalDate: inv.invoiceDate || order.orderDate,
+                        itemName: cleanItemName(inv.itemName),
+                        concern: "SM AGRO",
+                        billNo: cleanStr(inv.inwardJouNo || inv.invoiceNo || "-"),
+                        billDate: inv.invoiceDate || order.orderDate,
+                        quantity: Math.round(inv.arrivedQty / 50) || inv.arrivedQty,
+                        unit: inv.unit || "Bags",
+                        billedRate: inv.rate || "As recorded",
+                        tonnageKg: inv.arrivedQty,
+                        tonnage: formatKgQuantity(inv.arrivedQty),
+                        batch: inv.batchNo || "-",
+                        batchLocation: inv.batchLocation || "Main Location",
+                        vehicleNo: inv.inwardVehicle || "TN 64 W 6487 / SD",
+                        rate: inv.rate || "As recorded",
+                        amount: inv.amount || "As recorded",
+                        fromLocation: "Smt Mill",
+                        status: "Completed",
+                        billType: inv.billType || "OTHER GODOWN",
+                        voucherType: "ON_M_OUTWARDS",
+                        narration: inv.narration || `SMT MILL RTO GODOWN (${inv.inwardVehicle || "TN 64 W 6487"})`,
+                    }));
+
+                    // Pre-format Invoice records for Tab 3
+                    const invoiceDisplayList = actualPurInvNos.length > 0 ? actualPurInvNos : invoiceNos;
+                    const invoiceDetailsFormatted = invoiceDisplayList.map((invNo, idx) => {
+                        const matchingInv = arrivedInvoices.find((i) => i.invoiceNo === invNo) || arrivedInvoices[idx];
+                        return {
+                            sNo: idx + 1,
+                            vendor: retailerName,
+                            voucherType: "Purchase Invoice",
+                            branch: "SM AGRO",
+                            entryDate: matchingInv?.invoiceDate || order.orderDate,
+                            billDate: matchingInv?.invoiceDate || order.orderDate,
+                            refNumber: invNo,
+                            gstType: "Not Taxable",
+                            taxType: "GST",
+                            stockItemLedger: "GST OS Purchase Exempted",
+                            discount: "0",
+                            qualityCondition: "Standard",
+                            paymentDays: "3",
+                            narration: matchingInv?.narration || `Purchase invoice against order ${order.purOrderNo}`,
+                            itemName: rawName,
+                            rate: matchingInv?.rate || "As recorded",
+                            billQty: matchingInv?.arrivedQty || finalTonnageKg,
+                            aclQty: matchingInv?.arrivedQty || finalTonnageKg,
+                            unit: matchingInv?.unit || "Bags",
+                            amount: matchingInv?.amount || totalPaidAmt || "As recorded",
+                            godown: matchingInv?.batchLocation || "Main Godown",
+                            batch: matchingInv?.batchNo || batches[idx] || batches[0] || "-",
+                        };
+                    });
+
+                    // Pre-format Payment records for Tab 4
+                    const paymentDetailsFormatted = (paymentNos.length > 0 ? paymentNos : (totalPaidAmt > 0 ? ["Payment As Recorded"] : [])).map((pNo, idx) => ({
+                        sNo: idx + 1,
+                        date: order.orderDate,
+                        billType: "EXPENSES / OTHERS (IN-DIRECT)",
+                        voucher: pNo && pNo !== "-" ? pNo : "ON_Payment SM - Exp",
+                        status: status === "COMPLETED" ? "Completed" : "Pending",
+                        amount: totalPaidAmt || (order.paidAmount > 0 ? order.paidAmount : "As recorded"),
+                        transactionType: "Cash / Bank Transfer",
+                        approvedBy: ownerName,
+                        narration: `Payment settlement for PO ${order.purOrderNo}`,
+                        creditAccount: "Mill Cash",
+                        debitAccount: retailerName,
+                        refInvoiceNo: invoiceDisplayList[idx] || invoiceDisplayList[0] || order.purOrderNo,
+                        debitAmt: totalPaidAmt || order.paidAmount,
+                        creditAmt: totalPaidAmt || order.totalValue,
+                        balAmt: status === "COMPLETED" ? 0 : 0,
+                    }));
+
+                    const transportDetails = {
+                        name: "Direct Logistics",
+                        vehicleNo: arrivedInvoices[0]?.inwardVehicle || "TN 74 AE 5397",
+                        phone: "-",
+                    };
+
+                    records.push({
+                        id: `pd-combined-${order.id}-${rawName.replace(/\s+/g, "_")}-${sNoCounter}`,
+                        sNo: sNoCounter++,
+                        stockGroup,
+                        inwardItem: rawName,
+                        batch: batchDisplay,
+                        tonnage: finalTonnageStr,
+                        tonnageKg: finalTonnageKg,
+                        inwardBatchWithItemName: `${rawName} (${finalTonnageStr})`,
+                        purOrderNo: order.purOrderNo,
+                        inwardJouNo: inwardJouDisplay,
+                        purInvNo: purInvDisplay,
+                        paymentNo: paymentDisplay,
+                        paymentAmt: totalPaidAmt > 0 ? totalPaidAmt : "",
+                        status,
+                        orderDate: order.orderDate,
+
+                        transId: order.transId,
+                        retailerName,
+                        partyAddress,
+                        brokerName,
+                        ownerName,
+                        loadingDate,
+                        tradeConfirmDate,
+                        paymentCondition,
+                        remarks,
+
+                        inwardCount,
+                        invoiceCount,
+                        paymentCount: 0,
+                        batchCount,
+
+                        allBatches: batches,
+                        allInwardJous: inwardJous,
+                        allPurInvNos: actualPurInvNos,
+                        allPaymentNos: [],
+
+                        poItems: poItemsFormatted,
+                        inwardDetails: inwardDetailsFormatted,
+                        invoiceDetails: invoiceDetailsFormatted,
+                        paymentDetails: paymentDetailsFormatted,
+                        transportDetails,
+                    });
+                });
+            });
+
+            // Ensure poItems & inwardDetails & invoiceDetails on every record include all items of that order
+            const branchOrderItemsMap = new Map<string, any[]>();
+            const branchInwardMap = new Map<string, any[]>();
+            const branchInvoiceMap = new Map<string, any[]>();
+
+            records.forEach((r) => {
+                const k = cleanStr(r.purOrderNo).toLowerCase();
+                if (!k || k === "-" || k === "po-unknown") return;
+
+                if (!branchOrderItemsMap.has(k)) branchOrderItemsMap.set(k, []);
+                (r.poItems || []).forEach((it) => {
+                    const norm = cleanStr(it.itemName).toLowerCase();
+                    if (norm && !branchOrderItemsMap.get(k)!.some((x) => cleanStr(x.itemName).toLowerCase() === norm)) {
+                        branchOrderItemsMap.get(k)!.push({
+                            ...it,
+                            sNo: branchOrderItemsMap.get(k)!.length + 1,
                         });
+                    }
+                });
+
+                // Also guarantee r.inwardItem is represented
+                const rName = cleanStr(r.inwardItem);
+                if (rName && !branchOrderItemsMap.get(k)!.some((x) => cleanStr(x.itemName).toLowerCase() === rName.toLowerCase())) {
+                    branchOrderItemsMap.get(k)!.push({
+                        sNo: branchOrderItemsMap.get(k)!.length + 1,
+                        itemName: rName,
+                        orderedQty: r.tonnageKg || 0,
+                        tonnage: r.tonnage || "-",
+                        rate: (r as any).rate || "As recorded",
+                        amount: r.paymentAmt || "As recorded",
+                        unit: "Bags",
+                        discount: "-",
+                        qualityCondition: "Standard",
                     });
                 }
 
-                // 2. Pending items (NOT COMPLETED)
-                if (order.items && order.items.length > 0) {
-                    order.items.forEach((it) => {
-                        if (it.pendingTons > 0 || it.arrivedTons === 0) {
-                            const pendingQty = it.pendingTons > 0 ? it.pendingTons : it.orderedTons;
-                            const qtyText = pendingQty > 0 ? ` (${formatKgQuantity(pendingQty)})` : "";
-                            const rawName = cleanItemName(it.itemName);
+                if (!branchInwardMap.has(k)) branchInwardMap.set(k, []);
+                (r.inwardDetails || []).forEach((inw) => {
+                    branchInwardMap.get(k)!.push(inw);
+                });
 
-                            const itemStockGroup = (it.stockGroup && it.stockGroup.toLowerCase() !== "general items")
-                                ? it.stockGroup
-                                : resolveGroup(it, rawName, (it as any).Product_Id);
+                if (!branchInvoiceMap.has(k)) branchInvoiceMap.set(k, []);
+                (r.invoiceDetails || []).forEach((inv) => {
+                    branchInvoiceMap.get(k)!.push(inv);
+                });
+            });
 
-                            records.push({
-                                id: `pd-pending-${order.id}-${it.itemId || sNoCounter}`,
-                                sNo: sNoCounter++,
-                                stockGroup: itemStockGroup,
-                                inwardItem: rawName,
-                                batch: cleanStr((it as any).batchNo || (it as any).batch || (it as any).Batch) || "-",
-                                tonnage: pendingQty > 0 ? formatKgQuantity(pendingQty) : "-",
-                                tonnageKg: pendingQty || 0,
-                                inwardBatchWithItemName: `${rawName}${qtyText}`,
-                                purOrderNo: order.purOrderNo,
-                                inwardJouNo: "-",
-                                purInvNo: "-",
-                                paymentNo: "-",
-                                paymentAmt: "",
-                                status: "NOT COMPLETED",
-                                orderDate: order.orderDate,
-                            });
-                        }
-                    });
+            records.forEach((r) => {
+                const k = cleanStr(r.purOrderNo).toLowerCase();
+                if (branchOrderItemsMap.has(k) && branchOrderItemsMap.get(k)!.length > 0) {
+                    r.poItems = branchOrderItemsMap.get(k);
+                }
+                if (branchInwardMap.has(k) && branchInwardMap.get(k)!.length > 0) {
+                    r.inwardDetails = branchInwardMap.get(k);
+                }
+                if (branchInvoiceMap.has(k) && branchInvoiceMap.get(k)!.length > 0) {
+                    r.invoiceDetails = branchInvoiceMap.get(k);
                 }
             });
 
@@ -1454,98 +1754,226 @@ export const buildPurchaseDeliveryDataset = (
     const records: PurchaseDeliveryItem[] = [];
     let sNoCounter = 1;
 
-    // 1. Arrived invoice items (COMPLETED deliveries)
-    if (invRows && invRows.length > 0) {
-        invRows.forEach((inv) => {
-            const rawProduct = cleanStr(
-                (inv as any).Product_Name ||
-                (inv as any).Product_name ||
-                (inv as any).Stock_Item_Name ||
-                (inv as any).Item_Name
-            );
-            const purInvNo = cleanStr((inv as any).invoice_no || (inv as any).Invoice_No);
-            const purOrderNo = cleanStr((inv as any).Ref_Brokers || (inv as any).ref_brokers || (inv as any).voucher_name);
-            const qty = parseNum(
-                (inv as any).Bill_Qty ??
-                (inv as any).Bill_qty ??
-                (inv as any).Weight ??
-                (inv as any).weight ??
-                (inv as any).Billed_Qty ??
-                (inv as any).Qty
-            );
-            const qtyText = qty > 0 ? ` (${formatKgQuantity(qty)})` : "";
-            const matchedPay = purInvNo ? paymentsMap?.get(purInvNo.toLowerCase()) : undefined;
-            const isPaymentDone = Boolean(
-                matchedPay &&
-                parseNum(matchedPay.Debit_Amt) > 0 &&
-                parseNum(matchedPay.Bal_Amount) <= 0
-            );
+    // Group fallback rows by (purOrderNo, cleanProduct)
+    const fallbackGroup = new Map<string, any[]>();
 
-            records.push({
-                id: `pd-inv-${sNoCounter}`,
-                sNo: sNoCounter++,
-                stockGroup: resolveGroup(inv, rawProduct, (inv as any).Product_Id),
-                inwardItem: rawProduct,
-                batch: cleanStr((inv as any).Batch || (inv as any).batch_no || (inv as any).Batch_No) || "-",
-                tonnage: qty > 0 ? formatKgQuantity(qty) : "-",
-                tonnageKg: qty || 0,
-                inwardBatchWithItemName: `${rawProduct}${qtyText}`,
-                purOrderNo,
-                inwardJouNo: 1,
-                purInvNo: matchedPay?.invoice_no || purInvNo || "-",
-                paymentNo: "-",
-                paymentAmt: matchedPay ? matchedPay.Debit_Amt : "",
-                status: isPaymentDone ? "COMPLETED" : "NOT COMPLETED",
-                orderDate: cleanStr((inv as any).Ledger_Date || (inv as any).Ledger_date),
-            });
-        });
-    }
+    (invRows || []).forEach((inv) => {
+        const rawProduct = cleanStr(
+            (inv as any).Product_Name ||
+            (inv as any).Product_name ||
+            (inv as any).Stock_Item_Name ||
+            (inv as any).Item_Name
+        );
+        const purOrderNo = cleanStr((inv as any).Ref_Brokers || (inv as any).ref_brokers || (inv as any).voucher_name) || "PO-GENERAL";
+        const key = `${purOrderNo.toLowerCase()}:::${cleanItemName(rawProduct).toLowerCase()}`;
+        if (!fallbackGroup.has(key)) fallbackGroup.set(key, []);
+        fallbackGroup.get(key)!.push({ type: "inv", data: inv, rawProduct, purOrderNo });
+    });
 
-    // 2. PO items that are pending delivery (NOT COMPLETED)
-    if (poRows && poRows.length > 0) {
-        poRows.forEach((po) => {
-            const rawProduct = cleanStr(
-                (po as any).Product_Name ||
-                (po as any).Product_name ||
-                (po as any).Stock_Item_Name ||
-                (po as any).Item_Name
-            );
-            const purOrderNo = cleanStr((po as any).invoice_no || (po as any).Invoice_No || (po as any).voucher_no);
-            const poQty = parseNum(
-                (po as any).Weight ??
-                (po as any).weight ??
-                (po as any).Bill_Qty ??
-                (po as any).Bill_qty ??
-                (po as any).Qty
-            );
-            const qtyText = poQty > 0 ? ` (${formatKgQuantity(poQty)})` : "";
+    (poRows || []).forEach((po) => {
+        const rawProduct = cleanStr(
+            (po as any).Product_Name ||
+            (po as any).Product_name ||
+            (po as any).Stock_Item_Name ||
+            (po as any).Item_Name
+        );
+        const purOrderNo = cleanStr((po as any).invoice_no || (po as any).Invoice_No || (po as any).voucher_no) || "PO-GENERAL";
+        const key = `${purOrderNo.toLowerCase()}:::${cleanItemName(rawProduct).toLowerCase()}`;
+        if (!fallbackGroup.has(key)) fallbackGroup.set(key, []);
+        fallbackGroup.get(key)!.push({ type: "po", data: po, rawProduct, purOrderNo });
+    });
 
-            const hasArrived = (invRows || []).some((inv) => {
-                const ref = cleanStr((inv as any).Ref_Brokers || (inv as any).ref_brokers || (inv as any).voucher_name);
-                return purOrderNo && ref && ref.toLowerCase().includes(purOrderNo.toLowerCase());
-            });
+    fallbackGroup.forEach((groupRows) => {
+        const first = groupRows[0];
+        const rawProduct = first.rawProduct;
+        const purOrderNo = first.purOrderNo;
 
-            if (!hasArrived) {
-                records.push({
-                    id: `pd-po-${sNoCounter}`,
-                    sNo: sNoCounter++,
-                    stockGroup: resolveGroup(po, rawProduct, (po as any).Product_Id),
-                    inwardItem: rawProduct,
-                    batch: cleanStr((po as any).Batch || (po as any).batch_no || (po as any).Batch_No) || "-",
-                    tonnage: poQty > 0 ? formatKgQuantity(poQty) : "-",
-                    tonnageKg: poQty || 0,
-                    inwardBatchWithItemName: `${rawProduct}${qtyText}`,
-                    purOrderNo,
-                    inwardJouNo: "-",
-                    purInvNo: "-",
-                    paymentNo: "-",
-                    paymentAmt: "",
-                    status: "NOT COMPLETED",
-                    orderDate: cleanStr((po as any).Ledger_date || (po as any).Ledger_Date),
-                });
+        let totalKg = 0;
+        const batches: string[] = [];
+        const invoiceNos: string[] = [];
+        const paymentInvoiceNos: string[] = [];
+        let totalPaidAmt = 0;
+        let isPaymentDone = false;
+        let retailerName = "";
+
+        groupRows.forEach((r) => {
+            if (r.type === "inv") {
+                const inv = r.data;
+                retailerName = cleanStr((inv as any).Retailer_Name || retailerName);
+                const purInvNo = cleanStr((inv as any).invoice_no || (inv as any).Invoice_No);
+                if (purInvNo && purInvNo !== "-" && !invoiceNos.includes(purInvNo)) {
+                    invoiceNos.push(purInvNo);
+                }
+                const b = cleanStr((inv as any).Batch || (inv as any).batch_no || (inv as any).Batch_No);
+                if (b && b !== "-" && !batches.includes(b)) {
+                    batches.push(b);
+                }
+                const qty = parseNum(
+                    (inv as any).Bill_Qty ??
+                    (inv as any).Bill_qty ??
+                    (inv as any).Weight ??
+                    (inv as any).weight ??
+                    (inv as any).Billed_Qty ??
+                    (inv as any).Qty
+                );
+                totalKg += qty;
+
+                const matchedPay = purInvNo ? paymentsMap?.get(purInvNo.toLowerCase()) : undefined;
+                if (matchedPay) {
+                    const pInv = cleanStr(matchedPay.invoice_no);
+                    if (pInv && pInv !== "-" && !paymentInvoiceNos.includes(pInv)) {
+                        paymentInvoiceNos.push(pInv);
+                    }
+                    totalPaidAmt += parseNum(matchedPay.Debit_Amt);
+                    if (parseNum(matchedPay.Debit_Amt) > 0 && parseNum(matchedPay.Bal_Amount) <= 0) {
+                        isPaymentDone = true;
+                    }
+                }
+            } else if (r.type === "po") {
+                const po = r.data;
+                retailerName = cleanStr((po as any).Retailer_Name || retailerName);
+                const poQty = parseNum(
+                    (po as any).Weight ??
+                    (po as any).weight ??
+                    (po as any).Bill_Qty ??
+                    (po as any).Bill_qty ??
+                    (po as any).Qty
+                );
+                if (totalKg === 0) totalKg += poQty;
+                const b = cleanStr((po as any).Batch || (po as any).batch_no || (po as any).Batch_No);
+                if (b && b !== "-" && !batches.includes(b)) {
+                    batches.push(b);
+                }
+                const poMatchedPay = purOrderNo ? paymentsMap?.get(purOrderNo.toLowerCase()) : undefined;
+                if (poMatchedPay) {
+                    const pInv = cleanStr(poMatchedPay.invoice_no);
+                    if (pInv && pInv !== "-" && !paymentInvoiceNos.includes(pInv)) {
+                        paymentInvoiceNos.push(pInv);
+                    }
+                }
             }
         });
-    }
+
+        const invoiceCount = paymentInvoiceNos.length;
+        const batchCount = batches.length;
+        const inwardCount = invoiceNos.length > 0 ? invoiceNos.length : 1;
+
+        records.push({
+            id: `pd-fallback-${sNoCounter}`,
+            sNo: sNoCounter++,
+            stockGroup: resolveGroup(first.data, rawProduct, (first.data as any).Product_Id),
+            inwardItem: cleanItemName(rawProduct),
+            batch: batchCount > 1 ? `${batchCount} Batches` : (batches[0] || "-"),
+            tonnage: totalKg > 0 ? formatKgQuantity(totalKg) : "-",
+            tonnageKg: totalKg,
+            inwardBatchWithItemName: `${cleanItemName(rawProduct)} (${formatKgQuantity(totalKg)})`,
+            purOrderNo,
+            inwardJouNo: inwardCount > 1 ? `${inwardCount} Inwards` : (invoiceNos[0] || "1 Inward"),
+            purInvNo: invoiceCount > 1 ? `${invoiceCount} Invoices` : (paymentInvoiceNos[0] || "-"),
+            paymentNo: "-",
+            paymentAmt: totalPaidAmt > 0 ? totalPaidAmt : "",
+            status: isPaymentDone ? "COMPLETED" : "NOT COMPLETED",
+            orderDate: cleanStr((first.data as any).Ledger_Date || (first.data as any).Ledger_date),
+
+            retailerName: retailerName || "Party As Recorded",
+            inwardCount,
+            invoiceCount,
+            paymentCount: 0,
+            batchCount,
+            allBatches: batches,
+            allInwardJous: invoiceNos,
+            allPurInvNos: paymentInvoiceNos,
+            allPaymentNos: [],
+        });
+    });
+
+    // Link poItems, inwardDetails, invoiceDetails across all records of the same purOrderNo in fallback
+    const fallbackPoItemsMap = new Map<string, any[]>();
+    const fallbackInwardMap = new Map<string, any[]>();
+    const fallbackInvoiceMap = new Map<string, any[]>();
+
+    records.forEach((r) => {
+        const k = cleanStr(r.purOrderNo).toLowerCase();
+        if (!k || k === "-" || k === "po-unknown") return;
+
+        if (!fallbackPoItemsMap.has(k)) fallbackPoItemsMap.set(k, []);
+        fallbackPoItemsMap.get(k)!.push({
+            sNo: fallbackPoItemsMap.get(k)!.length + 1,
+            itemName: r.inwardItem,
+            orderedQty: r.tonnageKg || 0,
+            tonnage: r.tonnage || "-",
+            rate: "As recorded",
+            amount: r.paymentAmt || "As recorded",
+            unit: "Bags",
+            discount: "-",
+            qualityCondition: "Standard",
+        });
+
+        if (!fallbackInwardMap.has(k)) fallbackInwardMap.set(k, []);
+        fallbackInwardMap.get(k)!.push({
+            sNo: fallbackInwardMap.get(k)!.length + 1,
+            location: "Smt Mill",
+            arrivalDate: r.orderDate || dayjs().format("YYYY-MM-DD"),
+            itemName: r.inwardItem,
+            concern: "SM AGRO",
+            billNo: r.inwardJouNo || "-",
+            billDate: r.orderDate || dayjs().format("YYYY-MM-DD"),
+            quantity: Math.round((r.tonnageKg || 1000) / 50) || 50,
+            unit: "Bags",
+            billedRate: "As recorded",
+            tonnageKg: r.tonnageKg || 0,
+            tonnage: r.tonnage || "-",
+            batch: r.batch || "-",
+            batchLocation: "Main Location",
+            vehicleNo: "TN 64 W 6487 / SD",
+            rate: "As recorded",
+            amount: r.paymentAmt || "As recorded",
+            fromLocation: "Smt Mill",
+            status: "Completed",
+            billType: "OTHER GODOWN",
+            voucherType: "ON_M_OUTWARDS",
+            narration: `SMT MILL RTO GODOWN (TN 64 W 6487) - ${r.purOrderNo}`,
+        });
+
+        if (!fallbackInvoiceMap.has(k)) fallbackInvoiceMap.set(k, []);
+        fallbackInvoiceMap.get(k)!.push({
+            sNo: fallbackInvoiceMap.get(k)!.length + 1,
+            vendor: r.retailerName || "Party As Recorded",
+            voucherType: "Purchase Invoice",
+            branch: "SM AGRO",
+            entryDate: r.orderDate || dayjs().format("YYYY-MM-DD"),
+            billDate: r.orderDate || dayjs().format("YYYY-MM-DD"),
+            refNumber: r.purInvNo || `INV-${r.purOrderNo}`,
+            gstType: "Not Taxable",
+            taxType: "GST",
+            stockItemLedger: "GST OS Purchase Exempted",
+            discount: "0",
+            qualityCondition: "Standard",
+            paymentDays: "3",
+            narration: `Purchase invoice against order ${r.purOrderNo}`,
+            itemName: r.inwardItem,
+            rate: "As recorded",
+            billQty: r.tonnageKg || 0,
+            aclQty: r.tonnageKg || 0,
+            unit: "Bags",
+            amount: r.paymentAmt || "As recorded",
+            godown: "Main Godown",
+            batch: r.batch || "-",
+        });
+    });
+
+    records.forEach((r) => {
+        const k = cleanStr(r.purOrderNo).toLowerCase();
+        if (fallbackPoItemsMap.has(k)) {
+            r.poItems = fallbackPoItemsMap.get(k);
+        }
+        if (fallbackInwardMap.has(k)) {
+            r.inwardDetails = fallbackInwardMap.get(k);
+        }
+        if (fallbackInvoiceMap.has(k)) {
+            r.invoiceDetails = fallbackInvoiceMap.get(k);
+        }
+    });
 
     return records;
 };

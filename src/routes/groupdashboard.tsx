@@ -6,7 +6,6 @@ import {
   CircularProgress,
   Card,
   CardContent,
-  useTheme,
   useMediaQuery,
   Dialog,
   DialogTitle,
@@ -14,6 +13,7 @@ import {
   DialogActions,
   Button
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import {
   ResponsiveContainer,
   LineChart,

@@ -151,7 +151,7 @@ const PERCENTAGE_KEYS = [
 ];
 
 const REPORT_SP = "Reporting_Admin_Unit_Economics";
-const PARENT_REPORT_NAME = "Unit Economics Report";
+const PARENT_REPORT_NAME = "Unit Economics Admin Report";
 
 /* ================= SORTABLE ROW ================= */
 
@@ -404,14 +404,9 @@ const UnitEconomicsAdmin: React.FC = () => {
         // 1. Add current predefined columns (enabled according to current rateType)
         baseKeyConfigs.forEach((b, idx) => {
             const isEnabled = defaultEnabled.includes(b.key);
-            const matchedLol = lolCols.find(
-                l => l.ColumnName && l.ColumnName.toUpperCase() === b.key.toUpperCase()
-            );
-            const finalLabel = (matchedLol?.Alias_Name && matchedLol.Alias_Name.trim()) || b.label;
-
             result.push({
                 key: b.key,
-                label: finalLabel,
+                label: b.label,
                 enabled: isEnabled,
                 isNumeric: b.isNumeric,
                 order: idx,
@@ -427,8 +422,7 @@ const UnitEconomicsAdmin: React.FC = () => {
                     const matchedLol = lolCols.find(
                         l => l.ColumnName && l.ColumnName.toUpperCase() === key.toUpperCase()
                     );
-                    const label = (matchedLol?.Alias_Name && matchedLol.Alias_Name.trim())
-                        || key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+                    const label = (matchedLol?.Alias_Name && matchedLol.Alias_Name.trim()) || matchedLol?.ColumnName || key;
 
                     const isNum = NUMERIC_KEYS.includes(key) || rows.some(r => typeof r[key] === "number");
 
@@ -448,8 +442,7 @@ const UnitEconomicsAdmin: React.FC = () => {
         // 3. Add remaining columns from lolfields dataset as disabled columns
         lolCols.forEach(l => {
             if (l.ColumnName && !seenKeys.has(l.ColumnName.toUpperCase())) {
-                const label = (l.Alias_Name && l.Alias_Name.trim())
-                    || l.ColumnName.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+                const label = (l.Alias_Name && l.Alias_Name.trim()) || l.ColumnName;
 
                 result.push({
                     key: l.ColumnName,
@@ -546,8 +539,7 @@ const UnitEconomicsAdmin: React.FC = () => {
                                     );
                                     newCols.push({
                                         key,
-                                        label: (matchedLol?.Alias_Name && matchedLol.Alias_Name.trim())
-                                            || key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+                                        label: (matchedLol?.Alias_Name && matchedLol.Alias_Name.trim()) || matchedLol?.ColumnName || key,
                                         enabled: false,
                                         isNumeric: NUMERIC_KEYS.includes(key) || rows.some(r => typeof (r as any)[key] === "number"),
                                         order: newCols.length,
@@ -562,8 +554,7 @@ const UnitEconomicsAdmin: React.FC = () => {
                             if (l.ColumnName && !existingKeys.has(l.ColumnName.toUpperCase())) {
                                 newCols.push({
                                     key: l.ColumnName,
-                                    label: (l.Alias_Name && l.Alias_Name.trim())
-                                        || l.ColumnName.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+                                    label: (l.Alias_Name && l.Alias_Name.trim()) || l.ColumnName,
                                     enabled: false,
                                     isNumeric: NUMERIC_KEYS.includes(l.ColumnName),
                                     order: newCols.length,
@@ -1030,12 +1021,12 @@ const UnitEconomicsAdmin: React.FC = () => {
 
     const handleExportPDF = () => {
         const { headers, data: exportData } = mapForExport(exportColumns, data);
-        exportToPDF("Unit Economics Report", headers, exportData);
+        exportToPDF("Unit Economics Admin Report", headers, exportData);
     };
 
     const handleExportExcel = () => {
         const { headers, data: exportData } = mapForExport(exportColumns, data);
-        exportToExcel("Unit Economics Report", headers, exportData);
+        exportToExcel("Unit Economics Admin Report", headers, exportData);
     };
 
     /* ================= RENDER ================= */
@@ -1088,7 +1079,6 @@ const UnitEconomicsAdmin: React.FC = () => {
                                     width: 24,
                                     backgroundColor: "#fff",
                                     borderRadius: 0.5,
-                                    "&:hover": { backgroundColor: "#f5f5f5" },
                                 }}
                             >
                                 <GroupWorkIcon fontSize="small" />
@@ -1104,7 +1094,6 @@ const UnitEconomicsAdmin: React.FC = () => {
                                     width: 24,
                                     backgroundColor: "#fff",
                                     borderRadius: 0.5,
-                                    "&:hover": { backgroundColor: "#f5f5f5" },
                                 }}
                             >
                                 <SettingsIcon fontSize="small" />

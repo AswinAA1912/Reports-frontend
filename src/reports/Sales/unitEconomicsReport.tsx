@@ -80,7 +80,9 @@ const UnitEconomicsReportPage: React.FC = () => {
       "Amount",
       "Min_Rate",
       "List_Rate",
-      "COGS"
+      "COGS",
+      "TGP_COGS",
+      "GP_Percentage_COGS"
     ].includes(key);
   };
 
@@ -167,6 +169,8 @@ const UnitEconomicsReportPage: React.FC = () => {
     { label: "Min Rate", key: "Min_Rate", type: "number" },
     { label: "List Rate", key: "List_Rate", type: "number" },
     { label: "COGS", key: "COGS", type: "number" },
+    { label: "TGP COGS", key: "TGP_COGS", type: "number" },
+    { label: "GP % COGS", key: "GP_Percentage_COGS", type: "number" },
   ];
 
   /* ================= LOAD DATA ================= */
@@ -250,7 +254,7 @@ const UnitEconomicsReportPage: React.FC = () => {
     setActiveHeader(column);
     setFilterAnchor(e.currentTarget);
 
-    if (["Bill_Qty", "Rate", "Amount", "COGS"].includes(column)) {
+    if (["Bill_Qty", "Rate", "Amount", "COGS", "TGP_COGS", "GP_Percentage_COGS"].includes(column)) {
       if (summaryColumn === column) {
         setSummaryColumn(null);
       } else {
@@ -379,6 +383,12 @@ const UnitEconomicsReportPage: React.FC = () => {
                   <TableCell align="right" sx={headStyle}>
                     {renderHeader("COGS", "COGS")}
                   </TableCell>
+                  <TableCell align="right" sx={headStyle}>
+                    {renderHeader("TGP COGS", "TGP_COGS")}
+                  </TableCell>
+                  <TableCell align="right" sx={headStyle}>
+                    {renderHeader("GP % COGS", "GP_Percentage_COGS")}
+                  </TableCell>
                 </TableRow>
                 <TableRow
                   sx={{
@@ -421,6 +431,14 @@ const UnitEconomicsReportPage: React.FC = () => {
                   <TableCell align="right" sx={{ fontWeight: 700 }}>
                     {getTotal("COGS").toFixed(2)}
                   </TableCell>
+
+                  {/* TGP COGS */}
+                  <TableCell align="right" sx={{ fontWeight: 700 }}>
+                    {formatINR(getTotal("TGP_COGS"))}
+                  </TableCell>
+
+                  {/* GP % COGS */}
+                  <TableCell />
                 </TableRow>
               </TableHead>
 
@@ -441,6 +459,12 @@ const UnitEconomicsReportPage: React.FC = () => {
                     <TableCell align="right">{formatINR(Number(row.Min_Rate))}</TableCell>
                     <TableCell align="right">{formatINR(Number(row.List_Rate))}</TableCell>
                     <TableCell align="right">{Number(row.COGS).toFixed(2)}</TableCell>
+                    <TableCell align="right">{formatINR(Number(row.TGP_COGS || 0))}</TableCell>
+                    <TableCell align="right">
+                      {row.GP_Percentage_COGS !== undefined && row.GP_Percentage_COGS !== null
+                        ? `${Number(row.GP_Percentage_COGS).toFixed(2)}%`
+                        : "-"}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

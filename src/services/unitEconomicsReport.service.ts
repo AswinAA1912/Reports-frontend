@@ -16,6 +16,8 @@ export interface UnitEconomicsReport {
   List_Rate: number;
   COGS: number;
   COGS_Amount: number;
+  TGP_COGS?: number;
+  GP_Percentage_COGS?: number;
   Brand?: string;
   Group_ST?: string;
   Grade_Item_Group?: string;

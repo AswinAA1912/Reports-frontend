@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import dayjs from "dayjs";
 import {
     OnlinePurchaseReportService,
@@ -1063,7 +1062,7 @@ export const buildPurchaseItemPaymentDataset = (
                     pendingPayment: totalVal,
                     paymentStatus: "PENDING",
                     inwardVehicle: vehicle,
-                    inwardJouNo: cleanStr(t.TR_INV_ID) || cleanStr(t.BillNo) || (t.T_No ? `MIA/${String(t.T_No).padStart(6, "0")}/26-27` : "-"),
+                    inwardJouNo: cleanStr(t.TR_INV_ID) || cleanStr(t.BillNo) || "-",
                     TR_INV_ID: cleanStr(t.TR_INV_ID),
                     godown: batchLocation || (t.To_Location ? `Location ${t.To_Location}` : ""),
                     challanNo: cleanStr(t.Challan_No),
@@ -1452,13 +1451,20 @@ export const buildPurchaseDeliveryDataset = (
                     const inwardJous: string[] = [];
                     const batches: string[] = [];
                     const invoiceNos: string[] = [];
+                    const purInvoiceList: string[] = [];
                     const paymentNos: string[] = [];
+                    const tripIds: (string | number)[] = [];
                     let totalArrivedKg = 0;
                     let totalPaidAmt = 0;
                     let isAllPaid = arrivedInvoices.length > 0;
 
                     arrivedInvoices.forEach((inv) => {
                         totalArrivedKg += (inv.arrivedQty || 0);
+
+                        const tId = (inv as any).tripId || (inv as any).Trip_Id;
+                        if (tId && !tripIds.includes(tId)) {
+                            tripIds.push(tId);
+                        }
 
                         const jou = cleanStr((inv as any).inwardJouNo || (inv as any).TR_INV_ID || order.inwardJouNo);
                         if (jou && jou !== "-" && !inwardJous.includes(jou)) {
@@ -1488,9 +1494,17 @@ export const buildPurchaseDeliveryDataset = (
                             : (pMatch && pMatch.Debit_Amt > 0 ? pMatch.Debit_Amt : (order.paidAmount > 0 ? order.paidAmount : 0));
                         totalPaidAmt += parseNum(effectivePaid);
 
-                        const payNo = cleanStr((inv as any).paymentNo || (pMatch ? pMatch.invoice_no : "") || order.paymentNo);
-                        if (payNo && payNo !== "-" && !paymentNos.includes(payNo)) {
-                            paymentNos.push(payNo);
+                        // Map actual purchase invoice (PS/...) from payment match or prefix conversion
+                        let resolvedPurInv = pMatch?.invoice_no ? cleanStr(pMatch.invoice_no) : "";
+                        if (!resolvedPurInv || resolvedPurInv === "-") {
+                            if (/^ps\//i.test(invNo)) resolvedPurInv = invNo;
+                            else if (/^mia\//i.test(invNo)) resolvedPurInv = invNo.replace(/^mia\//i, "PS/");
+                            else if (/^gi\//i.test(invNo)) resolvedPurInv = invNo.replace(/^gi\//i, "PS/");
+                            else if (/^oa\//i.test(invNo)) resolvedPurInv = invNo.replace(/^oa\//i, "CR/");
+                            else if (!/^(cr|pa)\//i.test(invNo)) resolvedPurInv = invNo;
+                        }
+                        if (resolvedPurInv && resolvedPurInv !== "-" && !inwardJous.includes(resolvedPurInv) && !purInvoiceList.includes(resolvedPurInv)) {
+                            purInvoiceList.push(resolvedPurInv);
                         }
 
                         const numPaid = parseNum(effectivePaid);
@@ -1525,14 +1539,17 @@ export const buildPurchaseDeliveryDataset = (
                         ? `${inwardCount} Inwards`
                         : (inwardJous[0] || (inwardCount === 1 ? "1 Inward" : "-"));
 
-                    // Show Payment Invoice no column data in Pur Inv no column
-                    const actualPurInvNos = paymentNos.length > 0 ? paymentNos : (order.paymentNo && order.paymentNo !== "-" ? [order.paymentNo] : []);
+                    // Real Purchase Invoices collected from purInvoiceList or order.purInvNo
+                    const fallbackCandidateInvoices = invoiceNos.filter(invN => !inwardJous.includes(invN) && !/^(cr|pa)\//i.test(invN));
+                    const actualPurInvNos = purInvoiceList.length > 0
+                        ? purInvoiceList.filter(p => !inwardJous.includes(p))
+                        : (order.purInvNo && order.purInvNo !== "-" && !inwardJous.includes(order.purInvNo) ? [order.purInvNo] : (fallbackCandidateInvoices.length > 0 ? fallbackCandidateInvoices : []));
                     const invoiceCount = actualPurInvNos.length;
                     const purInvDisplay = invoiceCount > 1
                         ? `${invoiceCount} Invoices`
                         : (actualPurInvNos[0] || "-");
 
-                    // Make the Payment Invoice no column empty as of now
+                    // User requested Payment inv to be empty as of now since payment datas are not given yet
                     const paymentDisplay = "-";
 
                     const batchDisplay = batchCount > 1
@@ -1558,6 +1575,8 @@ export const buildPurchaseDeliveryDataset = (
                     // Pre-format Inward arrivals for Tab 2
                     const inwardDetailsFormatted = arrivedInvoices.map((inv, idx) => ({
                         sNo: idx + 1,
+                        tripId: (inv as any).tripId || (inv as any).Trip_Id,
+                        Trip_Id: (inv as any).tripId || (inv as any).Trip_Id,
                         location: inv.batchLocation || "Smt Mill",
                         arrivalDate: inv.invoiceDate || order.orderDate,
                         itemName: cleanItemName(inv.itemName),
@@ -1592,7 +1611,9 @@ export const buildPurchaseDeliveryDataset = (
                             branch: "SM AGRO",
                             entryDate: matchingInv?.invoiceDate || order.orderDate,
                             billDate: matchingInv?.invoiceDate || order.orderDate,
+                            vouNo: invNo,
                             refNumber: invNo,
+                            refNo: invNo,
                             gstType: "Not Taxable",
                             taxType: "GST",
                             stockItemLedger: "GST OS Purchase Exempted",
@@ -1672,6 +1693,8 @@ export const buildPurchaseDeliveryDataset = (
                         allInwardJous: inwardJous,
                         allPurInvNos: actualPurInvNos,
                         allPaymentNos: [],
+                        tripId: tripIds[0] || (order as any).tripId || (order as any).Trip_Id,
+                        allTripIds: tripIds,
 
                         poItems: poItemsFormatted,
                         inwardDetails: inwardDetailsFormatted,
@@ -1789,8 +1812,9 @@ export const buildPurchaseDeliveryDataset = (
         const purOrderNo = first.purOrderNo;
 
         let totalKg = 0;
+        const inwardJous: string[] = [];
+        const purInvoices: string[] = [];
         const batches: string[] = [];
-        const invoiceNos: string[] = [];
         const paymentInvoiceNos: string[] = [];
         let totalPaidAmt = 0;
         let isPaymentDone = false;
@@ -1800,10 +1824,44 @@ export const buildPurchaseDeliveryDataset = (
             if (r.type === "inv") {
                 const inv = r.data;
                 retailerName = cleanStr((inv as any).Retailer_Name || retailerName);
-                const purInvNo = cleanStr((inv as any).invoice_no || (inv as any).Invoice_No);
-                if (purInvNo && purInvNo !== "-" && !invoiceNos.includes(purInvNo)) {
-                    invoiceNos.push(purInvNo);
+                const invNo = cleanStr((inv as any).invoice_no || (inv as any).Invoice_No);
+                const refNo = cleanStr((inv as any).Ref_Po_Inv_No || (inv as any).ref_po_inv_no);
+
+                // Differentiate Inward Journal vs Purchase Invoice:
+                // Inward journal prefixes: CR/, PA/, MIA/, GI/, GIA/, OA/
+                const isInwardJournal = /^(mia|gi|gia|oa|pa|cr)\//i.test(invNo);
+                const isPurInvoice = /^ps\//i.test(invNo);
+
+                if (isInwardJournal) {
+                    if (invNo && invNo !== "-" && !inwardJous.includes(invNo)) {
+                        inwardJous.push(invNo);
+                    }
+                    if (refNo && /^ps\//i.test(refNo) && !purInvoices.includes(refNo)) {
+                        purInvoices.push(refNo);
+                    }
+                } else if (isPurInvoice) {
+                    if (invNo && invNo !== "-" && !purInvoices.includes(invNo)) {
+                        purInvoices.push(invNo);
+                    }
+                    if (refNo && /^(mia|gi|gia|oa|pa|cr)\//i.test(refNo) && !inwardJous.includes(refNo)) {
+                        inwardJous.push(refNo);
+                    }
+                } else {
+                    const vName = String((inv as any).voucher_name || "").toLowerCase();
+                    if (vName.includes("return") || vName.includes("journal") || vName.includes("adjustment") || vName.includes("com,line") || vName.includes("_pur_") || vName.includes("pur_ag")) {
+                        if (invNo && invNo !== "-" && !inwardJous.includes(invNo)) {
+                            inwardJous.push(invNo);
+                        }
+                    } else {
+                        // Only add to purInvoices if it does NOT look like an inward journal
+                        if (invNo && invNo !== "-" && !/^(mia|gi|gia|oa|pa|cr)\//i.test(invNo) && !purInvoices.includes(invNo)) {
+                            purInvoices.push(invNo);
+                        } else if (invNo && invNo !== "-" && !inwardJous.includes(invNo)) {
+                            inwardJous.push(invNo);
+                        }
+                    }
                 }
+
                 const b = cleanStr((inv as any).Batch || (inv as any).batch_no || (inv as any).Batch_No);
                 if (b && b !== "-" && !batches.includes(b)) {
                     batches.push(b);
@@ -1818,11 +1876,14 @@ export const buildPurchaseDeliveryDataset = (
                 );
                 totalKg += qty;
 
-                const matchedPay = purInvNo ? paymentsMap?.get(purInvNo.toLowerCase()) : undefined;
+                const matchedPay = invNo ? paymentsMap?.get(invNo.toLowerCase()) : undefined;
                 if (matchedPay) {
                     const pInv = cleanStr(matchedPay.invoice_no);
                     if (pInv && pInv !== "-" && !paymentInvoiceNos.includes(pInv)) {
                         paymentInvoiceNos.push(pInv);
+                        if (!/^(mia|gi|gia|oa|pa|cr)\//i.test(pInv) && !purInvoices.includes(pInv)) {
+                            purInvoices.push(pInv);
+                        }
                     }
                     totalPaidAmt += parseNum(matchedPay.Debit_Amt);
                     if (parseNum(matchedPay.Debit_Amt) > 0 && parseNum(matchedPay.Bal_Amount) <= 0) {
@@ -1849,18 +1910,38 @@ export const buildPurchaseDeliveryDataset = (
                     const pInv = cleanStr(poMatchedPay.invoice_no);
                     if (pInv && pInv !== "-" && !paymentInvoiceNos.includes(pInv)) {
                         paymentInvoiceNos.push(pInv);
+                        if (!/^(mia|gi|gia|oa|pa|cr)\//i.test(pInv) && !purInvoices.includes(pInv)) {
+                            purInvoices.push(pInv);
+                        }
                     }
                 }
             }
         });
 
-        const invoiceCount = paymentInvoiceNos.length;
+        // Ensure inwardJous and purInvoices are mutually exclusive (never duplicate each other)
+        // Inward journals must never be in purInvoices
+        const cleanPurInvoices = purInvoices.filter((pi) => pi && !/^(mia|gi|gia|oa|pa|cr)\//i.test(pi));
+        const filteredInwards = inwardJous.filter((ij) => !cleanPurInvoices.includes(ij));
+        const filteredPurInvoices = cleanPurInvoices.filter((pi) => !filteredInwards.includes(pi));
+
+        const invoiceCount = filteredPurInvoices.length;
+        const paymentCount = 0;
         const batchCount = batches.length;
-        const inwardCount = invoiceNos.length > 0 ? invoiceNos.length : 1;
+        const inwardCount = filteredInwards.length;
+
+        const inwardJouNo = inwardCount > 1
+            ? `${inwardCount} Inwards`
+            : (filteredInwards[0] || "-");
+
+        const purInvNo = invoiceCount > 1
+            ? `${invoiceCount} Invoices`
+            : (filteredPurInvoices[0] || "-");
 
         records.push({
             id: `pd-fallback-${sNoCounter}`,
             sNo: sNoCounter++,
+            transId: cleanStr((first.data as any).Trans_Id || (first.data as any).trans_id || (first.data as any).OrderId || ""),
+            OrderId: (first.data as any).OrderId || (first.data as any).Trans_Id,
             stockGroup: resolveGroup(first.data, rawProduct, (first.data as any).Product_Id),
             inwardItem: cleanItemName(rawProduct),
             batch: batchCount > 1 ? `${batchCount} Batches` : (batches[0] || "-"),
@@ -1868,8 +1949,8 @@ export const buildPurchaseDeliveryDataset = (
             tonnageKg: totalKg,
             inwardBatchWithItemName: `${cleanItemName(rawProduct)} (${formatKgQuantity(totalKg)})`,
             purOrderNo,
-            inwardJouNo: inwardCount > 1 ? `${inwardCount} Inwards` : (invoiceNos[0] || "1 Inward"),
-            purInvNo: invoiceCount > 1 ? `${invoiceCount} Invoices` : (paymentInvoiceNos[0] || "-"),
+            inwardJouNo,
+            purInvNo,
             paymentNo: "-",
             paymentAmt: totalPaidAmt > 0 ? totalPaidAmt : "",
             status: isPaymentDone ? "COMPLETED" : "NOT COMPLETED",
@@ -1878,27 +1959,27 @@ export const buildPurchaseDeliveryDataset = (
             retailerName: retailerName || "Party As Recorded",
             inwardCount,
             invoiceCount,
-            paymentCount: 0,
+            paymentCount,
             batchCount,
             allBatches: batches,
-            allInwardJous: invoiceNos,
-            allPurInvNos: paymentInvoiceNos,
+            allInwardJous: filteredInwards,
+            allPurInvNos: filteredPurInvoices,
             allPaymentNos: [],
         });
     });
 
-    // Link poItems, inwardDetails, invoiceDetails across all records of the same purOrderNo in fallback
+    // Link poItems, inwardDetails, invoiceDetails across records ONLY for real Purchase Orders (e.g. PO_1_2026_...)
+    // Never group journal vouchers (e.g. Online_PUR_SM) together across distinct records
     const fallbackPoItemsMap = new Map<string, any[]>();
     const fallbackInwardMap = new Map<string, any[]>();
     const fallbackInvoiceMap = new Map<string, any[]>();
 
     records.forEach((r) => {
-        const k = cleanStr(r.purOrderNo).toLowerCase();
-        if (!k || k === "-" || k === "po-unknown") return;
+        const isRealPo = /^po[_-]?\d/i.test(cleanStr(r.purOrderNo));
+        const k = isRealPo ? cleanStr(r.purOrderNo).toLowerCase() : "";
 
-        if (!fallbackPoItemsMap.has(k)) fallbackPoItemsMap.set(k, []);
-        fallbackPoItemsMap.get(k)!.push({
-            sNo: fallbackPoItemsMap.get(k)!.length + 1,
+        const singlePoItem = {
+            sNo: 1,
             itemName: r.inwardItem,
             orderedQty: r.tonnageKg || 0,
             tonnage: r.tonnage || "-",
@@ -1907,11 +1988,10 @@ export const buildPurchaseDeliveryDataset = (
             unit: "Bags",
             discount: "-",
             qualityCondition: "Standard",
-        });
+        };
 
-        if (!fallbackInwardMap.has(k)) fallbackInwardMap.set(k, []);
-        fallbackInwardMap.get(k)!.push({
-            sNo: fallbackInwardMap.get(k)!.length + 1,
+        const singleInwardDetail = {
+            sNo: 1,
             location: "Smt Mill",
             arrivalDate: r.orderDate || dayjs().format("YYYY-MM-DD"),
             itemName: r.inwardItem,
@@ -1933,17 +2013,19 @@ export const buildPurchaseDeliveryDataset = (
             billType: "OTHER GODOWN",
             voucherType: "ON_M_OUTWARDS",
             narration: `SMT MILL RTO GODOWN (TN 64 W 6487) - ${r.purOrderNo}`,
-        });
+            transId: r.transId,
+            Trans_Id: r.transId,
+        };
 
-        if (!fallbackInvoiceMap.has(k)) fallbackInvoiceMap.set(k, []);
-        fallbackInvoiceMap.get(k)!.push({
-            sNo: fallbackInvoiceMap.get(k)!.length + 1,
+        const singleInvoiceDetail = {
+            sNo: 1,
             vendor: r.retailerName || "Party As Recorded",
             voucherType: "Purchase Invoice",
             branch: "SM AGRO",
             entryDate: r.orderDate || dayjs().format("YYYY-MM-DD"),
             billDate: r.orderDate || dayjs().format("YYYY-MM-DD"),
-            refNumber: r.purInvNo || `INV-${r.purOrderNo}`,
+            refNumber: (r.purInvNo && r.purInvNo !== "-" && !r.purInvNo.includes("Invoices") && !/^(mia|gi|gia|oa|pa|cr)\//i.test(r.purInvNo)) ? r.purInvNo : "-",
+            vouNo: (r.purInvNo && r.purInvNo !== "-" && !r.purInvNo.includes("Invoices") && !/^(mia|gi|gia|oa|pa|cr)\//i.test(r.purInvNo)) ? r.purInvNo : "-",
             gstType: "Not Taxable",
             taxType: "GST",
             stockItemLedger: "GST OS Purchase Exempted",
@@ -1959,19 +2041,40 @@ export const buildPurchaseDeliveryDataset = (
             amount: r.paymentAmt || "As recorded",
             godown: "Main Godown",
             batch: r.batch || "-",
-        });
+            transId: r.transId,
+            Trans_Id: r.transId,
+        };
+
+        if (k) {
+            if (!fallbackPoItemsMap.has(k)) fallbackPoItemsMap.set(k, []);
+            fallbackPoItemsMap.get(k)!.push({ ...singlePoItem, sNo: fallbackPoItemsMap.get(k)!.length + 1 });
+
+            if (!fallbackInwardMap.has(k)) fallbackInwardMap.set(k, []);
+            fallbackInwardMap.get(k)!.push({ ...singleInwardDetail, sNo: fallbackInwardMap.get(k)!.length + 1 });
+
+            if (!fallbackInvoiceMap.has(k)) fallbackInvoiceMap.set(k, []);
+            fallbackInvoiceMap.get(k)!.push({ ...singleInvoiceDetail, sNo: fallbackInvoiceMap.get(k)!.length + 1 });
+        } else {
+            // For non-PO records (journals, online purchases), do NOT cross-contaminate rows!
+            r.poItems = [singlePoItem];
+            r.inwardDetails = [singleInwardDetail];
+            r.invoiceDetails = [singleInvoiceDetail];
+        }
     });
 
     records.forEach((r) => {
-        const k = cleanStr(r.purOrderNo).toLowerCase();
-        if (fallbackPoItemsMap.has(k)) {
-            r.poItems = fallbackPoItemsMap.get(k);
-        }
-        if (fallbackInwardMap.has(k)) {
-            r.inwardDetails = fallbackInwardMap.get(k);
-        }
-        if (fallbackInvoiceMap.has(k)) {
-            r.invoiceDetails = fallbackInvoiceMap.get(k);
+        const isRealPo = /^po[_-]?\d/i.test(cleanStr(r.purOrderNo));
+        const k = isRealPo ? cleanStr(r.purOrderNo).toLowerCase() : "";
+        if (k) {
+            if (fallbackPoItemsMap.has(k)) {
+                r.poItems = fallbackPoItemsMap.get(k);
+            }
+            if (fallbackInwardMap.has(k)) {
+                r.inwardDetails = fallbackInwardMap.get(k);
+            }
+            if (fallbackInvoiceMap.has(k)) {
+                r.invoiceDetails = fallbackInvoiceMap.get(k);
+            }
         }
     });
 

@@ -53,6 +53,7 @@ const ABSTRACT_DEFAULT_KEYS = [
     "Retailer_Name",
     "itemCount",
     "Total_Invoice_value",
+    "OrderStatus",
 ];
 
 const EXPANDED_DEFAULT_KEYS = [
@@ -70,6 +71,7 @@ const NUMERIC_KEYS = [
     "Rate",
     "Amount",
     "Total_Invoice_value",
+    "itemCount",
 ];
 
 /* ================= TYPES ================= */
@@ -82,6 +84,25 @@ type ColumnConfig = {
     order: number;
 };
 
+const ABSTRACT_INITIAL_COLUMNS: ColumnConfig[] = [
+    { key: "invoice_no", label: "Invoice No", enabled: true, order: 0 },
+    { key: "Ledger_Date", label: "Ledger Date", enabled: true, order: 1 },
+    { key: "Retailer_Name", label: "Retailer Name", enabled: true, order: 2 },
+    { key: "itemCount", label: "Item Count", enabled: true, isNumeric: true, order: 3 },
+    { key: "Total_Invoice_value", label: "Total Invoice Value", enabled: true, isNumeric: true, order: 4 },
+    { key: "OrderStatus", label: "Order Status", enabled: true, order: 5 },
+];
+
+const EXPANDED_INITIAL_COLUMNS: ColumnConfig[] = [
+    { key: "invoice_no", label: "Invoice No", enabled: true, order: 0 },
+    { key: "Ledger_Date", label: "Ledger Date", enabled: true, order: 1 },
+    { key: "Product_Name", label: "Product Name", enabled: true, order: 2 },
+    { key: "Bill_Qty", label: "Bill Qty", enabled: true, isNumeric: true, order: 3 },
+    { key: "Rate", label: "Rate", enabled: true, isNumeric: true, order: 4 },
+    { key: "Amount", label: "Amount", enabled: true, isNumeric: true, order: 5 },
+    { key: "Retailer_Name", label: "Retailer Name", enabled: true, order: 6 },
+];
+
 type FiltersMap = {
     Date: { from: string; to: string };
     columnFilters: Record<string, string[] | undefined>;
@@ -90,20 +111,10 @@ type FiltersMap = {
 /* ================= HELPERS ================= */
 
 const buildAbstractData = (rows: any[]) => {
-    const map: Record<string, any> = {};
-
-    rows.forEach((row) => {
-        if (!map[row.invoice_no]) {
-            map[row.invoice_no] = {
-                ...row,
-                itemCount: 0,
-            };
-        }
-
-        map[row.invoice_no].itemCount += 1;
-    });
-
-    return Object.values(map);
+    return rows.map((row) => ({
+        ...row,
+        itemCount: row.Item_Count ?? row.itemCount ?? 1,
+    }));
 };
 
 const buildColumnsFromApi = (
@@ -189,8 +200,8 @@ const PurchaseOrder: React.FC = () => {
         toggleMode === "Expanded" ? expandedRows : abstractRows;
 
     /* ===== COLUMNS ===== */
-    const [abstractColumns, setAbstractColumns] = useState<ColumnConfig[]>([]);
-    const [expandedColumns, setExpandedColumns] = useState<ColumnConfig[]>([]);
+    const [abstractColumns, setAbstractColumns] = useState<ColumnConfig[]>(ABSTRACT_INITIAL_COLUMNS);
+    const [expandedColumns, setExpandedColumns] = useState<ColumnConfig[]>(EXPANDED_INITIAL_COLUMNS);
     const columns =
         toggleMode === "Expanded"
             ? expandedColumns
@@ -308,13 +319,11 @@ const PurchaseOrder: React.FC = () => {
                     setExpandedRows(apiRows);
 
                     setExpandedColumns((prev) => {
-                        // already modified by user → keep it
-                        if (prev.length > 0) return prev;
-
-                        return applyTemplateColumns(
-                            freshColumns,
-                            templateConfig?.expanded
-                        );
+                        const baseCols = freshColumns.length > 0 ? freshColumns : prev;
+                        if (templateConfig?.expanded) {
+                            return applyTemplateColumns(baseCols, templateConfig.expanded);
+                        }
+                        return baseCols.length > 0 ? baseCols : EXPANDED_INITIAL_COLUMNS;
                     });
                 }
                 else {
@@ -323,13 +332,11 @@ const PurchaseOrder: React.FC = () => {
                     setAbstractRows(abstractData);
 
                     setAbstractColumns((prev) => {
-                        // already modified by user → keep it
-                        if (prev.length > 0) return prev;
-
-                        return applyTemplateColumns(
-                            freshColumns,
-                            templateConfig?.abstract
-                        );
+                        const baseCols = freshColumns.length > 0 ? freshColumns : prev;
+                        if (templateConfig?.abstract) {
+                            return applyTemplateColumns(baseCols, templateConfig.abstract);
+                        }
+                        return baseCols.length > 0 ? baseCols : ABSTRACT_INITIAL_COLUMNS;
                     });
                 }
 
@@ -1023,8 +1030,8 @@ const PurchaseOrder: React.FC = () => {
                         setAbstractExpandedKeys([]);
                         setExpandedExpandedKeys([]);
 
-                        setAbstractColumns([]);
-                        setExpandedColumns([]);
+                        setAbstractColumns(ABSTRACT_INITIAL_COLUMNS);
+                        setExpandedColumns(EXPANDED_INITIAL_COLUMNS);
                         setPage(1);
 
                         return;

@@ -50,6 +50,7 @@ import OverallStaffReport from "../reports/StaffBased/overallStaffReport";
 import SalesStockGodown from "../reports/Stock/SalesStockGodown";
 import UserRights from "../settings/UserRights";
 import OverallItemwise from "../reports/Stock/OverallItemwise";
+import BatchwiseStockReport from "../reports/Stock/BatchwiseStockReport";
 import PurchaseDelivery from "../reports/Purchase/PurchaseDelivery";
 import PurchasePaymentReport from "../reports/Purchase/PurchasePaymentReport";
 import PurchaseItemPaymentReport from "../reports/Purchase/PurchaseItemPaymentReport";
@@ -726,6 +727,17 @@ const AppRouting: React.FC<AppRoutingProps> = ({
             <RequireAuth>
               <AppLayout fullWidth>
                 <AccountingOutstandingReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/batchwisestock"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <BatchwiseStockReport />
               </AppLayout>
             </RequireAuth>
           }

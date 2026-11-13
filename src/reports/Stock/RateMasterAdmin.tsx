@@ -152,7 +152,15 @@ const SortableColumnRow = ({ column, onToggle, hasActiveFilter }: SortableColumn
 
 /* ================= CONSTANTS ================= */
 
-const NUMERIC_KEYS = ["Rate", "Min_Rate", "Max_Rate", "COGS", "GP_Percentage_COGS"];
+const NUMERIC_KEYS = [
+    "Rate",
+    "Min_Rate",
+    "Max_Rate",
+    "COGS",
+    "GP_Percentage_COGS",
+    "Margin",
+    "Margin_Percentage"
+];
 
 const DEFAULT_KEYS = [
     "Product_Name",
@@ -170,6 +178,8 @@ const ALL_COLUMNS_METADATA: Omit<ColumnConfig, "order" | "enabled">[] = [
     { key: "Max_Rate", label: "Max Rate", isNumeric: true },
     { key: "COGS", label: "COGS", isNumeric: true },
     { key: "GP_Percentage_COGS", label: "COGS %", isNumeric: true },
+    { key: "Margin", label: "Margin", isNumeric: true },
+    { key: "Margin_Percentage", label: "%", isNumeric: true },
     { key: "Product_Id", label: "Product Id", isNumeric: false },
     { key: "Brand", label: "Brand", isNumeric: false },
     { key: "Group_ST", label: "Group ST", isNumeric: false },
@@ -179,7 +189,7 @@ const ALL_COLUMNS_METADATA: Omit<ColumnConfig, "order" | "enabled">[] = [
     { key: "POS_Item_Name", label: "POS Item Name", isNumeric: false }
 ];
 
-const CURRENCY_KEYS = ["Rate", "Min_Rate", "Max_Rate", "COGS"];
+const CURRENCY_KEYS = ["Rate", "Min_Rate", "Max_Rate", "COGS", "Margin"];
 
 const formatINR = (value: number) =>
     new Intl.NumberFormat("en-IN", {
@@ -249,7 +259,18 @@ const RateMasterAdminReport: React.FC = () => {
                 const res = await RateMasterAdminService.getReport({ Todate: toDate });
 
                 if (res.data.success) {
-                    const data1 = res.data.data.Data1 || [];
+                    const data1 = (res.data.data.Data1 || []).map((row: any) => {
+                        const listRate = Number(row.Rate ?? 0);
+                        const minRate = Number(row.Min_Rate ?? 0);
+                        const margin = listRate - minRate;
+                        const marginPercent = listRate !== 0 ? (margin / listRate) * 100 : 0;
+
+                        return {
+                            ...row,
+                            Margin: margin,
+                            Margin_Percentage: Number(marginPercent.toFixed(2)),
+                        };
+                    });
                     const data2 = res.data.data.Data2 || [];
 
                     setRawData1(data1);
@@ -285,12 +306,12 @@ const RateMasterAdminReport: React.FC = () => {
                 const templateCols = settings.columns || [];
 
                 if (templateCols.length > 0) {
-                    const loadedCols = columns.map(col => {
+                    const loadedCols = ALL_COLUMNS_METADATA.map((col, index) => {
                         const tc = templateCols.find((x: any) => x.key === col.key);
                         return {
                             ...col,
                             enabled: tc ? Boolean(tc.enabled) : false,
-                            order: tc?.order !== undefined ? Number(tc.order) : col.order,
+                            order: tc?.order !== undefined ? Number(tc.order) : index,
                             groupBy: tc?.groupBy !== undefined ? Number(tc.groupBy) : 0,
                         };
                     });
@@ -586,7 +607,7 @@ const RateMasterAdminReport: React.FC = () => {
             (s: number, r: any) => s + Number(r[columnKey] || 0),
             0
         );
-        if (columnKey === "GP_Percentage_COGS") {
+        if (columnKey === "GP_Percentage_COGS" || columnKey === "Margin_Percentage") {
             return Number((sum / sortedRows.length).toFixed(2));
         }
         return Number(sum.toFixed(2));
@@ -692,7 +713,7 @@ const RateMasterAdminReport: React.FC = () => {
                                 (s: number, r: any) => s + Number(r[c.key] || 0),
                                 0
                             );
-                            item[c.label] = c.key === "GP_Percentage_COGS"
+                            item[c.label] = c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage"
                                 ? (sum / row.__rows.length).toFixed(2) + "%"
                                 : sum;
                         } else {
@@ -738,7 +759,7 @@ const RateMasterAdminReport: React.FC = () => {
                                 (s: number, r: any) => s + Number(r[c.key] || 0),
                                 0
                             );
-                            return c.key === "GP_Percentage_COGS"
+                            return (c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage")
                                 ? (sum / row.__rows.length).toFixed(2) + "%"
                                 : String(sum);
                         }
@@ -920,9 +941,11 @@ const RateMasterAdminReport: React.FC = () => {
                                     {enabledColumns.map((c) => (
                                         <TableCell key={c.key} align={c.isNumeric ? "right" : "left"} sx={{ fontWeight: 700, bgcolor: "#f3f4f6" }}>
                                             {c.isNumeric
-                                                ? CURRENCY_KEYS.includes(c.key)
-                                                    ? formatINR(getTotal(c.key))
-                                                    : getTotal(c.key)
+                                                ? c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage"
+                                                    ? `${getTotal(c.key)}%`
+                                                    : CURRENCY_KEYS.includes(c.key)
+                                                        ? formatINR(getTotal(c.key))
+                                                        : getTotal(c.key)
                                                 : ""}
                                         </TableCell>
                                     ))}
@@ -977,7 +1000,7 @@ const RateMasterAdminReport: React.FC = () => {
 
                                                             return (
                                                                 <TableCell key={c.key} align="right" sx={{ borderRight: "1px solid #cbd5e1" }}>
-                                                                    {c.key === "GP_Percentage_COGS"
+                                                                    {c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage"
                                                                         ? (sum / row.__rows.length).toFixed(2) + "%"
                                                                         : CURRENCY_KEYS.includes(c.key)
                                                                             ? formatINR(sum)
@@ -1002,7 +1025,7 @@ const RateMasterAdminReport: React.FC = () => {
                                                     const align = c.isNumeric ? "right" : "left";
                                                     return (
                                                         <TableCell key={c.key} align={align} sx={{ borderRight: "1px solid #cbd5e1", fontSize: "0.7rem", py: 0.8 }}>
-                                                            {c.key === "GP_Percentage_COGS"
+                                                            {c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage"
                                                                 ? (Number(row[c.key]) || 0).toFixed(2) + "%"
                                                                 : CURRENCY_KEYS.includes(c.key)
                                                                     ? formatINR(Number(row[c.key]) || 0)

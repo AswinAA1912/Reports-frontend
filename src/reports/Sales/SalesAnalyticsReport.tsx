@@ -85,6 +85,38 @@ const NUMERIC_KEYS = [
     "Tot_Amo",
 ];
 
+const KNOWN_TEXT_KEYS = [
+    "ledger_name",
+    "item_name",
+    "item_name_modified",
+    "pos_item_name",
+    "product_id",
+    "party_location",
+    "party_group",
+    "ref_brokers",
+    "ref_owners",
+    "brand",
+    "group_st",
+    "grade_item_group",
+    "created_on",
+    "voucher_name",
+    "retailer_name",
+    "remarks",
+    "narration",
+    "parent",
+    "category",
+    "state",
+    "country",
+    "email",
+    "mobile",
+    "phone",
+    "gst",
+    "gstin",
+    "address",
+    "alias",
+    "description"
+];
+
 const formatCreatedOn = (dateString: any): string => {
   if (!dateString) return "-";
   if (typeof dateString === "string" && (dateString.includes("a.m.") || dateString.includes("p.m."))) {
@@ -163,16 +195,28 @@ const buildColumnsFromApi = (
             ? matched.Alias_Name.trim() 
             : key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 
+        const isExplicitText = KNOWN_TEXT_KEYS.includes(normalizeKey(key));
+        const isExplicitNumeric = NUMERIC_KEYS.some(n => normalizeKey(n) === normalizeKey(key));
+
+        // Strict dynamic check: non-empty values exist and ALL non-empty values are valid numbers
+        const nonNullValues = rows
+            .map(r => r[key])
+            .filter(v => v !== null && v !== undefined && String(v).trim() !== "");
+        const isDynamicallyNumeric =
+            nonNullValues.length > 0 &&
+            nonNullValues.every(v => {
+                if (typeof v === "number") return !isNaN(v);
+                const s = String(v).trim();
+                return !isNaN(Number(s)) && !isNaN(parseFloat(s));
+            });
+
+        const isNumeric = !isExplicitText && (isExplicitNumeric || isDynamicallyNumeric);
+
         return {
             key,
             label,
             enabled: defaults.includes(key),
-
-            // ✅ FIX HERE
-            isNumeric:
-                NUMERIC_KEYS.some(n => normalizeKey(n) === normalizeKey(key)) ||
-                rows.some(r => !isNaN(Number(r[key]))),
-
+            isNumeric,
             order: index,
         };
     });
@@ -466,9 +510,13 @@ const SalesReport: React.FC = () => {
                 (b) => b.key.toLowerCase() === col.key.toLowerCase()
             );
 
+            const isExplicitText = KNOWN_TEXT_KEYS.includes(normalizeKey(col.key));
+            const isExplicitNumeric = NUMERIC_KEYS.some(n => normalizeKey(n) === normalizeKey(col.key));
+            const isNum = !isExplicitText && (base?.isNumeric ?? isExplicitNumeric);
+
             return {
                 ...col,
-                isNumeric: base?.isNumeric,
+                isNumeric: isNum,
             };
         });
 

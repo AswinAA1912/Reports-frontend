@@ -768,7 +768,10 @@ const ExpensesReport = () => {
 
             <AppLayout fullWidth>
                 <Box p={1} sx={{
-                    overflow: "hidden",
+                    flex: 1,
+                    minHeight: 0,
+                    overflowY: "auto",
+                    overflowX: "hidden",
                 }}>
 
                     {data && section && (
@@ -970,13 +973,14 @@ const ExpensesReport = () => {
                                                                 maxHeight: 300,
                                                                 overflowX: "auto",
                                                                 overflowY: "auto",
-                                                                width: "100%",
+                                                                width: "calc(100% - 48px)",
                                                             }}
                                                         >
                                                             <Table
                                                                 size="small"
                                                                 sx={{
-                                                                    minWidth: (enabledCols.length + 1) * 150, // +1 for S.NO
+                                                                    minWidth: Math.max((enabledCols.length + 1) * 140, 800),
+                                                                    width: "max-content",
                                                                     tableLayout: "auto",
                                                                 }}
                                                             >
@@ -998,8 +1002,7 @@ const ExpensesReport = () => {
                                                                                 fontSize: "12px",
                                                                                 borderBottom: "2px solid #cbd5e1",
                                                                                 textAlign: "center",
-                                                                                minWidth: 80,
-                                                                                width: 80,
+                                                                                width: 50,
                                                                                 background: "#f8fafc",
                                                                             }}
                                                                         >
@@ -1014,37 +1017,12 @@ const ExpensesReport = () => {
                                                                                     textTransform: "uppercase",
                                                                                     fontSize: "12px",
                                                                                     borderBottom: "2px solid #cbd5e1",
-
                                                                                     textAlign:
                                                                                         ["debit_amount", "credit_amount"].includes(col.key)
                                                                                             ? "right"
                                                                                             : "left",
-
-                                                                                    minWidth:
-                                                                                        ["debit_amount", "credit_amount"].includes(col.key)
-                                                                                            ? 120
-                                                                                            : col.key === "transaction_type"
-                                                                                                ? 140
-                                                                                                : col.key === "remarks"
-                                                                                                    ? 300
-                                                                                                    : 150,
-
-                                                                                    maxWidth:
-                                                                                        col.key === "remarks"
-                                                                                            ? 300
-                                                                                            : "none",
-
-                                                                                    whiteSpace:
-                                                                                        col.key === "remarks"
-                                                                                            ? "normal"
-                                                                                            : "nowrap",
-
-                                                                                    wordBreak:
-                                                                                        col.key === "remarks"
-                                                                                            ? "break-word"
-                                                                                            : "normal",
-
                                                                                     background: "#f8fafc",
+                                                                                    whiteSpace: "nowrap",
                                                                                 }}
                                                                             >
                                                                                 {col.label}
@@ -1064,8 +1042,7 @@ const ExpensesReport = () => {
                                                                             <TableCell
                                                                                 sx={{
                                                                                     textAlign: "center",
-                                                                                    minWidth: 80,
-                                                                                    width: 80,
+                                                                                    width: 50,
                                                                                 }}
                                                                             >
                                                                                 {index + 1}
@@ -1079,30 +1056,7 @@ const ExpensesReport = () => {
                                                                                             ["debit_amount", "credit_amount"].includes(col.key)
                                                                                                 ? "right"
                                                                                                 : "left",
-
-                                                                                        minWidth:
-                                                                                            ["debit_amount", "credit_amount"].includes(col.key)
-                                                                                                ? 180
-                                                                                                : col.key === "transaction_type"
-                                                                                                    ? 180
-                                                                                                    : col.key === "remarks"
-                                                                                                        ? 350
-                                                                                                        : 160,
-
-                                                                                        maxWidth:
-                                                                                            col.key === "remarks"
-                                                                                                ? 300
-                                                                                                : "none",
-
-                                                                                        whiteSpace:
-                                                                                            col.key === "remarks"
-                                                                                                ? "normal"
-                                                                                                : "nowrap",
-
-                                                                                        wordBreak:
-                                                                                            col.key === "remarks"
-                                                                                                ? "break-word"
-                                                                                                : "normal",
+                                                                                        whiteSpace: "nowrap",
                                                                                     }}
                                                                                 >
                                                                                     {col.key === "debit_amount"

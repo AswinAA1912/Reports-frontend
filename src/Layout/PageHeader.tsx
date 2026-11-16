@@ -21,7 +21,7 @@ import PowerSettingsNewIcon from "@mui/icons-material/PowerSettingsNew";
 import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
 import logo from "../assets/logo.png";
 import { SettingsService } from "../services/reportSettings.services";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth, Company } from "../auth/authContext";
 import { MenuService } from "../services/menus.service";
 import { UserRightsService } from "../services/userRights.service";
@@ -97,6 +97,13 @@ const PageHeader: React.FC<PageHeaderProps> = ({
 
   const isDevOrAdmin = useMemo(() => {
     return user ? (String(user.UserTypeId) === "0" || String(user.UserTypeId) === "1") : false;
+  }, [user]);
+
+  // Check if user is Developer (0), Administrator (1), or Management (2)
+  const canAccessSettingsAndTemplates = useMemo(() => {
+    if (!user) return false;
+    const typeId = String(user.UserTypeId);
+    return typeId === "0" || typeId === "1" || typeId === "2";
   }, [user]);
 
   const selectedPath = useMemo(() => {
@@ -363,11 +370,13 @@ const PageHeader: React.FC<PageHeaderProps> = ({
           >
             {!isAutoLogin && (
               <Box
-                onClick={() => navigate("/")}
+                component={Link}
+                to="/"
                 sx={{
                   display: "flex",
                   alignItems: "center",
                   cursor: "pointer",
+                  textDecoration: "none",
                 }}
               >
                 <img
@@ -376,6 +385,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
                   style={{
                     height: 28,
                     objectFit: "contain",
+                    display: "block",
                   }}
                 />
               </Box>
@@ -542,7 +552,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
           >
             {infoSlot}
 
-            {onQuickSave && (
+            {canAccessSettingsAndTemplates && onQuickSave && (
               <Tooltip title="Save Template">
                 <IconButton
                   size="small"
@@ -644,7 +654,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
               </>
             )}
 
-            {settingsSlot}
+            {canAccessSettingsAndTemplates && settingsSlot}
 
             {/* MOBILE COMPANY SWITCH */}
             {isMobile && user && companies && companies.length > 1 && (

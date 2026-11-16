@@ -16,7 +16,7 @@ import {
 import MenuIcon from "@mui/icons-material/Menu";
 import SearchIcon from "@mui/icons-material/Search";
 import LogoutIcon from "@mui/icons-material/Logout";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/authContext";
 import logo from "../assets/logo.png";
 
@@ -33,7 +33,6 @@ const Header: React.FC<HeaderProps> = ({
   showSearch = false,
   position = "static",
 }) => {
-  const navigate = useNavigate();
   const { logout, token, user, companies, switchCompany } = useAuth();
 
   const [companyAnchor, setCompanyAnchor] = useState<null | HTMLElement>(null);
@@ -90,11 +89,13 @@ const Header: React.FC<HeaderProps> = ({
 
         {/* Logo */}
         <Box
-          onClick={() => navigate("/")}
+          component={Link}
+          to="/"
           sx={{
             display: "flex",
             alignItems: "center",
             cursor: "pointer",
+            textDecoration: "none",
           }}
         >
           <img
@@ -103,6 +104,7 @@ const Header: React.FC<HeaderProps> = ({
             style={{
               height: 40,
               objectFit: "contain",
+              display: "block",
             }}
           />
         </Box>

@@ -538,8 +538,11 @@ const SalesReport: React.FC = () => {
             // ✅ COLUMN FILTERS
             for (const [key, values] of Object.entries(filters.columnFilters)) {
                 if (values === undefined) continue;
-                const rowValue = String(row[key] ?? "");
-                if (!values.some(v => v === rowValue)) return false;
+                const rowValue = String(row[key] ?? "").trim().toLowerCase();
+                const match = values.some(
+                    v => String(v).trim().toLowerCase() === rowValue
+                );
+                if (!match) return false;
             }
 
             // ✅ STOCK FILTER (existing)
@@ -797,15 +800,36 @@ const SalesReport: React.FC = () => {
     const filterOptions = useMemo(() => {
         if (!activeHeader) return [];
 
-        // 🚨 Apply ALL filters EXCEPT current column
-        const rowsForOptions = numFilteredAndSortedRows.filter(row => {
+        // Apply ALL filters EXCEPT current column to determine available options
+        const rowsForOptions = rawRows.filter(row => {
             for (const [key, values] of Object.entries(filters.columnFilters)) {
-                if (key === activeHeader) continue; // ✅ skip current column
+                if (key === activeHeader) continue; // skip current column
                 if (values === undefined) continue;
 
-                const rowValue = String(row[key] ?? "");
-                if (!values.includes(rowValue)) return false;
+                const rowValue = String(row[key] ?? "").trim().toLowerCase();
+                const match = values.some(
+                    v => String(v).trim().toLowerCase() === rowValue
+                );
+                if (!match) return false;
             }
+
+            // Stock filter
+            const y1 = Number(row.Y1) || 0;
+            const m6 = Number(row.M6) || 0;
+            const m2 = Number(row.M2) || 0;
+            const m3 = Number(row.M3) || 0;
+            const m9 = Number(row.M9) || 0;
+            const total = Number(row.Total_Qty) || 0;
+            const totAmo = Number(row["Tot_Amo"]) || 0;
+
+            const hasValue =
+                y1 !== 0 || m6 !== 0 || m2 !== 0 || m3 !== 0 || m9 !== 0 || total !== 0 || totAmo !== 0;
+
+            const isZero =
+                y1 === 0 && m6 === 0 && m2 === 0 && m3 === 0 && m9 === 0 && total === 0 && totAmo === 0;
+
+            if (stockFilter === "hasValues" && !hasValue) return false;
+            if (stockFilter === "zero" && !isZero) return false;
 
             return true;
         });
@@ -814,11 +838,11 @@ const SalesReport: React.FC = () => {
             new Set(
                 rowsForOptions
                     .map(r => r[activeHeader!])
-                    .filter(Boolean)
-                    .map(v => String(v))
+                    .filter(v => v !== null && v !== undefined && v !== "")
+                    .map(v => String(v).trim())
             )
-        );
-    }, [activeHeader, numFilteredAndSortedRows, filters]);
+        ).sort((a, b) => a.localeCompare(b));
+    }, [activeHeader, rawRows, filters.columnFilters, stockFilter]);
 
     const groupableColumns = useMemo(() => {
         return enabledColumns.map(c => ({

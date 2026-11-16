@@ -46,6 +46,7 @@ import SalesDeliveryReport from "../reports/Sales/salesDeliveryReport";
 import PurchaseReport from "../reports/Purchase/PurchaseReport";
 import RetailerLocations from "./RetailerLocations";
 import RecievablePayableReport from "../reports/Expenses/recievablePayableReport";
+import OutstandingManagementReport from "../reports/Expenses/OutstandingManagementReport";
 import OverallStaffReport from "../reports/StaffBased/overallStaffReport";
 import SalesStockGodown from "../reports/Stock/SalesStockGodown";
 import UserRights from "../settings/UserRights";
@@ -76,6 +77,7 @@ const URLSyncHandler: React.FC<{ setActiveCategory: (cat: string) => void }> = (
       "/salesreport": "Online Sales Report",
       "/uniteconomics": "Unit Economics Report",
       "/recievablePayable": "Receivable & Payable Report",
+      "/outstandingManagement": "Outstanding Management Report",
       "/purchasedelivery": "Purchase Delivery Funnel Report",
       "/purchaseDelivery": "Purchase Delivery Funnel Report",
       "/purchasepayment": "Purchase Payment Report",
@@ -456,6 +458,17 @@ const AppRouting: React.FC<AppRoutingProps> = ({
             <RequireAuth>
               <AppLayout fullWidth>
                 <RecievablePayableReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/outstandingManagement"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <OutstandingManagementReport />
               </AppLayout>
             </RequireAuth>
           }

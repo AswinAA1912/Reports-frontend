@@ -2,13 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import {
     Box, Table, TableBody, TableCell, TableContainer,
     TableHead, TableRow, Paper, IconButton, Typography,
-    Tooltip, Menu, Switch, CircularProgress, Button
+    Tooltip, Menu, Switch, CircularProgress, Button,
+    Dialog, DialogTitle, DialogContent, DialogActions,
+    RadioGroup, FormControlLabel, Radio
 } from "@mui/material";
 
 import SettingsIcon from "@mui/icons-material/Settings";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import TableChartIcon from "@mui/icons-material/TableChart";
 import { arrayMove } from "@dnd-kit/sortable";
 
 import {
@@ -29,7 +33,7 @@ import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 
 import dayjs from "dayjs";
 import { toast } from "react-toastify";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -59,7 +63,7 @@ const renderFormattedAmount = (v: number, textStyles?: any) => {
 
 /* ================= MAPPING ================= */
 
-const mapExpenseData = (
+export const mapExpenseData = (
     summary: any[],
     direct: any[],
     indirect: any[]
@@ -235,6 +239,10 @@ const ExpensesReport = () => {
         Date: { from: today, to: today },
     });
 
+    /* ================= EXPORT DIALOG STATE ================= */
+    const [exportFormat, setExportFormat] = useState<"excel" | "pdf" | null>(null);
+    const [exportTemplate, setExportTemplate] = useState<"normal" | "management">("management");
+
     const sensors = useSensors(useSensor(PointerSensor));
 
     /* ================= FETCH ================= */
@@ -379,9 +387,9 @@ const ExpensesReport = () => {
         });
     };
 
-    /* ================= EXPORT EXCEL ================= */
+    /* ================= EXPORT NORMAL EXCEL ================= */
 
-    const exportExcel = () => {
+    const exportNormalExcel = () => {
         try {
             if (!section) {
                 toast.error("No data available");
@@ -504,7 +512,7 @@ const ExpensesReport = () => {
 
             XLSX.writeFile(
                 wb,
-                `${activeType}_Expenses_Report.xlsx`
+                `${activeType}_Expenses_Report_Normal.xlsx`
             );
 
             toast.success("Excel Exported ✅");
@@ -515,11 +523,167 @@ const ExpensesReport = () => {
         }
     };
 
+    /* ================= EXPORT MANAGEMENT EXCEL ================= */
 
+    const exportManagementExcel = () => {
+        try {
+            if (!section) {
+                toast.error("No data available");
+                return;
+            }
 
-    /* ================= EXPORT PDF ================= */
+            const formatDisplayDate = (dStr: string) => {
+                if (!dStr) return "";
+                const d = dayjs(dStr);
+                return d.isValid() ? d.format("DD.MM.YYYY") : dStr;
+            };
 
-    const exportPDF = () => {
+            const dateHeader = filters.Date.from === filters.Date.to
+                ? formatDisplayDate(filters.Date.to)
+                : `${formatDisplayDate(filters.Date.from)} - ${formatDisplayDate(filters.Date.to)}`;
+
+            const borderAll = {
+                top: { style: "thin", color: { rgb: "000000" } },
+                bottom: { style: "thin", color: { rgb: "000000" } },
+                left: { style: "thin", color: { rgb: "000000" } },
+                right: { style: "thin", color: { rgb: "000000" } },
+            };
+
+            const headerStyle = {
+                font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "000000" } },
+                fill: { fgColor: { rgb: "FFFF00" } }, // Bright Yellow
+                alignment: { horizontal: "center", vertical: "center" },
+                border: borderAll,
+            };
+
+            const colHeaderStyle = {
+                font: { bold: true, sz: 10, name: "Calibri", color: { rgb: "000000" } },
+                fill: { fgColor: { rgb: "FFFFFF" } },
+                alignment: { horizontal: "center", vertical: "center" },
+                border: borderAll,
+            };
+
+            const groupStyle = {
+                font: { bold: true, sz: 10, name: "Calibri", color: { rgb: "000000" } },
+                alignment: { horizontal: "left", vertical: "center" },
+                border: borderAll,
+            };
+
+            const subGroupStyle = {
+                font: { sz: 9.5, name: "Calibri", color: { rgb: "000000" } },
+                alignment: { horizontal: "left", vertical: "center" },
+                border: borderAll,
+            };
+
+            const amountStyle = {
+                font: { sz: 9.5, name: "Calibri", color: { rgb: "000000" } },
+                alignment: { horizontal: "right", vertical: "center" },
+                border: borderAll,
+                numFmt: "#,##0.00",
+            };
+
+            const blankBorderedCell = {
+                border: borderAll,
+            };
+
+            const footerTitleStyle = {
+                font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "000000" } },
+                fill: { fgColor: { rgb: "FFFF00" } },
+                alignment: { horizontal: "center", vertical: "center" },
+                border: borderAll,
+            };
+
+            const footerAmountStyle = {
+                font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "000000" } },
+                fill: { fgColor: { rgb: "FFFF00" } },
+                alignment: { horizontal: "right", vertical: "center" },
+                border: borderAll,
+                numFmt: "#,##0.00",
+            };
+
+            const titleText = `${activeType === "Direct" ? "Direct" : "Indirect"} Expenses`;
+
+            const rows: any[][] = [];
+
+            // Row 0: Title Header
+            rows.push([
+                { v: titleText, s: headerStyle },
+                { v: "", s: headerStyle }
+            ]);
+
+            // Row 1: Date Header
+            rows.push([
+                { v: dateHeader, s: headerStyle },
+                { v: "", s: headerStyle }
+            ]);
+
+            // Row 2: Table Columns Header
+            rows.push([
+                { v: "Particulars", s: colHeaderStyle },
+                { v: "Amount", s: colHeaderStyle }
+            ]);
+
+            let grandTotal = 0;
+
+            section.groups.forEach((group: any) => {
+                // Primary Group Header (Level 1)
+                rows.push([
+                    { v: group.name.toUpperCase(), s: groupStyle },
+                    { v: "", s: blankBorderedCell }
+                ]);
+
+                group.subGroups.forEach((sub: any) => {
+                    // Sub Group Row (Level 2: Account Name & Balance)
+                    const amt = Number(sub.balance || 0);
+                    grandTotal += amt;
+                    rows.push([
+                        { v: `    ${sub.name}`, s: subGroupStyle },
+                        { v: amt, t: "n", s: amountStyle }
+                    ]);
+                });
+            });
+
+            // Grand Total Footer Row
+            rows.push([
+                { v: "Grand Total", s: footerTitleStyle },
+                { v: grandTotal, t: "n", s: footerAmountStyle }
+            ]);
+
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+
+            // Merges for top headers
+            ws["!merges"] = [
+                { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
+                { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } }
+            ];
+
+            // Column Widths
+            ws["!cols"] = [
+                { wch: 45 },
+                { wch: 20 }
+            ];
+
+            // Row heights
+            ws["!rows"] = [
+                { hpt: 24 },
+                { hpt: 20 },
+                { hpt: 20 }
+            ];
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Management Expenses");
+            XLSX.writeFile(wb, `${activeType}_Expenses_Management_Report.xlsx`);
+
+            toast.success("Management Excel Exported ✅");
+        } catch (err) {
+            console.error(err);
+            toast.error("Management Excel Export Failed ❌");
+        }
+    };
+
+    /* ================= EXPORT NORMAL PDF ================= */
+
+    const exportNormalPDF = () => {
 
         try {
 
@@ -665,11 +829,13 @@ const ExpensesReport = () => {
                                 styles: {
                                     fontSize: 7,
                                     cellPadding: 2,
+                                    textColor: [0, 0, 0],
                                 },
 
                                 headStyles: {
-                                    fontStyle:
-                                        "bold",
+                                    fontStyle: "bold",
+                                    fillColor: [30, 58, 138],
+                                    textColor: [255, 255, 255],
                                 },
 
                                 theme: "grid",
@@ -700,7 +866,7 @@ const ExpensesReport = () => {
             );
 
             doc.save(
-                `${activeType}_Expenses_Report.pdf`
+                `${activeType}_Expenses_Report_Normal.pdf`
             );
 
             toast.success(
@@ -713,6 +879,184 @@ const ExpensesReport = () => {
                 "PDF Export Failed ❌"
             );
         }
+    };
+
+    /* ================= EXPORT MANAGEMENT PDF ================= */
+
+    const exportManagementPDF = () => {
+        try {
+            if (!section) {
+                toast.error("No data available");
+                return;
+            }
+
+            const doc = new jsPDF("portrait", "mm", "a4");
+
+            const formatDisplayDate = (dStr: string) => {
+                if (!dStr) return "";
+                const d = dayjs(dStr);
+                return d.isValid() ? d.format("DD.MM.YYYY") : dStr;
+            };
+
+            const dateHeader = filters.Date.from === filters.Date.to
+                ? formatDisplayDate(filters.Date.to)
+                : `${formatDisplayDate(filters.Date.from)} - ${formatDisplayDate(filters.Date.to)}`;
+
+            const titleText = `${activeType === "Direct" ? "Direct" : "Indirect"} Expenses`;
+
+            const tableBody: any[] = [];
+            let grandTotal = 0;
+
+            section.groups.forEach((group: any) => {
+                // Group row (Level 1)
+                tableBody.push([
+                    {
+                        content: group.name.toUpperCase(),
+                        styles: { fontStyle: "bold", fontSize: 9.5, textColor: [0, 0, 0] }
+                    },
+                    {
+                        content: "",
+                        styles: { halign: "right", textColor: [0, 0, 0] }
+                    }
+                ]);
+
+                group.subGroups.forEach((sub: any) => {
+                    // Sub Group Row (Level 2: Account Name & Balance)
+                    const amt = Number(sub.balance || 0);
+                    grandTotal += amt;
+                    tableBody.push([
+                        {
+                            content: `    ${sub.name}`,
+                            styles: { fontSize: 9, textColor: [0, 0, 0] }
+                        },
+                        {
+                            content: amt.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                            styles: { halign: "right", fontSize: 9, textColor: [0, 0, 0] }
+                        }
+                    ]);
+                });
+            });
+
+            // Management Yellow Table using autoTable
+            autoTable(doc, {
+                startY: 15,
+                margin: { left: 20, right: 20 },
+                theme: "grid",
+                styles: {
+                    lineColor: [0, 0, 0],
+                    lineWidth: 0.2,
+                    cellPadding: 2,
+                    textColor: [0, 0, 0],
+                },
+                head: [
+                    [
+                        {
+                            content: titleText,
+                            colSpan: 2,
+                            styles: {
+                                halign: "center",
+                                fontStyle: "bold",
+                                fontSize: 12,
+                                fillColor: [255, 255, 0], // Bright Yellow
+                                textColor: [0, 0, 0],
+                            }
+                        }
+                    ],
+                    [
+                        {
+                            content: dateHeader,
+                            colSpan: 2,
+                            styles: {
+                                halign: "center",
+                                fontStyle: "bold",
+                                fontSize: 10,
+                                fillColor: [255, 255, 0], // Bright Yellow
+                                textColor: [0, 0, 0],
+                            }
+                        }
+                    ],
+                    [
+                        {
+                            content: "Particulars",
+                            styles: {
+                                halign: "center",
+                                fontStyle: "bold",
+                                fontSize: 9.5,
+                                fillColor: [255, 255, 255],
+                                textColor: [0, 0, 0],
+                            }
+                        },
+                        {
+                            content: "Amount",
+                            styles: {
+                                halign: "center",
+                                fontStyle: "bold",
+                                fontSize: 9.5,
+                                fillColor: [255, 255, 255],
+                                textColor: [0, 0, 0],
+                            }
+                        }
+                    ]
+                ],
+                body: tableBody,
+                foot: [
+                    [
+                        {
+                            content: "Grand Total",
+                            styles: {
+                                halign: "center",
+                                fontStyle: "bold",
+                                fontSize: 11,
+                                fillColor: [255, 255, 0],
+                                textColor: [0, 0, 0],
+                            }
+                        },
+                        {
+                            content: grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                            styles: {
+                                halign: "right",
+                                fontStyle: "bold",
+                                fontSize: 11,
+                                fillColor: [255, 255, 0],
+                                textColor: [0, 0, 0],
+                            }
+                        }
+                    ]
+                ],
+                columnStyles: {
+                    0: { cellWidth: 120 },
+                    1: { cellWidth: 50 },
+                }
+            });
+
+            doc.save(`${activeType}_Expenses_Management_Report.pdf`);
+            toast.success("Management PDF Exported ✅");
+        } catch (err) {
+            console.error(err);
+            toast.error("Management PDF Export Failed ❌");
+        }
+    };
+
+    /* ================= CONFIRM EXPORT HANDLER ================= */
+
+    const handleConfirmExport = () => {
+        if (!exportFormat) return;
+
+        if (exportFormat === "excel") {
+            if (exportTemplate === "management") {
+                exportManagementExcel();
+            } else {
+                exportNormalExcel();
+            }
+        } else if (exportFormat === "pdf") {
+            if (exportTemplate === "management") {
+                exportManagementPDF();
+            } else {
+                exportNormalPDF();
+            }
+        }
+
+        setExportFormat(null);
     };
 
     const activeType = toggleMode === "Abstract" ? "Direct" : "Indirect";
@@ -736,8 +1080,8 @@ const ExpensesReport = () => {
             <PageHeader
                 toggleMode={toggleMode}
                 onToggleChange={setToggleMode}
-                onExportExcel={exportExcel}
-                onExportPDF={exportPDF}
+                onExportExcel={() => setExportFormat("excel")}
+                onExportPDF={() => setExportFormat("pdf")}
                 settingsSlot={
                     <Tooltip title="Table Settings">
                         <IconButton size="small"
@@ -1196,6 +1540,127 @@ const ExpensesReport = () => {
                     </DndContext>
                 </Box>
             </Menu>
+
+            {/* ===== EXPORT CONFIRMATION MODAL ===== */}
+            <Dialog
+                open={Boolean(exportFormat)}
+                onClose={() => setExportFormat(null)}
+                maxWidth="xs"
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: 2,
+                        p: 1
+                    }
+                }}
+            >
+                <DialogTitle sx={{ pb: 1, display: "flex", alignItems: "center", gap: 1 }}>
+                    {exportFormat === "pdf" ? (
+                        <PictureAsPdfIcon color="error" />
+                    ) : (
+                        <TableChartIcon color="success" />
+                    )}
+                    <Typography variant="h6" fontWeight={700}>
+                        Export {exportFormat === "pdf" ? "PDF" : "Excel"}
+                    </Typography>
+                </DialogTitle>
+
+                <DialogContent sx={{ py: 1.5 }}>
+                    <Typography variant="body2" color="text.secondary" mb={2}>
+                        Please choose which export template format you would like to download:
+                    </Typography>
+
+                    <RadioGroup
+                        value={exportTemplate}
+                        onChange={(e) => setExportTemplate(e.target.value as "management" | "normal")}
+                    >
+                        <Box
+                            onClick={() => setExportTemplate("management")}
+                            sx={{
+                                border: "1px solid",
+                                borderColor: exportTemplate === "management" ? "#1E3A8A" : "#e2e8f0",
+                                backgroundColor: exportTemplate === "management" ? "#f0f4ff" : "#fff",
+                                borderRadius: 1.5,
+                                p: 1.5,
+                                mb: 1.5,
+                                cursor: "pointer",
+                                transition: "all 0.2s ease"
+                            }}
+                        >
+                            <FormControlLabel
+                                value="management"
+                                control={<Radio size="small" />}
+                                label={
+                                    <Box>
+                                        <Typography fontWeight={700} fontSize="0.9rem">
+                                            Management Export
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                            Yellow branded summary format with nested hierarchy (Particulars & Amount)
+                                        </Typography>
+                                    </Box>
+                                }
+                                sx={{ m: 0, width: "100%", alignItems: "flex-start" }}
+                            />
+                        </Box>
+
+                        <Box
+                            onClick={() => setExportTemplate("normal")}
+                            sx={{
+                                border: "1px solid",
+                                borderColor: exportTemplate === "normal" ? "#1E3A8A" : "#e2e8f0",
+                                backgroundColor: exportTemplate === "normal" ? "#f0f4ff" : "#fff",
+                                borderRadius: 1.5,
+                                p: 1.5,
+                                cursor: "pointer",
+                                transition: "all 0.2s ease"
+                            }}
+                        >
+                            <FormControlLabel
+                                value="normal"
+                                control={<Radio size="small" />}
+                                label={
+                                    <Box>
+                                        <Typography fontWeight={700} fontSize="0.9rem">
+                                            Normal Export
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                            Standard detailed voucher list with DR, CR, and all enabled columns
+                                        </Typography>
+                                    </Box>
+                                }
+                                sx={{ m: 0, width: "100%", alignItems: "flex-start" }}
+                            />
+                        </Box>
+                    </RadioGroup>
+                </DialogContent>
+
+                <DialogActions sx={{ px: 3, pb: 2, pt: 1, gap: 1 }}>
+                    <Button
+                        onClick={() => setExportFormat(null)}
+                        variant="outlined"
+                        color="inherit"
+                        size="small"
+                        sx={{ textTransform: "none", fontWeight: 600 }}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={handleConfirmExport}
+                        variant="contained"
+                        size="small"
+                        sx={{
+                            backgroundColor: "#1E3A8A",
+                            "&:hover": { backgroundColor: "#1e40af" },
+                            textTransform: "none",
+                            fontWeight: 600,
+                            px: 2.5
+                        }}
+                    >
+                        Download {exportFormat?.toUpperCase()}
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </>
     );
 };

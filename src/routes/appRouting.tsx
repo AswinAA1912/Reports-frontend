@@ -50,11 +50,13 @@ import OutstandingManagementReport from "../reports/Expenses/OutstandingManageme
 import OverallStaffReport from "../reports/StaffBased/overallStaffReport";
 import SalesStockGodown from "../reports/Stock/SalesStockGodown";
 import UserRights from "../settings/UserRights";
+import BatchExportScreen from "../settings/BatchExportScreen";
 import OverallItemwise from "../reports/Stock/OverallItemwise";
 import BatchwiseStockReport from "../reports/Stock/BatchwiseStockReport";
 import PurchaseDelivery from "../reports/Purchase/PurchaseDelivery";
 import PurchasePaymentReport from "../reports/Purchase/PurchasePaymentReport";
 import PurchaseItemPaymentReport from "../reports/Purchase/PurchaseItemPaymentReport";
+import ShetSheetReport from "../reports/Sales/ShetSheetReport";
 
 interface AppRoutingProps {
   setActiveCategory: (category: string) => void;
@@ -87,6 +89,7 @@ const URLSyncHandler: React.FC<{ setActiveCategory: (cat: string) => void }> = (
       "/purchaseinvoicepayment": "Purchase Item & Invoice Payment Report",
       "/purchaseInvoicePayment": "Purchase Item & Invoice Payment Report",
       "/groupwiseItem": "Group Wise Item",
+      "/shetSheet": "Shet Sheet Report",
       "/": "Login",
     };
 
@@ -597,6 +600,18 @@ const AppRouting: React.FC<AppRoutingProps> = ({
           }
         />
 
+        {/* SHET SHEET REPORT */}
+        <Route
+          path="/shetSheet"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <ShetSheetReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
         <Route
           path="/purchaseDetailed"
           element={
@@ -770,6 +785,16 @@ const AppRouting: React.FC<AppRoutingProps> = ({
                   <Navigate to="/dashboard" replace />
                 );
               })()}
+            </RequireAuth>
+          }
+        />
+
+        {/* BATCH EXPORT SCREEN */}
+        <Route
+          path="/export"
+          element={
+            <RequireAuth>
+              <BatchExportScreen />
             </RequireAuth>
           }
         />

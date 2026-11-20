@@ -58,7 +58,7 @@ type ColumnConfig = {
 const NUMERIC_KEYS = ["System_Qty", "Actual_Qty", "Difference_Qty"];
 
 const INITIAL_COLUMNS: ColumnConfig[] = [
-    { key: "Stock_Group", label: "Stock Group", enabled: true, order: 0, align: "left", width: "9%" },
+    { key: "Godown_Name", label: "Godown", enabled: true, order: 0, align: "left", width: "9%" },
     { key: "Stock_Date", label: "Date", enabled: true, order: 1, align: "center", width: "8%" },
     { key: "Grade_Item_Group", label: "Grade Item Group", enabled: true, order: 2, align: "left", width: "10%" },
     { key: "Item_Name", label: "Item Name", enabled: true, order: 3, align: "left", width: "14%" },
@@ -526,7 +526,7 @@ const StockDifferenceReport: React.FC = () => {
     /* ================= EXPORT HANDLERS ================= */
 
     const handleExportExcel = () => {
-        const headers = ["S.No", ...enabledColumns.map((c) => c.label)];
+        const headers = ["S.No", "Stock Group", ...enabledColumns.map((c) => c.label)];
         let serial = 1;
         const rows: any[][] = [];
 
@@ -537,7 +537,7 @@ const StockDifferenceReport: React.FC = () => {
                     row.__value,
                 ];
 
-                enabledColumns.slice(1).forEach((c) => {
+                enabledColumns.forEach((c) => {
                     if (c.isNumeric) {
                         const sum = row.__rows.reduce(
                             (s: number, r: any) => s + Number(r[c.key] || 0),
@@ -550,12 +550,9 @@ const StockDifferenceReport: React.FC = () => {
                 });
                 rows.push(groupRow);
             } else {
-                const normalRow: any[] = [serial++];
+                const normalRow: any[] = [serial++, ""];
                 enabledColumns.forEach((c) => {
-                    if (c.key === "Stock_Group") {
-                        // Empty in detail rows as per grouped layout
-                        normalRow.push("");
-                    } else if (c.isNumeric) {
+                    if (c.isNumeric) {
                         normalRow.push(formatOneDecimal(row[c.key]));
                     } else if (c.key === "Stock_Date") {
                         normalRow.push(formatDateOnly(row[c.key]));
@@ -581,7 +578,7 @@ const StockDifferenceReport: React.FC = () => {
 
     const handleExportPDF = () => {
         const doc = new jsPDF("l", "pt", "a4");
-        const headers = ["S.No", ...enabledColumns.map((c) => c.label)];
+        const headers = ["S.No", "Stock Group", ...enabledColumns.map((c) => c.label)];
         let serial = 1;
 
         const body: any[][] = paginatedSourceRows.map((row: any) => {
@@ -589,7 +586,7 @@ const StockDifferenceReport: React.FC = () => {
                 return [
                     "",
                     row.__value,
-                    ...enabledColumns.slice(1).map((c) => {
+                    ...enabledColumns.map((c) => {
                         if (c.isNumeric) {
                             const sum = row.__rows.reduce(
                                 (s: number, r: any) => s + Number(r[c.key] || 0),
@@ -603,8 +600,8 @@ const StockDifferenceReport: React.FC = () => {
             } else {
                 return [
                     String(serial++),
+                    "",
                     ...enabledColumns.map((c) => {
-                        if (c.key === "Stock_Group") return "";
                         let val = row[c.key];
                         if (c.isNumeric) return formatOneDecimal(val);
                         if (c.key === "Stock_Date") return formatDateOnly(val);
@@ -899,8 +896,9 @@ const StockDifferenceReport: React.FC = () => {
                                                     </IconButton>
                                                 </TableCell>
 
-                                                {enabledColumns.map((c) => {
-                                                    if (c.key === "Stock_Group") {
+                                                {/* Group header cell spanning the first column or showing group name */}
+                                                {enabledColumns.map((c, colIdx) => {
+                                                    if (colIdx === 0) {
                                                         return (
                                                             <TableCell
                                                                 key={c.key}
@@ -913,6 +911,7 @@ const StockDifferenceReport: React.FC = () => {
                                                                     overflow: "hidden",
                                                                     textOverflow: "ellipsis",
                                                                     whiteSpace: "nowrap",
+                                                                    color: "#1E3A8A",
                                                                 }}
                                                             >
                                                                 {row.__value}

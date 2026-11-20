@@ -5,6 +5,7 @@ export interface StockDifferenceItem {
     SD_Id: string;
     Stock_Date: string;
     Godown_Id: string;
+    Godown_Name?: string;
     Product_Id: string;
     Item_Name: string;
     Stock_Group: string;

@@ -54,7 +54,7 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { CSS } from "@dnd-kit/utilities";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
-import AppLayout, { useToggleMode } from "../../Layout/appLayout";
+import { useToggleMode } from "../../Layout/appLayout";
 import PageHeader from "../../Layout/PageHeader";
 import { SettingsService } from "../../services/reportSettings.services";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
@@ -273,6 +273,8 @@ const OnlineSalesReportLOL: React.FC = () => {
 
     const [abstractRows, setAbstractRows] = useState<any[]>([]);
     const [expandedRows, setExpandedRows] = useState<any[]>([]);
+    const [abstractLoaded, setAbstractLoaded] = useState(false);
+    const [expandedLoaded, setExpandedLoaded] = useState(false);
     const rawRows =
         toggleMode === "Expanded" ? expandedRows : abstractRows;
     const [lolColumns, setLolColumns] = useState<LolLosColumn[]>([]);
@@ -338,6 +340,10 @@ const OnlineSalesReportLOL: React.FC = () => {
     const [abstractExpandedKeys, setAbstractExpandedKeys] = useState<string[]>([]);
     const [expandedExpandedKeys, setExpandedExpandedKeys] = useState<string[]>([]);
 
+    useEffect(() => {
+        setToggleMode("Abstract");
+    }, []);
+
     const serialRef = React.useRef(0);
 
     const [templateConfig, setTemplateConfig] = useState<{
@@ -389,30 +395,20 @@ const OnlineSalesReportLOL: React.FC = () => {
     /* ================= LOAD DATA ================= */
 
     useEffect(() => {
-        const isTemplateApplied =
-            (toggleMode === "Abstract" && templateConfig?.abstract) ||
-            (toggleMode === "Expanded" && templateConfig?.expanded);
+        if (
+            toggleMode === "Abstract" &&
+            abstractLoaded &&
+            abstractDateKey === currentDateKey
+        ) {
+            return;
+        }
 
-        // ❌ SKIP CACHE ONLY IF NO TEMPLATE
-        const isResetState =
-            abstractRows.length === 0 && expandedRows.length === 0;
-
-        if (!isTemplateApplied && !isResetState) {
-            if (
-                toggleMode === "Abstract" &&
-                abstractRows.length > 0 &&
-                abstractDateKey === currentDateKey
-            ) {
-                return;
-            }
-
-            if (
-                toggleMode === "Expanded" &&
-                expandedRows.length > 0 &&
-                expandedDateKey === currentDateKey
-            ) {
-                return;
-            }
+        if (
+            toggleMode === "Expanded" &&
+            expandedLoaded &&
+            expandedDateKey === currentDateKey
+        ) {
+            return;
         }
 
         const service =
@@ -461,10 +457,12 @@ const OnlineSalesReportLOL: React.FC = () => {
                     setExpandedRows(apiRows);
                     setExpandedDateKey(currentDateKey);
                     setExpandedColumns(cols);
+                    setExpandedLoaded(true);
                 } else {
                     setAbstractRows(apiRows);
                     setAbstractDateKey(currentDateKey);
                     setAbstractColumns(cols);
+                    setAbstractLoaded(true);
                 }
 
                 setPage(1);
@@ -523,6 +521,8 @@ const OnlineSalesReportLOL: React.FC = () => {
         // ✅ HARD RESET DATA (IMPORTANT)
         setAbstractRows([]);
         setExpandedRows([]);
+        setAbstractLoaded(false);
+        setExpandedLoaded(false);
 
         setAbstractColumns([]);
         setExpandedColumns([]);
@@ -1272,6 +1272,8 @@ const OnlineSalesReportLOL: React.FC = () => {
 
             setAbstractRows([]);
             setExpandedRows([]);
+            setAbstractLoaded(false);
+            setExpandedLoaded(false);
 
         } catch (err) {
             console.error(err);
@@ -1501,6 +1503,8 @@ const OnlineSalesReportLOL: React.FC = () => {
 
                         setAbstractRows([]);
                         setExpandedRows([]);
+                        setAbstractLoaded(false);
+                        setExpandedLoaded(false);
                         setAbstractColumns([]);
                         setExpandedColumns([]);
                         setAbstractDateKey(null);
@@ -1574,15 +1578,17 @@ const OnlineSalesReportLOL: React.FC = () => {
                 toDate={toDate}
                 onFromDateChange={setFromDate}
                 onToDateChange={setToDate}
-                onApply={() =>
+                onApply={() => {
+                    setAbstractLoaded(false);
+                    setExpandedLoaded(false);
                     setFilters({
                         ...filters,
                         Date: { from: fromDate, to: toDate },
-                    })
-                }
+                    });
+                }}
             />
 
-            <AppLayout fullWidth>
+            <Box sx={{ flex: 1, minHeight: 0, width: "100%", display: "flex", flexDirection: "column" }}>
                 <Box sx={{ overflow: "auto", mt: 1 }}>
                     {templateLoading && (
                         <Box
@@ -1825,7 +1831,7 @@ const OnlineSalesReportLOL: React.FC = () => {
                         onRowsPerPageChange={setRowsPerPage}
                     />
                 </Box>
-            </AppLayout>
+            </Box>
 
             <HeaderFilterMenu
                 anchorEl={filterAnchor}

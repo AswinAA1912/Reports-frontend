@@ -57,6 +57,7 @@ import PurchaseDelivery from "../reports/Purchase/PurchaseDelivery";
 import PurchasePaymentReport from "../reports/Purchase/PurchasePaymentReport";
 import PurchaseItemPaymentReport from "../reports/Purchase/PurchaseItemPaymentReport";
 import ShetSheetReport from "../reports/Sales/ShetSheetReport";
+import StockDifferenceReport from "../reports/Stock/StockDifferenceReport";
 
 interface AppRoutingProps {
   setActiveCategory: (category: string) => void;
@@ -766,6 +767,17 @@ const AppRouting: React.FC<AppRoutingProps> = ({
             <RequireAuth>
               <AppLayout fullWidth>
                 <BatchwiseStockReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/stockDifference"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <StockDifferenceReport />
               </AppLayout>
             </RequireAuth>
           }

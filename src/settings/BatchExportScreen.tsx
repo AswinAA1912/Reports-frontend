@@ -61,6 +61,7 @@ import { StockAbstractReportService } from "../services/dayStockAbstract.service
 import { itemwisestockvaluereportservice, godownwisestockvaluereportservice } from "../services/stockValueReport.service";
 import { stockValueReportService } from "../services/stockValueRateMaster.service";
 import { ShetSheetReportService, ShetSheetItem } from "../services/ShetSheetReport.service";
+import { StockDifferenceService, StockDifferenceItem } from "../services/Stock Difference.service";
 
 const formatINR = (v: number) =>
     new Intl.NumberFormat("en-IN", {
@@ -144,6 +145,201 @@ const CASHBOX_CREDIT_GROUPS: CashBoxGroupConfig[] = [
     { key: "idex_cred", label: "InDirect Expenses- Income", side: "credit", masterKey: "IDEX" },
     { key: "others_cred", label: "Others", side: "credit", masterKey: "Others" }
 ];
+
+/* ================= GLOBAL EXPORT FORMATTING HELPERS ================= */
+
+let cachedNirmalaBase64: string | null = null;
+/**
+ * Loads Nirmala TrueType font (with complete Tamil Unicode glyph range support)
+ * and returns it as a base64 string for jsPDF embedding.
+ */
+async function loadNirmalaFont(): Promise<string | null> {
+    if (cachedNirmalaBase64) return cachedNirmalaBase64;
+    try {
+        const res = await fetch("/Nirmala.ttf");
+        if (!res.ok) {
+            console.warn("Could not fetch /Nirmala.ttf: HTTP", res.status);
+            return null;
+        }
+        const buffer = await res.arrayBuffer();
+        let binary = "";
+        const bytes = new Uint8Array(buffer);
+        const len = bytes.byteLength;
+        const chunkSize = 8192;
+        for (let i = 0; i < len; i += chunkSize) {
+            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+        }
+        cachedNirmalaBase64 = btoa(binary);
+        return cachedNirmalaBase64;
+    } catch (e) {
+        console.warn("Failed to load Nirmala Tamil font:", e);
+        return null;
+    }
+}
+
+/**
+ * Checks if a string looks like an ISO date or if column key indicates date.
+ * Formats as "DD-MM-YYYY" or "DD-MM-YYYY HH:mm".
+ */
+export const formatExportDate = (val: any, colKey?: string): string | null => {
+    if (val === undefined || val === null || val === "") return null;
+    if (typeof val !== "string" && !(val instanceof Date)) return null;
+
+    const str = String(val).trim();
+    // Match ISO formats like YYYY-MM-DD, YYYY-MM-DDTHH:mm:ss, YYYY-MM-DDTHH:mm:ss.sssZ, etc.
+    const isoDateRegex = /^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+    const isDateCol = colKey && /(?:date|created_on|updated_on|do_date|ledger_date|payment_date|inv_date|invoice_date)/i.test(colKey);
+
+    if (isoDateRegex.test(str) || (isDateCol && dayjs(str).isValid())) {
+        const d = dayjs(str);
+        if (!d.isValid()) return str;
+
+        // If time is present and not 00:00:00, format with time, else date only
+        const hasTime = str.includes("T") && !str.includes("T00:00:00");
+        return hasTime ? d.format("DD-MM-YYYY HH:mm") : d.format("DD-MM-YYYY");
+    }
+    return null;
+};
+
+/**
+ * Cleans corrupted / legacy non-Unicode glyphs and symbols from any text field (item name, staff/transport, retailer, etc.).
+ * Fallbacks to cleaner fields if current value contains corrupted legacy glyphs.
+ * NOTE: Tamil Unicode characters (range \u0B80-\u0BFF) are fully preserved.
+ */
+export const cleanExportText = (val: any, colKey?: string, row?: any): string => {
+    if (val === undefined || val === null) return "";
+    let str = String(val).trim();
+    if (!str) return "";
+
+    // If key is related to item/product name and row has a cleaner fallback
+    const isItemCol = colKey && /(?:item_name|product_name|pos_item_name|stock_item)/i.test(colKey);
+    if (isItemCol && row) {
+        // Only consider garbled if it contains specific legacy corruption symbols, NOT Tamil characters
+        const hasGarble = /[•*µÆ¿©®™§¶±×÷=≠~]/.test(str);
+        if (hasGarble) {
+            const cleanerCandidate = row.Product_Name || row.Stock_Item || row.Item_Name || row.Item_Name_Modified;
+            if (cleanerCandidate && typeof cleanerCandidate === "string" && cleanerCandidate.trim()) {
+                const alt = cleanerCandidate.trim();
+                if (!/[•*µÆ¿©®™§¶±×÷≠]/.test(alt)) {
+                    str = alt;
+                }
+            }
+        }
+    }
+
+    // Clean rogue legacy font encoding characters across ALL columns and reports
+    // Characters like •, *, µ, Æ, ¿, ©, ®, ™, §, ¶, ±, ×, ÷, ¢, £, ¥, ¬, ¦, «, », etc.
+    // Tamil characters (\u0B80-\u0BFF) are strictly kept intact!
+    str = str
+        .replace(/[•*µÆ¿©®™§¶±×÷≠¢£¥¬¦«»]/g, " ")
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, "")
+        .replace(/\s*=\s*/g, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+    return str;
+};
+
+/**
+ * Computes dynamic column widths and styles for PDF autoTable to guarantee:
+ * 1. The table NEVER exceeds the page width (297mm landscape - 20mm margins = 277mm printable).
+ * 2. Columns with extensive content (like Retailer/Party, Product, Staff/Transport, Narration)
+ *    are assigned sufficient width and wrap onto 2-3 lines (`overflow: 'linebreak'`).
+ * 3. The last column is never clipped or pushed off the page edge.
+ */
+export const getDynamicTableStyles = (
+    headers: string[],
+    colConfigs: Array<{ key?: string; label?: string }>,
+    printableWidth: number = 277
+) => {
+    const totalCols = headers.length; // includes S.No
+    const pdfFontSize = totalCols > 15 ? 5.2 : totalCols > 12 ? 6.0 : totalCols > 9 ? 7.0 : 8.0;
+    const cellPad = totalCols > 15 ? 0.6 : totalCols > 12 ? 0.8 : 1.2;
+
+    // Relative weight calculation
+    const weights: number[] = [0.8]; // S.No index 0
+
+    colConfigs.forEach((c) => {
+        const k = String(c.key || c.label || "").toLowerCase();
+        if (/(?:s_no|sno|idx)/.test(k)) {
+            weights.push(0.8);
+        } else if (/(?:date|do_date|created_on|inv_date|invoice_date|ledger_date)/.test(k)) {
+            weights.push(1.3);
+        } else if (/(?:bags|qty|quantity|rate|billedrate|itemrate|amount|total)/.test(k)) {
+            weights.push(1.0);
+        } else if (/(?:trip_no|status|uom|follow_up)/.test(k)) {
+            weights.push(1.2);
+        } else if (/(?:do_inv_no|invoice_no|inv_no)/.test(k)) {
+            weights.push(1.8);
+        } else if (/(?:vouchertypeget|voucher_type|branch)/.test(k)) {
+            weights.push(1.8);
+        } else if (/(?:godown|godown_name)/.test(k)) {
+            weights.push(1.6);
+        } else if (/(?:staff_load|loadman|load_man)/.test(k)) {
+            weights.push(2.0);
+        } else if (/(?:staff_transport|transport)/.test(k)) {
+            weights.push(4.0); // Sufficient width to prevent truncation and allow 2-3 line wrapping
+        } else if (/(?:retailer|retailernameget|party|party_name|product_name|pos_item_name|item_name|narration)/.test(k)) {
+            weights.push(3.5); // Wide columns that wrap across 2-3 lines
+        } else if (/(?:staff_)/.test(k)) {
+            weights.push(3.0);
+        } else {
+            weights.push(2.0);
+        }
+    });
+
+    const sumWeights = weights.reduce((a, b) => a + b, 0);
+    const columnStyles: Record<number, { cellWidth: number; halign?: "left" | "center" | "right" }> = {};
+
+    // Distribute printableWidth precisely across all columns
+    weights.forEach((w, idx) => {
+        const widthMm = (w / sumWeights) * printableWidth;
+        const colCfg = idx > 0 ? colConfigs[idx - 1] : null;
+        let halign: "left" | "center" | "right" = "left";
+
+        if (idx === 0) {
+            halign = "center";
+        } else if (colCfg) {
+            const k = String(colCfg.key || colCfg.label || "").toLowerCase();
+            if (/(?:date|do_date|created_on|trip_no)/.test(k)) {
+                halign = "center";
+            } else if (/(?:bags|qty|quantity|amount|rate|value|total|balance|bal)/.test(k)) {
+                halign = "right";
+            }
+        }
+
+        columnStyles[idx] = {
+            cellWidth: widthMm,
+            halign,
+        };
+    });
+
+    return { pdfFontSize, cellPad, columnStyles };
+};
+
+/**
+ * Universal cell formatter for table exports (PDF & Excel)
+ */
+export const formatExportCellValue = (val: any, colKey: string, row: any, forPdf: boolean = false): any => {
+    if (val === undefined || val === null || val === "") return "";
+
+    // 1. Date formatting
+    const formattedDate = formatExportDate(val, colKey);
+    if (formattedDate !== null) return formattedDate;
+
+    // 2. Numeric formatting (single digit after decimal)
+    if (typeof val === "number") {
+        return forPdf ? val.toFixed(1) : Number(val.toFixed(1));
+    }
+    const num = Number(val);
+    const isNumCol = /(?:rate|qty|quantity|amount|total|value|balance|bal|cogs|margin|percent|pct|bags)/i.test(colKey);
+    if (!isNaN(num) && typeof val !== "boolean" && isNumCol) {
+        return forPdf ? num.toFixed(1) : Number(num.toFixed(1));
+    }
+
+    // 3. Text cleaning
+    return cleanExportText(val, colKey, row);
+};
 
 const styleCashBoxWorksheet = (ws: XLSX.WorkSheet) => {
     if (!ws || !ws["!ref"]) return;
@@ -1157,6 +1353,56 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
                 toDate: to,
             };
         }
+    },
+
+    // 19. STOCK DIFFERENCE REPORT
+    "/stockdifference": {
+        modes: ["Default"],
+        exportTypes: ["Standard"],
+        fetchData: async ({ from, to, templateId }) => {
+            let godownId = 0;
+            let templateCols: any[] = [];
+
+            if (templateId && templateId !== "default") {
+                const storedGodownId = localStorage.getItem(`template_godown_${templateId}`);
+                if (storedGodownId && !isNaN(Number(storedGodownId))) {
+                    godownId = Number(storedGodownId);
+                }
+
+                try {
+                    const tRes = await SettingsService.getReportEditData({
+                        reportId: Number(templateId),
+                        typeId: 1,
+                    });
+                    if (tRes.data?.success && tRes.data.data) {
+                        const info = tRes.data.data.reportInfo || tRes.data.data;
+                        if (!godownId && info?.Abstract_SP && !isNaN(Number(info.Abstract_SP))) {
+                            godownId = Number(info.Abstract_SP);
+                        }
+                        const cols = tRes.data.data.columns || [];
+                        if (Array.isArray(cols) && cols.length > 0) {
+                            templateCols = cols.filter((c: any) => c.enabled).sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0));
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Could not load template for Stock Difference Report:", e);
+                }
+            }
+
+            const res = await StockDifferenceService.getReport({
+                Fromdate: from,
+                Todate: to,
+                Godown_Id: godownId,
+            });
+            const rows: StockDifferenceItem[] = res.data?.data || (Array.isArray(res.data) ? (res.data as any) : []);
+
+            return {
+                type: "table",
+                title: "Stock Difference Report",
+                rows,
+                templateCols: templateCols.length > 0 ? templateCols : undefined,
+            };
+        }
     }
 };
 
@@ -1317,6 +1563,7 @@ const BatchExportScreen: React.FC = () => {
                     "/stockvalue": "Stock Value Report",
                     "/ratemaster": "Rate Master",
                     "/shetSheet": "Shet Sheet Report",
+                    "/stockdifference": "Stock Difference Report",
                 };
 
                 Object.entries(CUSTOM_CATALOG_OVERRIDES).forEach(([cPath, cDef]) => {
@@ -1349,10 +1596,12 @@ const BatchExportScreen: React.FC = () => {
             });
     }, []);
 
-    /* Helper: Fetch templates with multi-variant parentReport name matching */
+    /* Helper: Fetch templates with dynamic multi-variant & reportList fallback */
     const fetchTemplatesForParent = async (parentReportName: string) => {
         let templates: Array<{ id: number; name: string }> = [];
-        const clean = parentReportName.trim();
+        const clean = (parentReportName || "").trim();
+        const normClean = clean.toLowerCase().replace(/[\s\-_/]/g, "");
+
         const variants = Array.from(
             new Set([
                 clean,
@@ -1365,6 +1614,7 @@ const BatchExportScreen: React.FC = () => {
                 clean === "SHETSHEET REPORT" || clean === "SHET SHEET REPORT" || clean.toLowerCase().includes("shet")
                     ? "SHET SHEET REPORT"
                     : "",
+                clean.toLowerCase().includes("stock difference") ? "STOCK DIFFERENCE REPORT" : "",
                 clean.toLowerCase().includes("rate master") ? "RATE MASTER ADMIN" : "",
                 clean.toLowerCase().includes("overall staff") ? "Overall Staff Report" : "",
                 clean.toLowerCase().includes("ledger") && clean.toLowerCase().includes("item") ? "LEDGER WISE ITEM" : "",
@@ -1386,6 +1636,34 @@ const BatchExportScreen: React.FC = () => {
                 // Try next variant
             }
         }
+
+        // Dynamic fallback: If no templates found via getReportsByParent, query the full reportList dynamically
+        if (templates.length === 0) {
+            try {
+                const listRes = await SettingsService.getReportList();
+                const allReports = listRes.data?.data || (Array.isArray(listRes.data) ? listRes.data : []);
+                if (Array.isArray(allReports) && allReports.length > 0) {
+                    const matched = allReports.filter((r: any) => {
+                        const rParent = String(r.Parent_Report || "").toLowerCase().replace(/[\s\-_/]/g, "");
+                        const rName = String(r.Report_Name || "").toLowerCase().replace(/[\s\-_/]/g, "");
+                        return (
+                            (rParent && (rParent === normClean || rParent.includes(normClean) || normClean.includes(rParent))) ||
+                            (rName && (rName === normClean || rName.includes(normClean)))
+                        );
+                    });
+
+                    if (matched.length > 0) {
+                        templates = matched.map((t: any) => ({
+                            id: t.Report_Id || t.id,
+                            name: t.Report_Name || t.name,
+                        }));
+                    }
+                }
+            } catch (err) {
+                console.warn("Dynamic template discovery fallback error:", err);
+            }
+        }
+
         return templates;
     };
 
@@ -1721,17 +1999,21 @@ const BatchExportScreen: React.FC = () => {
                         const enabledCols = templateCols.length > 0
                             ? templateCols
                             : [
-                                { key: "Product_Name", label: "Product Name" },
-                                { key: "Rate", label: "List Rate", isNumeric: true },
+                                { key: "Product_Name", label: "Product" },
                                 { key: "Min_Rate", label: "Min Rate", isNumeric: true },
-                                { key: "Max_Rate", label: "Max Rate", isNumeric: true },
+                                { key: "Rate", label: "List Rate", isNumeric: true },
+                                { key: "Margin", label: "Margin", isNumeric: true },
+                                { key: "Margin_Percentage", label: "%", isNumeric: true },
                                 { key: "COGS", label: "COGS", isNumeric: true },
                                 { key: "GP_Percentage_COGS", label: "COGS %", isNumeric: true },
-                                { key: "Margin", label: "Margin", isNumeric: true },
-                                { key: "Margin_Percentage", label: "%", isNumeric: true }
+                                { key: "Max_Rate", label: "Max Rate", isNumeric: true }
                             ];
 
-                        const exportRows: any[] = [];
+                        const exportAoa: any[][] = [];
+                        const headerRow = ["S.No", ...enabledCols.map((c: any) => c.label)];
+                        exportAoa.push(headerRow);
+
+                        let serial = 1;
                         if (groupingCols.length > 0) {
                             // Group by first grouping col
                             const grpKey = groupingCols[0];
@@ -1743,39 +2025,92 @@ const BatchExportScreen: React.FC = () => {
                             });
 
                             groupMap.forEach((grpRows, val) => {
-                                const groupSummary: any = {};
-                                const firstCol = enabledCols[0]?.label || "Product Name";
-                                groupSummary[firstCol] = `Group: ${grpKey} = ${val}`;
-
-                                enabledCols.slice(1).forEach((c: any) => {
-                                    if (c.isNumeric || c.key === "Rate" || c.key === "Min_Rate" || c.key === "Max_Rate" || c.key === "COGS" || c.key === "Margin") {
-                                        const sum = grpRows.reduce((s: number, r: any) => s + (Number(r[c.key]) || 0), 0);
-                                        groupSummary[c.label] = sum;
-                                    } else {
-                                        groupSummary[c.label] = "";
-                                    }
-                                });
-                                exportRows.push(groupSummary);
+                                const groupRow = [
+                                    "",
+                                    `Group: ${grpKey} = ${val}`,
+                                    ...enabledCols.slice(1).map((c: any) => {
+                                        if (c.isNumeric || c.key === "Rate" || c.key === "Min_Rate" || c.key === "Max_Rate" || c.key === "COGS" || c.key === "Margin") {
+                                            const sum = grpRows.reduce((s: number, r: any) => s + (Number(r[c.key]) || 0), 0);
+                                            return c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage"
+                                                ? (sum / grpRows.length).toFixed(1)
+                                                : sum;
+                                        }
+                                        return "";
+                                    })
+                                ];
+                                exportAoa.push(groupRow);
 
                                 grpRows.forEach((r: any) => {
-                                    const rowObj: any = {};
-                                    enabledCols.forEach((c: any) => {
-                                        rowObj[c.label] = r[c.key] ?? "";
-                                    });
-                                    exportRows.push(rowObj);
+                                    exportAoa.push([
+                                        serial++,
+                                        ...enabledCols.map((c: any) => {
+                                            return formatExportCellValue(r[c.key], c.key, r, false);
+                                        })
+                                    ]);
                                 });
                             });
                         } else {
                             rawRows.forEach((r: any) => {
-                                const rowObj: any = {};
-                                enabledCols.forEach((c: any) => {
-                                    rowObj[c.label] = r[c.key] ?? "";
-                                });
-                                exportRows.push(rowObj);
+                                exportAoa.push([
+                                    serial++,
+                                    ...enabledCols.map((c: any) => {
+                                        return formatExportCellValue(r[c.key], c.key, r, false);
+                                    })
+                                ]);
                             });
                         }
 
-                        const ws = XLSX.utils.json_to_sheet(exportRows.length ? exportRows : [{ Message: "No records" }]);
+                        const ws = XLSX.utils.aoa_to_sheet(exportAoa.length ? exportAoa : [["No records found"]]);
+
+                        // Apply yellow header box styling matching user reference photo
+                        if (exportAoa.length > 0) {
+                            const range = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
+                            const borderAll = {
+                                top: { style: "thin", color: { rgb: "000000" } },
+                                bottom: { style: "thin", color: { rgb: "000000" } },
+                                left: { style: "thin", color: { rgb: "000000" } },
+                                right: { style: "thin", color: { rgb: "000000" } }
+                            };
+
+                            for (let R = range.s.r; R <= range.e.r; ++R) {
+                                for (let C = range.s.c; C <= range.e.c; ++C) {
+                                    const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                                    const cell = ws[cellRef];
+                                    if (!cell) continue;
+
+                                    if (R === 0) {
+                                        cell.s = {
+                                            fill: { fgColor: { rgb: "FFFF00" } },
+                                            font: { name: "Calibri", sz: 10, bold: true, color: { rgb: "000000" } },
+                                            alignment: { horizontal: C === 0 ? "center" : "center", vertical: "center" },
+                                            border: borderAll
+                                        };
+                                    } else {
+                                        const isNumeric = typeof cell.v === "number";
+                                        cell.s = {
+                                            font: { name: "Calibri", sz: 9.5, color: { rgb: "000000" } },
+                                            alignment: {
+                                                horizontal: C === 0 ? "center" : isNumeric ? "right" : "left",
+                                                vertical: "center"
+                                            },
+                                            border: borderAll
+                                        };
+                                    }
+                                }
+                            }
+
+                            const colWidths: Array<{ wch: number }> = [{ wch: 7 }];
+                            enabledCols.forEach((c: any) => {
+                                let maxLen = (c.label || "").length;
+                                rawRows.slice(0, 50).forEach((r: any) => {
+                                    const l = String(r[c.key] ?? "").length;
+                                    if (l > maxLen) maxLen = l;
+                                });
+                                colWidths.push({ wch: Math.min(Math.max(maxLen + 3, 10), 38) });
+                            });
+                            ws["!cols"] = colWidths;
+                        }
+
                         XLSX.utils.book_append_sheet(wb, ws, "Rate_Master_Admin".substring(0, 31));
                     }
                     // 3. RECIEVABLE PAYABLE
@@ -1972,8 +2307,7 @@ const BatchExportScreen: React.FC = () => {
                                 const rowData = [
                                     idx + 1,
                                     ...activeCols.map((c: any) => {
-                                        const val = item[c.key];
-                                        return val !== undefined && val !== null ? val : "";
+                                        return formatExportCellValue(item[c.key], c.key, item, false);
                                     }),
                                 ];
                                 exportAoa.push(rowData);
@@ -2032,29 +2366,115 @@ const BatchExportScreen: React.FC = () => {
                             }
                         }
 
-                        ws["!cols"] = [{ wch: 8 }, ...activeCols.map(() => ({ wch: 22 }))];
+                        // Dynamic column widths for Excel
+                        const colWidths: Array<{ wch: number }> = [{ wch: 8 }]; // S.No
+                        activeCols.forEach((c: any) => {
+                            let maxLen = (c.label || "").length;
+                            groupedData.forEach((grp: any) => {
+                                (grp.items || []).slice(0, 100).forEach((item: any) => {
+                                    const l = String(item[c.key] ?? "").length;
+                                    if (l > maxLen) maxLen = l;
+                                });
+                            });
+                            colWidths.push({ wch: Math.min(Math.max(maxLen + 3, 10), 38) });
+                        });
+                        ws["!cols"] = colWidths;
                         const safeTitle = `${cfg.reportName.replace(/[^a-zA-Z0-9]/g, "")}`.substring(0, 31);
                         XLSX.utils.book_append_sheet(wb, ws, safeTitle);
                     }
-                    // 8. STANDARD TABLE ROWS (Supports Template Columns)
+                    // 8. STANDARD TABLE ROWS (Supports Template Columns & Yellow Header Box Layout)
                     else {
                         const rawRows = data.rows || [];
                         const templateCols = data.templateCols || [];
 
-                        let sheetRows: any[] = [];
-                        if (templateCols.length > 0 && rawRows.length > 0) {
-                            sheetRows = rawRows.map((r: any) => {
-                                const rowObj: any = {};
-                                templateCols.forEach((col: any) => {
-                                    rowObj[col.label || col.key] = r[col.key] ?? "";
-                                });
-                                return rowObj;
-                            });
-                        } else {
-                            sheetRows = rawRows;
+                        // Determine columns to display
+                        let colsToUse: Array<{ key: string; label: string }> = [];
+                        if (templateCols.length > 0) {
+                            colsToUse = templateCols.map((c: any) => ({
+                                key: c.key,
+                                label: c.label || c.key,
+                            }));
+                        } else if (rawRows.length > 0) {
+                            const keys = Object.keys(rawRows[0]).slice(0, 15);
+                            colsToUse = keys.map((k) => ({
+                                key: k,
+                                label: k.replace(/_/g, " ").toUpperCase(),
+                            }));
                         }
 
-                        const ws = XLSX.utils.json_to_sheet(sheetRows.length ? sheetRows : [{ Message: "No records" }]);
+                        // Determine dynamic font size based on column count and width
+                        const colCount = colsToUse.length + 1; // including S.No
+                        const fontSize = colCount > 10 ? 8 : colCount > 6 ? 9 : 10;
+                        const headerFontSize = colCount > 10 ? 9 : 10;
+
+                        const exportAoa: any[][] = [];
+                        const headerRow = ["S.No", ...colsToUse.map((c) => c.label)];
+                        exportAoa.push(headerRow);
+
+                        rawRows.forEach((r: any, idx: number) => {
+                            const row = [
+                                idx + 1,
+                                ...colsToUse.map((c) => {
+                                    return formatExportCellValue(r[c.key], c.key, r, false);
+                                }),
+                            ];
+                            exportAoa.push(row);
+                        });
+
+                        const ws = XLSX.utils.aoa_to_sheet(exportAoa.length ? exportAoa : [["No records found"]]);
+
+                        // Apply yellow header, solid black borders, and alignments
+                        if (exportAoa.length > 0) {
+                            const range = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
+                            const borderAll = {
+                                top: { style: "thin", color: { rgb: "000000" } },
+                                bottom: { style: "thin", color: { rgb: "000000" } },
+                                left: { style: "thin", color: { rgb: "000000" } },
+                                right: { style: "thin", color: { rgb: "000000" } },
+                            };
+
+                            for (let R = range.s.r; R <= range.e.r; ++R) {
+                                for (let C = range.s.c; C <= range.e.c; ++C) {
+                                    const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                                    const cell = ws[cellRef];
+                                    if (!cell) continue;
+
+                                    if (R === 0) {
+                                        // Header row: Yellow background (#FFFF00), black bold font, bordered box
+                                        cell.s = {
+                                            fill: { fgColor: { rgb: "FFFF00" } },
+                                            font: { name: "Calibri", sz: headerFontSize, bold: true, color: { rgb: "000000" } },
+                                            alignment: { horizontal: C === 0 ? "center" : "center", vertical: "center" },
+                                            border: borderAll,
+                                        };
+                                    } else {
+                                        // Data row: bordered cell, clean alignment
+                                        const isNumeric = typeof cell.v === "number";
+                                        cell.s = {
+                                            font: { name: "Calibri", sz: fontSize, color: { rgb: "000000" } },
+                                            alignment: {
+                                                horizontal: C === 0 ? "center" : isNumeric ? "right" : "left",
+                                                vertical: "center",
+                                            },
+                                            border: borderAll,
+                                        };
+                                    }
+                                }
+                            }
+
+                            // Dynamic column widths
+                            const colWidths: Array<{ wch: number }> = [{ wch: 7 }]; // S.No
+                            colsToUse.forEach((c) => {
+                                let maxLen = (c.label || "").length;
+                                rawRows.slice(0, 100).forEach((r: any) => {
+                                    const l = String(r[c.key] ?? "").length;
+                                    if (l > maxLen) maxLen = l;
+                                });
+                                colWidths.push({ wch: Math.min(Math.max(maxLen + 3, 10), 38) });
+                            });
+                            ws["!cols"] = colWidths;
+                        }
+
                         const safeTitle = `${cfg.reportName.replace(/[^a-zA-Z0-9]/g, "")}_${mode}`.substring(0, 31);
                         XLSX.utils.book_append_sheet(wb, ws, safeTitle);
                     }
@@ -2083,9 +2503,19 @@ const BatchExportScreen: React.FC = () => {
 
         try {
             setExporting(true);
-            setExportStatusText("Initializing PDF Document...");
+            setExportStatusText("Initializing PDF Document & Loading Tamil Font...");
 
+            const fontBase64 = await loadNirmalaFont();
             const doc = new jsPDF("landscape", "mm", "a4");
+
+            if (fontBase64) {
+                doc.addFileToVFS("Nirmala.ttf", fontBase64);
+                doc.addFont("Nirmala.ttf", "Nirmala", "normal");
+                doc.addFont("Nirmala.ttf", "Nirmala", "bold");
+                doc.setFont("Nirmala", "normal");
+            }
+            const activeFontName = fontBase64 ? "Nirmala" : "helvetica";
+
             let isFirstPage = true;
 
             for (let i = 0; i < selectedReports.length; i++) {
@@ -2153,6 +2583,7 @@ const BatchExportScreen: React.FC = () => {
                                 margin: { left: 20, right: 20 },
                                 theme: "grid",
                                 styles: {
+                                    font: activeFontName,
                                     lineColor: [0, 0, 0],
                                     lineWidth: 0.2,
                                     cellPadding: 2,
@@ -2163,26 +2594,26 @@ const BatchExportScreen: React.FC = () => {
                                         {
                                             content: titleText,
                                             colSpan: 2,
-                                            styles: { halign: "center", fontStyle: "bold", fontSize: 12, fillColor: [255, 255, 0], textColor: [0, 0, 0] }
+                                            styles: { font: activeFontName, halign: "center", fontStyle: "bold", fontSize: 12, fillColor: [255, 255, 0], textColor: [0, 0, 0] }
                                         }
                                     ],
                                     [
                                         {
                                             content: dateHeader,
                                             colSpan: 2,
-                                            styles: { halign: "center", fontStyle: "bold", fontSize: 10, fillColor: [255, 255, 0], textColor: [0, 0, 0] }
+                                            styles: { font: activeFontName, halign: "center", fontStyle: "bold", fontSize: 10, fillColor: [255, 255, 0], textColor: [0, 0, 0] }
                                         }
                                     ],
                                     [
-                                        { content: "Particulars", styles: { halign: "center", fontStyle: "bold", fontSize: 9.5, fillColor: [255, 255, 255], textColor: [0, 0, 0] } },
-                                        { content: "Amount", styles: { halign: "center", fontStyle: "bold", fontSize: 9.5, fillColor: [255, 255, 255], textColor: [0, 0, 0] } }
+                                        { content: "Particulars", styles: { font: activeFontName, halign: "center", fontStyle: "bold", fontSize: 9.5, fillColor: [255, 255, 255], textColor: [0, 0, 0] } },
+                                        { content: "Amount", styles: { font: activeFontName, halign: "center", fontStyle: "bold", fontSize: 9.5, fillColor: [255, 255, 255], textColor: [0, 0, 0] } }
                                     ]
                                 ],
                                 body: bodyRows,
                                 foot: [
                                     [
-                                        { content: "Grand Total", styles: { halign: "center", fontStyle: "bold", fontSize: 11, fillColor: [255, 255, 0], textColor: [0, 0, 0] } },
-                                        { content: grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { halign: "right", fontStyle: "bold", fontSize: 11, fillColor: [255, 255, 0], textColor: [0, 0, 0] } }
+                                        { content: "Grand Total", styles: { font: activeFontName, halign: "center", fontStyle: "bold", fontSize: 11, fillColor: [255, 255, 0], textColor: [0, 0, 0] } },
+                                        { content: grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), styles: { font: activeFontName, halign: "right", fontStyle: "bold", fontSize: 11, fillColor: [255, 255, 0], textColor: [0, 0, 0] } }
                                     ]
                                 ],
                                 columnStyles: {
@@ -2221,9 +2652,30 @@ const BatchExportScreen: React.FC = () => {
                                 startY: 25,
                                 head: [["S.No", "Group", "Account", "Date", "Voucher", "Debit", "Credit"]],
                                 body: flat,
-                                theme: "striped",
-                                styles: { fontSize: 8, cellPadding: 2 },
-                                headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] }
+                                theme: "grid",
+                                styles: {
+                                    font: activeFontName,
+                                    fontSize: 8,
+                                    cellPadding: 2,
+                                    lineColor: [0, 0, 0],
+                                    lineWidth: 0.2,
+                                    textColor: [0, 0, 0]
+                                },
+                                headStyles: {
+                                    font: activeFontName,
+                                    fillColor: [255, 255, 0],
+                                    textColor: [0, 0, 0],
+                                    fontStyle: "bold",
+                                    lineColor: [0, 0, 0],
+                                    lineWidth: 0.2
+                                },
+                                didParseCell: (cellData) => {
+                                    if (cellData.column.index === 0) {
+                                        cellData.cell.styles.halign = "center";
+                                    } else if (cellData.column.index === 5 || cellData.column.index === 6) {
+                                        cellData.cell.styles.halign = "right";
+                                    }
+                                }
                             });
                         }
                     }
@@ -2241,15 +2693,13 @@ const BatchExportScreen: React.FC = () => {
                         const templateCols = data.templateCols || [];
                         const groupingCols = data.groupingCols || [];
 
+                        // Enabled columns projection matching user desired table format
                         const enabledCols = templateCols.length > 0
                             ? templateCols
                             : [
-                                { key: "Product_Name", label: "Product Name" },
-                                { key: "Rate", label: "List Rate", isNumeric: true },
+                                { key: "Product_Name", label: "Product" },
                                 { key: "Min_Rate", label: "Min Rate", isNumeric: true },
-                                { key: "Max_Rate", label: "Max Rate", isNumeric: true },
-                                { key: "COGS", label: "COGS", isNumeric: true },
-                                { key: "GP_Percentage_COGS", label: "COGS %", isNumeric: true },
+                                { key: "Rate", label: "List Rate", isNumeric: true },
                                 { key: "Margin", label: "Margin", isNumeric: true },
                                 { key: "Margin_Percentage", label: "%", isNumeric: true }
                             ];
@@ -2257,6 +2707,7 @@ const BatchExportScreen: React.FC = () => {
                         const headers = ["S.No", ...enabledCols.map((c: any) => c.label)];
                         let serial = 1;
                         const body: any[] = [];
+                        const groupRowIndices: number[] = [];
 
                         if (groupingCols.length > 0) {
                             const grpKey = groupingCols[0];
@@ -2268,15 +2719,17 @@ const BatchExportScreen: React.FC = () => {
                             });
 
                             groupMap.forEach((grpRows, val) => {
+                                groupRowIndices.push(body.length);
                                 const groupRow = [
                                     "",
                                     `Group: ${grpKey} = ${val}`,
                                     ...enabledCols.slice(1).map((c: any) => {
                                         if (c.isNumeric || c.key === "Rate" || c.key === "Min_Rate" || c.key === "Max_Rate" || c.key === "COGS" || c.key === "Margin") {
                                             const sum = grpRows.reduce((s: number, r: any) => s + (Number(r[c.key]) || 0), 0);
-                                            return c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage"
-                                                ? (sum / grpRows.length).toFixed(2) + "%"
-                                                : String(sum.toFixed(2));
+                                            const finalNum = c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage"
+                                                ? (sum / grpRows.length)
+                                                : sum;
+                                            return finalNum.toFixed(1);
                                         }
                                         return "";
                                     })
@@ -2286,7 +2739,9 @@ const BatchExportScreen: React.FC = () => {
                                 grpRows.forEach((r: any) => {
                                     body.push([
                                         String(serial++),
-                                        ...enabledCols.map((c: any) => String(r[c.key] ?? ""))
+                                        ...enabledCols.map((c: any) => {
+                                            return formatExportCellValue(r[c.key], c.key, r, true);
+                                        })
                                     ]);
                                 });
                             });
@@ -2294,18 +2749,47 @@ const BatchExportScreen: React.FC = () => {
                             rawRows.forEach((r: any) => {
                                 body.push([
                                     String(serial++),
-                                    ...enabledCols.map((c: any) => String(r[c.key] ?? ""))
+                                    ...enabledCols.map((c: any) => {
+                                        return formatExportCellValue(r[c.key], c.key, r, true);
+                                    })
                                 ]);
                             });
                         }
+
+                        const { pdfFontSize, cellPad, columnStyles } = getDynamicTableStyles(headers, enabledCols, 277);
 
                         autoTable(doc, {
                             startY: 25,
                             head: [headers],
                             body,
-                            theme: "striped",
-                            styles: { fontSize: 7, cellPadding: 1.5 },
-                            headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] }
+                            theme: "grid",
+                            margin: { left: 10, right: 10 },
+                            tableWidth: 277,
+                            styles: {
+                                font: activeFontName,
+                                fontSize: pdfFontSize,
+                                cellPadding: cellPad,
+                                overflow: "linebreak",
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2,
+                                textColor: [0, 0, 0]
+                            },
+                            headStyles: {
+                                font: activeFontName,
+                                fillColor: [255, 255, 0], // Yellow Header (#FFFF00)
+                                textColor: [0, 0, 0], // Black Bold text
+                                fontStyle: "bold",
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2
+                            },
+                            columnStyles,
+                            didParseCell: (cellData) => {
+                                if (groupRowIndices.includes(cellData.row.index)) {
+                                    cellData.cell.styles.fillColor = [219, 234, 254];
+                                    cellData.cell.styles.textColor = [30, 58, 138];
+                                    cellData.cell.styles.fontStyle = "bold";
+                                }
+                            }
                         });
                     }
                     // 3. RECIEVABLE PAYABLE
@@ -2377,8 +2861,23 @@ const BatchExportScreen: React.FC = () => {
                             startY: 25,
                             head: tableHeaders,
                             body: tableBody,
-                            styles: { fontSize: 8 },
-                            headStyles: { fillColor: [30, 58, 138] },
+                            theme: "grid",
+                            styles: {
+                                font: activeFontName,
+                                fontSize: 8,
+                                cellPadding: 2,
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2,
+                                textColor: [0, 0, 0]
+                            },
+                            headStyles: {
+                                font: activeFontName,
+                                fillColor: [255, 255, 0],
+                                textColor: [0, 0, 0],
+                                fontStyle: "bold",
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2
+                            },
                             didParseCell: (cellData) => {
                                 if (cellData.row.index === tableBody.length - 1) {
                                     cellData.cell.styles.fontStyle = "bold";
@@ -2391,6 +2890,9 @@ const BatchExportScreen: React.FC = () => {
                                     if (cellData.column.index === 4 || cellData.column.index === 5) cellData.cell.styles.halign = "right";
                                 } else if (cellData.column.index === 4 || cellData.column.index === 5) {
                                     cellData.cell.styles.halign = "right";
+                                }
+                                if (cellData.column.index === 0) {
+                                    cellData.cell.styles.halign = "center";
                                 }
                             }
                         });
@@ -2446,8 +2948,22 @@ const BatchExportScreen: React.FC = () => {
                             startY: 25,
                             head: [["Particulars (Debit)", "Debit Amt", "Particulars (Credit)", "Credit amt"]],
                             body: pdfBody,
-                            styles: { fontSize: 7.5, cellPadding: 1.5 },
-                            headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] },
+                            styles: {
+                                font: activeFontName,
+                                fontSize: 7.5,
+                                cellPadding: 1.5,
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2,
+                                textColor: [0, 0, 0]
+                            },
+                            headStyles: {
+                                font: activeFontName,
+                                fillColor: [255, 255, 0],
+                                textColor: [0, 0, 0],
+                                fontStyle: "bold",
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2
+                            },
                             theme: "grid",
                             didParseCell: (cellData) => {
                                 const valL = cellData.row.cells[0]?.text?.[0] || "";
@@ -2485,8 +3001,22 @@ const BatchExportScreen: React.FC = () => {
                             head,
                             body,
                             theme: "grid",
-                            styles: { fontSize: 7, cellPadding: 1.5 },
-                            headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] }
+                            styles: {
+                                font: activeFontName,
+                                fontSize: 7,
+                                cellPadding: 1.5,
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2,
+                                textColor: [0, 0, 0]
+                            },
+                            headStyles: {
+                                font: activeFontName,
+                                fillColor: [255, 255, 0],
+                                textColor: [0, 0, 0],
+                                fontStyle: "bold",
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2
+                            }
                         });
                     }
                     // 6. OUTSTANDING MANAGEMENT / RECIEVABLE PAYABLE MGT
@@ -2525,8 +3055,23 @@ const BatchExportScreen: React.FC = () => {
                             startY: 18,
                             head: [["Account Name", "Days", data.amountColumnTitle]],
                             body: tableBody,
-                            styles: { fontSize: 8.5, cellPadding: 2 },
-                            headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255], fontStyle: "bold" },
+                            theme: "grid",
+                            styles: {
+                                font: activeFontName,
+                                fontSize: 8.5,
+                                cellPadding: 2,
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2,
+                                textColor: [0, 0, 0]
+                            },
+                            headStyles: {
+                                font: activeFontName,
+                                fillColor: [255, 255, 0],
+                                textColor: [0, 0, 0],
+                                fontStyle: "bold",
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2
+                            },
                             didParseCell: (cellData) => {
                                 if (cellData.row.index === 0) {
                                     cellData.cell.styles.fillColor = [239, 246, 255];
@@ -2558,7 +3103,8 @@ const BatchExportScreen: React.FC = () => {
                         doc.setFontSize(9);
                         doc.text(`Period: ${fromDate} to ${toDate}`, 210, 12);
 
-                        const tableHead = [["S.No", ...activeCols.map((c: any) => c.label)]];
+                        const headRow = ["S.No", ...activeCols.map((c: any) => c.label)];
+                        const tableHead = [headRow];
                         const tableBody: any[] = [];
                         const groupRowIndices: number[] = [];
 
@@ -2569,19 +3115,39 @@ const BatchExportScreen: React.FC = () => {
                                 tableBody.push([
                                     idx + 1,
                                     ...activeCols.map((c: any) => {
-                                        const val = item[c.key];
-                                        return val !== undefined && val !== null ? val : "-";
+                                        return formatExportCellValue(item[c.key], c.key, item, true);
                                     }),
                                 ]);
                             });
                         });
 
+                        const { pdfFontSize, cellPad, columnStyles } = getDynamicTableStyles(headRow, activeCols, 277);
+
                         autoTable(doc, {
                             startY: 22,
                             head: tableHead,
                             body: tableBody,
-                            styles: { fontSize: 8, cellPadding: 2 },
-                            headStyles: { fillColor: [255, 215, 0], textColor: [0, 0, 0], fontStyle: "bold" },
+                            theme: "grid",
+                            margin: { left: 10, right: 10 },
+                            tableWidth: 277,
+                            styles: {
+                                font: activeFontName,
+                                fontSize: pdfFontSize,
+                                cellPadding: cellPad,
+                                overflow: "linebreak",
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.15,
+                                textColor: [0, 0, 0]
+                            },
+                            headStyles: {
+                                font: activeFontName,
+                                fillColor: [255, 255, 0],
+                                textColor: [0, 0, 0],
+                                fontStyle: "bold",
+                                lineColor: [0, 0, 0],
+                                lineWidth: 0.2
+                            },
+                            columnStyles,
                             didParseCell: (cellData) => {
                                 if (groupRowIndices.includes(cellData.row.index)) {
                                     cellData.cell.styles.fillColor = [219, 234, 254];
@@ -2591,7 +3157,7 @@ const BatchExportScreen: React.FC = () => {
                             },
                         });
                     }
-                    // 8. STANDARD TABLE ROWS (Supports Template Columns)
+                    // 8. STANDARD TABLE ROWS (Supports Template Columns & Yellow Header Box Layout)
                     else {
                         doc.setFillColor(30, 58, 138);
                         doc.rect(0, 0, 297, 18, "F");
@@ -2608,35 +3174,56 @@ const BatchExportScreen: React.FC = () => {
                             doc.setTextColor(100, 100, 100);
                             doc.text("No records found for this period.", 14, 35);
                         } else {
-                            let head: string[][] = [];
-                            let body: any[][] = [];
-
+                            let colsToUse: Array<{ key: string; label: string }> = [];
                             if (templateCols.length > 0) {
-                                head = [templateCols.map((c: any) => c.label || c.key)];
-                                body = rawRows.map((r: any) =>
-                                    templateCols.map((c: any) => {
-                                        const val = r[c.key];
-                                        return typeof val === "number" ? val.toLocaleString("en-IN") : String(val ?? "");
-                                    })
-                                );
+                                colsToUse = templateCols.map((c: any) => ({
+                                    key: c.key,
+                                    label: c.label || c.key,
+                                }));
                             } else {
-                                const keys = Object.keys(rawRows[0]).slice(0, 9);
-                                head = [keys.map((k) => k.replace(/_/g, " ").toUpperCase())];
-                                body = rawRows.map((r: any) =>
-                                    keys.map((k) => {
-                                        const val = r[k];
-                                        return typeof val === "number" ? val.toLocaleString("en-IN") : String(val ?? "");
-                                    })
-                                );
+                                const keys = Object.keys(rawRows[0]).slice(0, 15);
+                                colsToUse = keys.map((k) => ({
+                                    key: k,
+                                    label: k.replace(/_/g, " ").toUpperCase(),
+                                }));
                             }
+
+                            const headRow = ["S.No", ...colsToUse.map((c) => c.label)];
+                            const head = [headRow];
+                            const { pdfFontSize, cellPad, columnStyles } = getDynamicTableStyles(headRow, colsToUse, 277);
+
+                            const body = rawRows.map((r: any, idx: number) => [
+                                idx + 1,
+                                ...colsToUse.map((c) => {
+                                    return formatExportCellValue(r[c.key], c.key, r, true);
+                                }),
+                            ]);
 
                             autoTable(doc, {
                                 startY: 25,
                                 head,
                                 body,
                                 theme: "grid",
-                                styles: { fontSize: 7, cellPadding: 1.5 },
-                                headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255] }
+                                margin: { left: 10, right: 10 },
+                                tableWidth: 277,
+                                styles: {
+                                    font: activeFontName,
+                                    fontSize: pdfFontSize,
+                                    cellPadding: cellPad,
+                                    overflow: "linebreak",
+                                    lineColor: [0, 0, 0],
+                                    lineWidth: 0.15,
+                                    textColor: [0, 0, 0],
+                                },
+                                headStyles: {
+                                    font: activeFontName,
+                                    fillColor: [255, 255, 0], // Yellow Header (#FFFF00)
+                                    textColor: [0, 0, 0], // Black text
+                                    fontStyle: "bold",
+                                    lineColor: [0, 0, 0],
+                                    lineWidth: 0.2,
+                                },
+                                columnStyles,
                             });
                         }
                     }

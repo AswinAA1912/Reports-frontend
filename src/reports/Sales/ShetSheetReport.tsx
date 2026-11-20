@@ -923,7 +923,7 @@ const ShetSheetReport: React.FC = () => {
 
             {/* MAIN CONTENT AREA */}
             <AppLayout fullWidth>
-                <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
                     {loading ? (
                         <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", flex: 1 }}>
                             <CircularProgress size={40} />
@@ -934,12 +934,21 @@ const ShetSheetReport: React.FC = () => {
                                 component={Paper}
                                 sx={{
                                     flex: 1,
-                                    overflow: "auto",
+                                    width: "100%",
+                                    overflowY: "auto",
+                                    overflowX: "hidden",
                                     border: "1px solid #cbd5e1",
                                     boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                                 }}
                             >
-                                <Table stickyHeader size="small">
+                                <Table
+                                    stickyHeader
+                                    size="small"
+                                    sx={{
+                                        tableLayout: "fixed",
+                                        width: "100%",
+                                    }}
+                                >
                                     <TableHead>
                                         <TableRow>
                                             <TableCell
@@ -967,8 +976,10 @@ const ShetSheetReport: React.FC = () => {
                                                             fontWeight: "bold",
                                                             fontSize: "0.78rem",
                                                             borderRight: "1px solid #3b82f6",
-                                                            whiteSpace: "nowrap",
                                                             cursor: "pointer",
+                                                            p: "6px 8px",
+                                                            overflow: "hidden",
+                                                            textOverflow: "ellipsis",
                                                         }}
                                                         onClick={(e) => {
                                                             if (col.isNumeric) {
@@ -1097,8 +1108,11 @@ const ShetSheetReport: React.FC = () => {
                                                                             sx={{
                                                                                 fontSize: "0.78rem",
                                                                                 py: 0.5,
+                                                                                px: 1,
                                                                                 borderRight: "1px solid #e2e8f0",
-                                                                                whiteSpace: "nowrap",
+                                                                                overflow: "hidden",
+                                                                                textOverflow: "ellipsis",
+                                                                                wordBreak: "break-word",
                                                                             }}
                                                                         >
                                                                             {row[col.key] !== undefined && row[col.key] !== null

@@ -295,11 +295,35 @@ const PageHeader: React.FC<PageHeaderProps> = ({
 
     const loadTemplates = async () => {
       try {
+        let templatesList: any[] = [];
         const res = await SettingsService.getReportsByParent(currentPageLabel);
 
-        if (res.data.success) {
-          const templatesList = res.data.data || [];
+        if (res.data.success && Array.isArray(res.data.data)) {
+          templatesList = res.data.data;
+        }
 
+        // Cross-alias lookup for OUTSTANDING MANAGEMENT <-> RECIEVABLE PAYABLE
+        const normLabel = currentPageLabel.toUpperCase().trim();
+        if (normLabel.includes("OUTSTANDING MANAGEMENT") || normLabel.includes("RECIEVABLE PAYABLE") || normLabel.includes("RECEIVABLE PAYABLE")) {
+          const alternate = (normLabel.includes("RECIEVABLE") || normLabel.includes("RECEIVABLE"))
+            ? "OUTSTANDING MANAGEMENT"
+            : "RECIEVABLE PAYABLE";
+
+          try {
+            const altRes = await SettingsService.getReportsByParent(alternate);
+            if (altRes.data.success && Array.isArray(altRes.data.data)) {
+              altRes.data.data.forEach((altT: any) => {
+                if (!templatesList.some((t: any) => t.Report_Id === altT.Report_Id)) {
+                  templatesList.push(altT);
+                }
+              });
+            }
+          } catch (altErr) {
+            // ignore
+          }
+        }
+
+        if (templatesList.length > 0 || res.data.success) {
           // For regular users (non-Dev/Admin), only include templates explicitly allowed in user rights
           let filteredTemplates = templatesList;
           if (!isDevOrAdmin) {

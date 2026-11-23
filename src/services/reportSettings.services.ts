@@ -129,5 +129,13 @@ export const SettingsService = {
         return axios.delete(`${getBaseURL()}api/reports/settings/deleteReport/${reportId}`);
     },
 
+    /* 🔹 8. Batch Export Presets (Saved in tbl_ERP_Report) */
+    getBatchPresets: () =>
+        axios.get<{ success: boolean; data: any[] }>(`${getBaseURL()}api/reports/settings/batchPresets`),
 
+    saveBatchPreset: (payload: { id?: string; name: string; reports: any[]; createdBy?: number }) =>
+        axios.post<{ success: boolean; message: string; data?: any }>(`${getBaseURL()}api/reports/settings/batchPresets`, payload),
+
+    deleteBatchPreset: (id: string) =>
+        axios.delete<{ success: boolean; message: string }>(`${getBaseURL()}api/reports/settings/batchPresets/${id}`),
 };

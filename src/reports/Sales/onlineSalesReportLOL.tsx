@@ -88,9 +88,27 @@ const NUMERIC_KEYS = [
     "Item_Count",
     "Total_Invoice_value",
     "Rate",
+    "Rate_Master_Rate",
+    "Cost_Rate",
+    "RM_Min_Rate",
+    "List_Rate",
+    "Diff",
+    "Diff_Percentage",
     "Bill_Qty",
     "Amount",
 ];
+
+const isNumericKey = (key: string): boolean => {
+    if (!key) return false;
+    const cleanKey = key.trim().toUpperCase();
+    return NUMERIC_KEYS.some(k => k.toUpperCase() === cleanKey);
+};
+
+const isCurrencyKey = (key: string): boolean => {
+    if (!key) return false;
+    const cleanKey = key.trim().toUpperCase();
+    return CURRENCY_KEYS.some(k => k.toUpperCase() === cleanKey);
+};
 
 const SUMMABLE_KEYS = new Set([
     "Total_Invoice_value",
@@ -190,7 +208,7 @@ const SortableColumnRow = ({ column, onToggle, hasActiveFilter, }: SortableColum
     );
 };
 
-const CURRENCY_KEYS = ["Total_Invoice_value", "Amount", "Rate"];
+const CURRENCY_KEYS = ["Total_Invoice_value", "Amount", "Rate", "Rate_Master_Rate", "Cost_Rate", "RM_Min_Rate", "List_Rate", "Diff"];
 
 const formatCreatedOn = (dateString: any): string => {
     if (!dateString) return "-";
@@ -240,22 +258,51 @@ const buildColumnsFromApi = (
             ? ABSTRACT_DEFAULT_KEYS
             : EXPANDED_DEFAULT_KEYS;
 
-    return Object.keys(rows[0]).map((key, index) => {
+    const cols: ColumnConfig[] = Object.keys(rows[0]).map((key, index) => {
         const matched = lolColumns.find(
             col => col.ColumnName?.toUpperCase() === key.toUpperCase()
         );
-        const label = (matched && matched.Alias_Name && matched.Alias_Name.trim())
+        let label = (matched && matched.Alias_Name && matched.Alias_Name.trim())
             ? matched.Alias_Name.trim()
             : key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+        if (key === "Diff_Percentage") {
+            label = "% Diff";
+        } else if (key === "Diff") {
+            label = "Diff";
+        }
 
         return {
             key,
             label,
             enabled: defaults.includes(key),
-            isNumeric: NUMERIC_KEYS.includes(key),
+            isNumeric: isNumericKey(key),
             order: index,
         };
     });
+
+    // Ensure Diff and % Diff are present in column configuration
+    if (!cols.some(c => c.key === "Diff")) {
+        cols.push({
+            key: "Diff",
+            label: "Diff",
+            enabled: false,
+            isNumeric: true,
+            order: cols.length,
+        });
+    }
+
+    if (!cols.some(c => c.key === "Diff_Percentage")) {
+        cols.push({
+            key: "Diff_Percentage",
+            label: "% Diff",
+            enabled: false,
+            isNumeric: true,
+            order: cols.length,
+        });
+    }
+
+    return cols;
 };
 
 const formatINR = (value: number) =>
@@ -440,7 +487,18 @@ const OnlineSalesReportLOL: React.FC = () => {
             })
         ])
             .then(([currentLol, res]) => {
-                const apiRows = res.data.data || [];
+                const rawApiRows = res.data.data || [];
+                const apiRows = rawApiRows.map((row: any) => {
+                    const r = Number(row.Rate) || 0;
+                    const rm = Number(row.List_Rate ?? row.Rate_Master_Rate ?? row.Rate_Master ?? row.rate_master_rate ?? row.RateMasterRate ?? 0);
+                    const diff = Number((rm - r).toFixed(2));
+                    const diffPercent = rm !== 0 ? Number((((rm - r) / rm) * 100).toFixed(2)) : 0;
+                    return {
+                        ...row,
+                        Diff: diff,
+                        Diff_Percentage: diffPercent,
+                    };
+                });
 
                 let cols = buildColumnsFromApi(apiRows, toggleMode, currentLol);
 
@@ -503,6 +561,7 @@ const OnlineSalesReportLOL: React.FC = () => {
             Date: { from: todayDate, to: todayDate },
             columnFilters: {},
         });
+        setNumRangeFilter({});
 
         // ✅ Reset grouping
         // Reset BOTH modes
@@ -577,12 +636,10 @@ const OnlineSalesReportLOL: React.FC = () => {
                         ? (rawVal ? dayjs(rawVal).format("DD/MM/YYYY") : "-")
                         : String(rawVal ?? "");
 
-                const rowValue = formattedVal.trim().toLowerCase();
-                const rawRowValue = String(rawVal ?? "").trim().toLowerCase();
-
+                // Match exact formatted value or raw value, trimmed
                 const match = values.some(v => {
-                    const target = String(v).trim().toLowerCase();
-                    return target === rowValue || target === rawRowValue;
+                    const target = String(v ?? "").trim();
+                    return target === formattedVal.trim() || target === String(rawVal ?? "").trim();
                 });
 
                 if (!match) return false;
@@ -665,6 +722,12 @@ const OnlineSalesReportLOL: React.FC = () => {
                         ? Number((Number(entry.Amount) / Number(entry.Bill_Qty)).toFixed(2))
                         : entry.Rate;
                 }
+
+                // Recalculate Diff and Diff_Percentage on aggregated entry
+                const aggRate = Number(entry.Rate) || 0;
+                const aggRm = Number(entry.List_Rate ?? entry.Rate_Master_Rate ?? entry.Rate_Master ?? entry.rate_master_rate ?? entry.RateMasterRate ?? 0);
+                entry.Diff = Number((aggRm - aggRate).toFixed(2));
+                entry.Diff_Percentage = aggRm !== 0 ? Number((((aggRm - aggRate) / aggRm) * 100).toFixed(2)) : 0;
             }
         }
 
@@ -887,11 +950,35 @@ const OnlineSalesReportLOL: React.FC = () => {
 
     const baseRows = sortedRows;
 
-    const getTotal = (key: string) => {
-        if (key === "Rate") {
+    const getTotal = (key: string): number => {
+        if (key === "Rate" || key === "Cost_Rate" || key === "RM_Min_Rate" || key === "List_Rate" || key === "Rate_Master_Rate") {
+            const totalQty = baseRows.reduce((s, r) => s + Number(r["Bill_Qty"] || 0), 0);
+            const totalAmt = baseRows.reduce((s, r) => s + (Number(r["Bill_Qty"] || 0) * Number(r[key] || 0)), 0);
+            return totalQty > 0 ? Number((totalAmt / totalQty).toFixed(2)) : 0;
+        }
+        if (key === "Diff") {
             const totalQty = baseRows.reduce((s, r) => s + Number(r["Bill_Qty"] || 0), 0);
             const totalAmt = baseRows.reduce((s, r) => s + Number(r["Amount"] || 0), 0);
-            return totalQty > 0 ? Number((totalAmt / totalQty).toFixed(2)) : 0;
+            const avgRate: number = totalQty > 0 ? totalAmt / totalQty : 0;
+            const totalMasterAmt = baseRows.reduce((s, r) => {
+                const qty = Number(r["Bill_Qty"] || 0);
+                const rm = Number(r["List_Rate"] ?? r["Rate_Master_Rate"] ?? r["Rate_Master"] ?? r["rate_master_rate"] ?? r["RateMasterRate"] ?? 0);
+                return s + (qty * rm);
+            }, 0);
+            const avgMasterRate = totalQty > 0 ? totalMasterAmt / totalQty : 0;
+            return Number((avgMasterRate - avgRate).toFixed(2));
+        }
+        if (key === "Diff_Percentage") {
+            const totalQty = baseRows.reduce((s, r) => s + Number(r["Bill_Qty"] || 0), 0);
+            const totalAmt = baseRows.reduce((s, r) => s + Number(r["Amount"] || 0), 0);
+            const avgRate: number = totalQty > 0 ? totalAmt / totalQty : 0;
+            const totalMasterAmt = baseRows.reduce((s, r) => {
+                const qty = Number(r["Bill_Qty"] || 0);
+                const rm = Number(r["List_Rate"] ?? r["Rate_Master_Rate"] ?? r["Rate_Master"] ?? r["rate_master_rate"] ?? r["RateMasterRate"] ?? 0);
+                return s + (qty * rm);
+            }, 0);
+            const avgMasterRate = totalQty > 0 ? totalMasterAmt / totalQty : 0;
+            return avgMasterRate !== 0 ? Number((((avgMasterRate - avgRate) / avgMasterRate) * 100).toFixed(2)) : 0;
         }
         return Number(
             baseRows.reduce((s, r) => s + Number(r[key] || 0), 0).toFixed(2)
@@ -981,7 +1068,7 @@ const OnlineSalesReportLOL: React.FC = () => {
                         if (activeHeader === "Ledger_Date") return dayjs(rawVal).format("DD/MM/YYYY");
                         return String(rawVal).trim();
                     })
-                    .filter((v): v is string => Boolean(v))
+                    .filter((v): v is string => Boolean(v && v.trim()))
             )
         );
 
@@ -1019,6 +1106,9 @@ const OnlineSalesReportLOL: React.FC = () => {
             }
             if (col.key === "Created_on") {
                 return formatCreatedOn(row[col.key]);
+            }
+            if (col.key === "Diff_Percentage") {
+                return `${Number(row[col.key] || 0).toFixed(2)}%`;
             }
             return row[col.key] ?? "";
         };
@@ -1086,13 +1176,37 @@ const OnlineSalesReportLOL: React.FC = () => {
                                 `${" ".repeat(row.__level * 4)}${formattedVal}`;
                         }
                         else if (col.isNumeric) {
-
-                            exportGroup[col.label] =
-                                row.__rows.reduce(
-                                    (sum: number, r: any) =>
-                                        sum + Number(r[col.key] || 0),
-                                    0
-                                );
+                            if (col.key === "Diff") {
+                                const groupQty = row.__rows.reduce((s: number, r: any) => s + Number(r["Bill_Qty"] || 0), 0);
+                                const groupAmt = row.__rows.reduce((s: number, r: any) => s + Number(r["Amount"] || 0), 0);
+                                const avgRate = groupQty > 0 ? groupAmt / groupQty : 0;
+                                const groupMasterAmt = row.__rows.reduce((s: number, r: any) => {
+                                    const qty = Number(r["Bill_Qty"] || 0);
+                                    const rm = Number(r["List_Rate"] ?? r["Rate_Master_Rate"] ?? r["Rate_Master"] ?? r["rate_master_rate"] ?? r["RateMasterRate"] ?? 0);
+                                    return s + (qty * rm);
+                                }, 0);
+                                const avgMasterRate = groupQty > 0 ? groupMasterAmt / groupQty : 0;
+                                exportGroup[col.label] = Number((avgMasterRate - avgRate).toFixed(2));
+                            } else if (col.key === "Diff_Percentage") {
+                                const groupQty = row.__rows.reduce((s: number, r: any) => s + Number(r["Bill_Qty"] || 0), 0);
+                                const groupAmt = row.__rows.reduce((s: number, r: any) => s + Number(r["Amount"] || 0), 0);
+                                const avgRate = groupQty > 0 ? groupAmt / groupQty : 0;
+                                const groupMasterAmt = row.__rows.reduce((s: number, r: any) => {
+                                    const qty = Number(r["Bill_Qty"] || 0);
+                                    const rm = Number(r["List_Rate"] ?? r["Rate_Master_Rate"] ?? r["Rate_Master"] ?? r["rate_master_rate"] ?? r["RateMasterRate"] ?? 0);
+                                    return s + (qty * rm);
+                                }, 0);
+                                const avgMasterRate = groupQty > 0 ? groupMasterAmt / groupQty : 0;
+                                const diffPercent = avgMasterRate !== 0 ? Number((((avgMasterRate - avgRate) / avgMasterRate) * 100).toFixed(2)) : 0;
+                                exportGroup[col.label] = `${diffPercent.toFixed(2)}%`;
+                            } else {
+                                exportGroup[col.label] =
+                                    row.__rows.reduce(
+                                        (sum: number, r: any) =>
+                                            sum + Number(r[col.key] || 0),
+                                        0
+                                    );
+                            }
                         }
                         else {
                             exportGroup[col.label] = "";
@@ -1260,6 +1374,36 @@ const OnlineSalesReportLOL: React.FC = () => {
                 expanded: expandedCols,
             });
 
+            // Restore saved header filters / numerical range filters for this template
+            const savedRangeFilter = localStorage.getItem(`template_rangeFilter_${reportId}`);
+            if (savedRangeFilter) {
+                try {
+                    setNumRangeFilter(JSON.parse(savedRangeFilter));
+                } catch (e) {
+                    console.warn("Failed to parse saved range filter", e);
+                }
+            } else {
+                setNumRangeFilter({});
+            }
+
+            const savedColFilters = localStorage.getItem(`template_colFilters_${reportId}`);
+            if (savedColFilters) {
+                try {
+                    const parsedFilters = JSON.parse(savedColFilters);
+                    setFilters(prev => ({
+                        ...prev,
+                        columnFilters: parsedFilters,
+                    }));
+                } catch (e) {
+                    console.warn("Failed to parse saved column filters", e);
+                }
+            } else {
+                setFilters(prev => ({
+                    ...prev,
+                    columnFilters: {},
+                }));
+            }
+
             if (absRes.data.data.reportInfo?.Report_Name) {
                 setReportName(absRes.data.data.reportInfo.Report_Name);
             }
@@ -1293,25 +1437,31 @@ const OnlineSalesReportLOL: React.FC = () => {
             const matched = lolColumns.find(
                 col => col.ColumnName?.toUpperCase() === t.key.toUpperCase()
             );
-            const label = (matched && matched.Alias_Name && matched.Alias_Name.trim())
+            let label = (matched && matched.Alias_Name && matched.Alias_Name.trim())
                 ? matched.Alias_Name.trim()
                 : (t.label || t.key);
+
+            if (t.key === "Diff_Percentage") {
+                label = "% Diff";
+            } else if (t.key === "Diff") {
+                label = "Diff";
+            }
 
             return {
                 key: t.key,
                 label,
-                enabled: t.enabled,
+                enabled: Boolean(t.enabled),
                 order: t.order ?? 0,
                 groupBy: t.groupBy ?? 0,
-                isNumeric: NUMERIC_KEYS.includes(t.key),
+                isNumeric: isNumericKey(t.key),
             };
         });
 
         const merged = templateBased.map(col => {
-            const base = baseCols.find(b => b.key === col.key);
+            const base = baseCols.find(b => b.key.toUpperCase() === col.key.toUpperCase());
             return {
                 ...col,
-                isNumeric: base?.isNumeric ?? col.isNumeric,
+                isNumeric: col.isNumeric || Boolean(base?.isNumeric) || isNumericKey(col.key),
             };
         });
 
@@ -1420,6 +1570,10 @@ const OnlineSalesReportLOL: React.FC = () => {
                     columns: expandedPayload
                 });
 
+                // Persist current range filters and header column filters for this template
+                localStorage.setItem(`template_rangeFilter_${selectedTemplateId}`, JSON.stringify(numRangeFilter));
+                localStorage.setItem(`template_colFilters_${selectedTemplateId}`, JSON.stringify(filters.columnFilters));
+
                 toast.success("Template Updated Successfully ✅");
             }
 
@@ -1427,7 +1581,7 @@ const OnlineSalesReportLOL: React.FC = () => {
                CREATE MODE
             ========================================= */
             else {
-                await SettingsService.saveReportSettings({
+                const res = await SettingsService.saveReportSettings({
                     reportName,
                     parentReport: parentReportName,
                     abstractSP: spConfig.abstractSP,
@@ -1436,6 +1590,12 @@ const OnlineSalesReportLOL: React.FC = () => {
                     expandedColumns: expandedPayload,
                     createdBy
                 });
+
+                const newReportId = (res as any)?.data?.reportId || (res as any)?.data?.data?.Report_Id || (res as any)?.data?.Report_Id;
+                if (newReportId) {
+                    localStorage.setItem(`template_rangeFilter_${newReportId}`, JSON.stringify(numRangeFilter));
+                    localStorage.setItem(`template_colFilters_${newReportId}`, JSON.stringify(filters.columnFilters));
+                }
 
                 toast.success("Template Saved Successfully ✅");
             }
@@ -1475,9 +1635,8 @@ const OnlineSalesReportLOL: React.FC = () => {
                         setSelectedTemplateId(null);
                         setReportName("");
                         setParentReportName("");
+                        const hadTemplate = templateConfig !== null;
                         setTemplateConfig(null);
-
-                        setToggleMode("Abstract");
 
                         setFromDate(todayDate);
                         setToDate(todayDate);
@@ -1486,6 +1645,7 @@ const OnlineSalesReportLOL: React.FC = () => {
                             Date: { from: todayDate, to: todayDate },
                             columnFilters: {},
                         });
+                        setNumRangeFilter({});
 
                         setSortConfig({
                             key: null,
@@ -1501,14 +1661,16 @@ const OnlineSalesReportLOL: React.FC = () => {
                         setAbstractExpandedKeys([]);
                         setExpandedExpandedKeys([]);
 
-                        setAbstractRows([]);
-                        setExpandedRows([]);
-                        setAbstractLoaded(false);
-                        setExpandedLoaded(false);
-                        setAbstractColumns([]);
-                        setExpandedColumns([]);
-                        setAbstractDateKey(null);
-                        setExpandedDateKey(null);
+                        if (hadTemplate) {
+                            setAbstractRows([]);
+                            setExpandedRows([]);
+                            setAbstractLoaded(false);
+                            setExpandedLoaded(false);
+                            setAbstractColumns([]);
+                            setExpandedColumns([]);
+                            setAbstractDateKey(null);
+                            setExpandedDateKey(null);
+                        }
                         setPage(1);
                         setSettingsAnchor(null);
                         setFilterAnchor(null);
@@ -1678,8 +1840,11 @@ const OnlineSalesReportLOL: React.FC = () => {
                                                     alignItems="center"
                                                     justifyContent="space-between"
                                                 >
-                                                    <Box sx={{ display: "flex", alignItems: "center" }}>
+                                                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                                                         {c.label}
+                                                        {filters.columnFilters[c.key] !== undefined && filters.columnFilters[c.key]!.length > 0 && (
+                                                            <FilterAltIcon sx={{ fontSize: "0.85rem", color: "#60a5fa" }} />
+                                                        )}
                                                     </Box>
                                                     <IconButton
                                                         size="small"
@@ -1719,9 +1884,11 @@ const OnlineSalesReportLOL: React.FC = () => {
                                     {enabledColumns.map((c) => (
                                         <TableCell key={c.key} align={c.isNumeric ? "right" : "left"}>
                                             {c.isNumeric
-                                                ? CURRENCY_KEYS.includes(c.key)
-                                                    ? formatINR(getTotal(c.key))
-                                                    : getTotal(c.key)
+                                                ? c.key === "Diff_Percentage"
+                                                    ? `${getTotal(c.key).toFixed(2)}%`
+                                                    : isCurrencyKey(c.key)
+                                                        ? formatINR(getTotal(c.key))
+                                                        : getTotal(c.key)
                                                 : ""}
                                         </TableCell>
                                     ))}
@@ -1776,17 +1943,45 @@ const OnlineSalesReportLOL: React.FC = () => {
                                                         }
 
                                                         if (c.isNumeric) {
-                                                            const total = row.__rows.reduce(
-                                                                (s: number, r: any) =>
-                                                                    s + Number(r[c.key] || 0),
-                                                                0
-                                                            );
+                                                            let displayTotal: React.ReactNode;
+                                                            if (c.key === "Diff") {
+                                                                const groupQty = row.__rows.reduce((s: number, r: any) => s + Number(r["Bill_Qty"] || 0), 0);
+                                                                const groupAmt = row.__rows.reduce((s: number, r: any) => s + Number(r["Amount"] || 0), 0);
+                                                                const avgRate = groupQty > 0 ? groupAmt / groupQty : 0;
+                                                                const groupMasterAmt = row.__rows.reduce((s: number, r: any) => {
+                                                                    const qty = Number(r["Bill_Qty"] || 0);
+                                                                    const rm = Number(r["List_Rate"] ?? r["Rate_Master_Rate"] ?? r["Rate_Master"] ?? r["rate_master_rate"] ?? r["RateMasterRate"] ?? 0);
+                                                                    return s + (qty * rm);
+                                                                }, 0);
+                                                                const avgMasterRate = groupQty > 0 ? groupMasterAmt / groupQty : 0;
+                                                                const diff = Number((avgMasterRate - avgRate).toFixed(2));
+                                                                displayTotal = formatINR(diff);
+                                                            } else if (c.key === "Diff_Percentage") {
+                                                                const groupQty = row.__rows.reduce((s: number, r: any) => s + Number(r["Bill_Qty"] || 0), 0);
+                                                                const groupAmt = row.__rows.reduce((s: number, r: any) => s + Number(r["Amount"] || 0), 0);
+                                                                const avgRate = groupQty > 0 ? groupAmt / groupQty : 0;
+                                                                const groupMasterAmt = row.__rows.reduce((s: number, r: any) => {
+                                                                    const qty = Number(r["Bill_Qty"] || 0);
+                                                                    const rm = Number(r["List_Rate"] ?? r["Rate_Master_Rate"] ?? r["Rate_Master"] ?? r["rate_master_rate"] ?? r["RateMasterRate"] ?? 0);
+                                                                    return s + (qty * rm);
+                                                                }, 0);
+                                                                const avgMasterRate = groupQty > 0 ? groupMasterAmt / groupQty : 0;
+                                                                const diffPercent = avgMasterRate !== 0 ? Number((((avgMasterRate - avgRate) / avgMasterRate) * 100).toFixed(2)) : 0;
+                                                                displayTotal = `${diffPercent.toFixed(2)}%`;
+                                                            } else {
+                                                                const total = row.__rows.reduce(
+                                                                    (s: number, r: any) =>
+                                                                        s + Number(r[c.key] || 0),
+                                                                    0
+                                                                );
+                                                                displayTotal = isCurrencyKey(c.key)
+                                                                    ? formatINR(total)
+                                                                    : total;
+                                                            }
 
                                                             return (
                                                                 <TableCell key={c.key} align="right">
-                                                                    {CURRENCY_KEYS.includes(c.key)
-                                                                        ? formatINR(total)
-                                                                        : total}
+                                                                    {displayTotal}
                                                                 </TableCell>
                                                             );
                                                         }
@@ -1805,13 +2000,24 @@ const OnlineSalesReportLOL: React.FC = () => {
 
                                                 {enabledColumns.map(c => {
                                                     const align = c.isNumeric ? "right" : "left";
+                                                    let displayVal: React.ReactNode;
+                                                    if (c.key === "Ledger_Date") {
+                                                        displayVal = dayjs(row[c.key]).format("DD/MM/YYYY");
+                                                    } else if (c.key === "Created_on") {
+                                                        displayVal = formatCreatedOn(row[c.key]);
+                                                    } else if (c.key === "Diff_Percentage") {
+                                                        const pVal = Number(row[c.key] || 0);
+                                                        displayVal = `${pVal.toFixed(2)}%`;
+                                                    } else if (isCurrencyKey(c.key)) {
+                                                        const nVal = Number(row[c.key] || 0);
+                                                        displayVal = formatINR(nVal);
+                                                    } else {
+                                                        displayVal = row[c.key];
+                                                    }
+
                                                     return (
                                                         <TableCell key={c.key} align={align}>
-                                                            {c.key === "Ledger_Date"
-                                                                ? dayjs(row[c.key]).format("DD/MM/YYYY")
-                                                                : c.key === "Created_on"
-                                                                    ? formatCreatedOn(row[c.key])
-                                                                    : row[c.key]}
+                                                            {displayVal}
                                                         </TableCell>
                                                     );
                                                 })}

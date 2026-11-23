@@ -120,7 +120,7 @@ const OutstandingManagementReport: React.FC = () => {
     const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
     const [reportName, setReportName] = useState<string>("");
     const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
-    const [parentReportName, setParentReportName] = useState<string>("OUTSTANDING MANAGEMENT");
+    const [parentReportName, setParentReportName] = useState<string>("RECIEVABLE PAYABLE");
 
     const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
@@ -160,7 +160,7 @@ const OutstandingManagementReport: React.FC = () => {
     // "CR_DR": "CR" show Cr fully as Recievable and DR as Payable
     const targetCrDr = toggleMode === "Abstract" ? "CR" : "DR";
     const amountColumnTitle = toggleMode === "Abstract" ? "Recievable Amt" : "Payable Amt";
-    const reportTitle = toggleMode === "Abstract" ? "Outstanding Management - Receivable" : "Outstanding Management - Payable";
+    const reportTitle = toggleMode === "Abstract" ? "RECIEVABLE PAYABLE - Receivable" : "RECIEVABLE PAYABLE - Payable";
 
     const processedData: ProcessedOutstandingRow[] = useMemo(() => {
         const filtered = rawRows.filter((r) => String(r.CR_DR || "").toUpperCase() === targetCrDr);
@@ -636,7 +636,7 @@ const OutstandingManagementReport: React.FC = () => {
                     loadTemplate(template.Report_Id);
                 }}
                 onQuickSave={(parentName) => {
-                    setParentReportName(parentName || "OUTSTANDING MANAGEMENT");
+                    setParentReportName(parentName || "RECIEVABLE PAYABLE");
                     if (!selectedTemplateId) {
                         setReportName("");
                     }

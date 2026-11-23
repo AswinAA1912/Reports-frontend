@@ -38,8 +38,14 @@ interface ReportFilterDrawerProps {
     fromDate?: string;
     onFromDateChange?: (value: string) => void;
     hideFromDate?: boolean;
+    disableFromDate?: boolean;
     fromDateLabel?: string;
     toDateLabel?: string;
+
+    // ALL DETAILS CHECKBOX (e.g. ShetSheet Report)
+    showAllDetailsFilter?: boolean;
+    allDetailsValue?: boolean;
+    onAllDetailsChange?: (value: boolean) => void;
 
     // OLD (keep for compatibility)
     dropdownLabel?: string;
@@ -116,8 +122,13 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
     onFromDateChange,
     onToDateChange,
     hideFromDate = false,
+    disableFromDate = false,
     fromDateLabel = "From Date",
     toDateLabel = "To Date",
+
+    showAllDetailsFilter = false,
+    allDetailsValue = false,
+    onAllDetailsChange,
 
     // OLD
     dropdownLabel,
@@ -254,10 +265,20 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                             type="date"
                             label={fromDateLabel}
                             fullWidth
+                            disabled={disableFromDate}
                             InputLabelProps={{ shrink: true }}
                             value={formatDateForInput(fromDate)}
                             onChange={(e) => onFromDateChange(e.target.value)}
-                            sx={{ mb: 2 }}
+                            sx={{
+                                mb: 2,
+                                ...(disableFromDate && {
+                                    opacity: 0.6,
+                                    "& .MuiInputBase-root": {
+                                        backgroundColor: "#e2e8f0",
+                                        cursor: "not-allowed",
+                                    },
+                                }),
+                            }}
                         />
                     )}
 
@@ -271,6 +292,32 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                             onChange={(e) => onToDateChange(e.target.value)}
                             sx={{ mb: 2 }}
                         />
+                    )}
+
+                    {/* ALL DETAILS CHECKBOX */}
+                    {showAllDetailsFilter && onAllDetailsChange && (
+                        <Box sx={{ mb: 2, display: "flex", alignItems: "center" }}>
+                            <FormControlLabel
+                                control={
+                                    <Checkbox
+                                        checked={Boolean(allDetailsValue)}
+                                        onChange={(e) => onAllDetailsChange(e.target.checked)}
+                                        size="small"
+                                        sx={{
+                                            color: "#1E3A8A",
+                                            "&.Mui-checked": {
+                                                color: "#1E3A8A",
+                                            },
+                                        }}
+                                    />
+                                }
+                                label={
+                                    <Typography sx={{ fontWeight: 600, color: "#1e293b", fontSize: "0.88rem" }}>
+                                        All Details
+                                    </Typography>
+                                }
+                            />
+                        </Box>
                     )}
 
                     {/* PURCHASE REPORT FILTER (RADIO TYPE) */}

@@ -15,7 +15,7 @@ export function useNumericalFilter<T>(
   const [activeHeader, setActiveHeader] = useState<string | null>(null);
 
   const isNumericColumn = (key: string) => {
-    return numericKeys.includes(key);
+    return numericKeys.some(k => k.toUpperCase() === key?.toUpperCase());
   };
 
   const getMinMax = (key: string) => {

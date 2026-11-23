@@ -73,6 +73,7 @@ export interface ShetSheetReportParams {
   Todate?: string;
   FromDate?: string;
   ToDate?: string;
+  allDetails?: boolean | string;
 }
 
 /* ================= SERVICE ================= */
@@ -91,6 +92,7 @@ export const ShetSheetReportService = {
           Todate: to,
           Fromdate: from,
           toDate: to,
+          allDetails: params?.allDetails,
         },
       }
     );

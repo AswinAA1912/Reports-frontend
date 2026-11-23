@@ -181,9 +181,11 @@ const ShetSheetReport: React.FC = () => {
     // Date Filters
     const [fromDate, setFromDate] = useState<string>(today);
     const [toDate, setToDate] = useState<string>(today);
+    const [allDetails, setAllDetails] = useState<boolean>(false);
     const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
     const [tempFromDate, setTempFromDate] = useState<string>(today);
     const [tempToDate, setTempToDate] = useState<string>(today);
+    const [tempAllDetails, setTempAllDetails] = useState<boolean>(false);
 
     // Data State
     const [rawItems, setRawItems] = useState<ShetSheetItem[]>([]);
@@ -388,12 +390,13 @@ const ShetSheetReport: React.FC = () => {
 
     /* ================= FETCH DATA ================= */
 
-    const fetchData = async (from = fromDate, to = toDate) => {
+    const fetchData = async (from = fromDate, to = toDate, isAll = allDetails) => {
         try {
             setLoading(true);
             const res = await ShetSheetReportService.getShetSheetReport({
                 Fromdate: from,
                 Todate: to,
+                allDetails: isAll,
             });
 
             const dataList: ShetSheetItem[] = res.data?.data || (Array.isArray(res.data) ? (res.data as any) : []);
@@ -476,7 +479,15 @@ const ShetSheetReport: React.FC = () => {
 
                 setSelectedTemplateId(templateId);
                 setReportName(settings.Report_Name || settings.reportInfo?.Report_Name || "");
+
+                // Load allDetails setting if saved with template
+                const savedAll = localStorage.getItem(`template_allDetails_${templateId}`);
+                const isAll = savedAll === "true";
+                setAllDetails(isAll);
+                setTempAllDetails(isAll);
+
                 toast.success("Template Loaded ✅");
+                fetchData(fromDate, toDate, isAll);
             }
         } catch (err) {
             console.error(err);
@@ -489,6 +500,8 @@ const ShetSheetReport: React.FC = () => {
     const handleClearTemplate = () => {
         setSelectedTemplateId(null);
         setReportName("");
+        setAllDetails(false);
+        setTempAllDetails(false);
         setColumns((prev) =>
             prev.map((c, i) => ({
                 ...c,
@@ -496,6 +509,7 @@ const ShetSheetReport: React.FC = () => {
                 order: i,
             }))
         );
+        fetchData(fromDate, toDate, false);
     };
 
     const handleQuickSave = async () => {
@@ -527,9 +541,10 @@ const ShetSheetReport: React.FC = () => {
                     reportName: reportName.trim(),
                     columns: payloadColumns,
                 });
+                localStorage.setItem(`template_allDetails_${selectedTemplateId}`, String(allDetails));
                 toast.success("Template Updated Successfully ✅");
             } else {
-                await SettingsService.saveReportSettings({
+                const saveRes: any = await SettingsService.saveReportSettings({
                     reportName: reportName.trim(),
                     parentReport: parentReportName,
                     abstractSP: "EXTERNAL_API",
@@ -538,6 +553,11 @@ const ShetSheetReport: React.FC = () => {
                     expandedColumns: payloadColumns,
                     createdBy,
                 });
+                const newId = saveRes?.data?.Report_Id || saveRes?.data?.data?.Report_Id;
+                if (newId) {
+                    setSelectedTemplateId(newId);
+                    localStorage.setItem(`template_allDetails_${newId}`, String(allDetails));
+                }
                 toast.success("Template Saved Successfully ✅");
             }
 
@@ -904,6 +924,7 @@ const ShetSheetReport: React.FC = () => {
                         if (!prev) {
                             setTempFromDate(fromDate);
                             setTempToDate(toDate);
+                            setTempAllDetails(allDetails);
                         }
                         return !prev;
                     });
@@ -913,11 +934,16 @@ const ShetSheetReport: React.FC = () => {
                 onFromDateChange={setTempFromDate}
                 toDate={tempToDate}
                 onToDateChange={setTempToDate}
+                disableFromDate={tempAllDetails}
+                showAllDetailsFilter={true}
+                allDetailsValue={tempAllDetails}
+                onAllDetailsChange={setTempAllDetails}
                 onApply={() => {
                     setFromDate(tempFromDate);
                     setToDate(tempToDate);
+                    setAllDetails(tempAllDetails);
                     setDrawerOpen(false);
-                    fetchData(tempFromDate, tempToDate);
+                    fetchData(tempFromDate, tempToDate, tempAllDetails);
                 }}
             />
 

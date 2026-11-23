@@ -833,7 +833,19 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
             const isExp = mode === "Expanded";
             const service = isExp ? onlineSalesReportItemLOLService.getReportsItemLOL : onlineSalesReportLOLService.getReportsLOL;
             const res = await service({ Fromdate: from, Todate: to });
-            const rows = res.data?.data || [];
+            const rawRows = res.data?.data || [];
+
+            let rows = rawRows.map((row: any) => {
+                const r = Number(row.Rate) || 0;
+                const rm = Number(row.List_Rate ?? row.Rate_Master_Rate ?? row.Rate_Master ?? row.rate_master_rate ?? row.RateMasterRate ?? 0);
+                const diff = Number((rm - r).toFixed(2));
+                const diffPercent = rm !== 0 ? Number((((rm - r) / rm) * 100).toFixed(2)) : 0;
+                return {
+                    ...row,
+                    Diff: diff,
+                    Diff_Percentage: `${diffPercent.toFixed(2)}%`,
+                };
+            });
 
             let templateCols: any[] = [];
             if (templateId && templateId !== "default") {
@@ -1171,9 +1183,18 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
         modes: ["Default"],
         exportTypes: ["Standard"],
         fetchData: async ({ from, to, templateId }) => {
+            let isAllDetails = false;
+            if (templateId && templateId !== "default") {
+                const savedAll = localStorage.getItem(`template_allDetails_${templateId}`);
+                if (savedAll !== null) {
+                    isAllDetails = savedAll === "true";
+                }
+            }
+
             const res = await ShetSheetReportService.getShetSheetReport({
                 Fromdate: from,
                 Todate: to,
+                allDetails: isAllDetails,
             });
             const rawItems: ShetSheetItem[] = res.data?.data || (Array.isArray(res.data) ? (res.data as any) : []);
 
@@ -1394,13 +1415,46 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
                 Todate: to,
                 Godown_Id: godownId,
             });
-            const rows: StockDifferenceItem[] = res.data?.data || (Array.isArray(res.data) ? (res.data as any) : []);
+            const rawItems: StockDifferenceItem[] = res.data?.data || (Array.isArray(res.data) ? (res.data as any) : []);
+
+            // Default frontend columns matching StockDifferenceReport.tsx exactly:
+            const defaultFrontendCols = [
+                { key: "Godown_Name", label: "Godown" },
+                { key: "Stock_Date", label: "Date" },
+                { key: "Grade_Item_Group", label: "Grade Item Group" },
+                { key: "Item_Name", label: "Item Name" },
+                { key: "System_Qty", label: "System Stock" },
+                { key: "Actual_Qty", label: "Manual Stock" },
+                { key: "Difference_Qty", label: "Difference" },
+                { key: "Remarks", label: "Remarks" },
+                { key: "Created_At", label: "Created Date-Time" },
+            ];
+
+            const activeCols = templateCols.length > 0 ? templateCols : defaultFrontendCols;
+
+            // Group by Stock_Group exactly like the parent StockDifferenceReport.tsx screen
+            const groupMap = new Map<string, StockDifferenceItem[]>();
+            rawItems.forEach((item) => {
+                const grpName = String(item.Stock_Group || "Others").trim();
+                if (!groupMap.has(grpName)) {
+                    groupMap.set(grpName, []);
+                }
+                groupMap.get(grpName)!.push(item);
+            });
+
+            const groupedData: Array<{ groupName: string; rows: StockDifferenceItem[] }> = [];
+            groupMap.forEach((items, groupName) => {
+                groupedData.push({ groupName, rows: items });
+            });
 
             return {
-                type: "table",
+                type: "stockDifference",
                 title: "Stock Difference Report",
-                rows,
-                templateCols: templateCols.length > 0 ? templateCols : undefined,
+                activeCols,
+                groupedData,
+                rawRows: rawItems,
+                fromDate: from,
+                toDate: to,
             };
         }
     }
@@ -1431,19 +1485,36 @@ const BatchExportScreen: React.FC = () => {
 
     /* Loading state */
     const [exporting, setExporting] = useState<boolean>(false);
-    const [exportStatusText, setExportStatusText] = useState<string>("");
+    const [exportStatusText, setExportStatusText] = useState<string>("" );
+    const [loadingPreset, setLoadingPreset] = useState<boolean>(false);
 
     /* Initialize available reports & presets */
     useEffect(() => {
-        // Load presets from LocalStorage
-        try {
-            const saved = localStorage.getItem(STORAGE_PRESETS_KEY);
-            if (saved) {
-                setPresetTemplates(JSON.parse(saved));
-            }
-        } catch (e) {
-            console.error("Failed to load export presets:", e);
-        }
+        // Load presets from backend database (tbl_ERP_Report) with fallback to localStorage
+        SettingsService.getBatchPresets()
+            .then((res) => {
+                if (res.data?.success && Array.isArray(res.data.data) && res.data.data.length > 0) {
+                    setPresetTemplates(res.data.data);
+                } else {
+                    // Fallback to local storage if DB has no presets yet
+                    const saved = localStorage.getItem(STORAGE_PRESETS_KEY);
+                    if (saved) {
+                        const localPresets = JSON.parse(saved);
+                        setPresetTemplates(localPresets);
+                    }
+                }
+            })
+            .catch((e) => {
+                console.warn("Failed to load export presets from DB, checking localStorage:", e);
+                try {
+                    const saved = localStorage.getItem(STORAGE_PRESETS_KEY);
+                    if (saved) {
+                        setPresetTemplates(JSON.parse(saved));
+                    }
+                } catch (err) {
+                    console.error("Failed to load export presets:", err);
+                }
+            });
 
         // Fetch menus and list ALL available report submenus dynamically
         Promise.all([
@@ -1602,6 +1673,8 @@ const BatchExportScreen: React.FC = () => {
         const clean = (parentReportName || "").trim();
         const normClean = clean.toLowerCase().replace(/[\s\-_/]/g, "");
 
+        const isRecOrOut = normClean.includes("recievable") || normClean.includes("receivable") || normClean.includes("outstanding");
+
         const variants = Array.from(
             new Set([
                 clean,
@@ -1618,6 +1691,9 @@ const BatchExportScreen: React.FC = () => {
                 clean.toLowerCase().includes("rate master") ? "RATE MASTER ADMIN" : "",
                 clean.toLowerCase().includes("overall staff") ? "Overall Staff Report" : "",
                 clean.toLowerCase().includes("ledger") && clean.toLowerCase().includes("item") ? "LEDGER WISE ITEM" : "",
+                isRecOrOut ? "OUTSTANDING MANAGEMENT" : "",
+                isRecOrOut ? "RECIEVABLE PAYABLE" : "",
+                isRecOrOut ? "RECEIVABLE PAYABLE" : "",
             ])
         ).filter(Boolean);
 
@@ -1626,11 +1702,15 @@ const BatchExportScreen: React.FC = () => {
                 const res = await SettingsService.getReportsByParent(variant);
                 const data = res.data?.data || [];
                 if (data.length > 0) {
-                    templates = data.map((t: any) => ({
+                    const mapped = data.map((t: any) => ({
                         id: t.Report_Id || t.id,
                         name: t.Report_Name || t.name,
                     }));
-                    break;
+                    mapped.forEach((m: any) => {
+                        if (!templates.some((ex) => ex.id === m.id)) {
+                            templates.push(m);
+                        }
+                    });
                 }
             } catch (e) {
                 // Try next variant
@@ -1641,11 +1721,32 @@ const BatchExportScreen: React.FC = () => {
         if (templates.length === 0) {
             try {
                 const listRes = await SettingsService.getReportList();
-                const allReports = listRes.data?.data || (Array.isArray(listRes.data) ? listRes.data : []);
-                if (Array.isArray(allReports) && allReports.length > 0) {
+                const allData = listRes.data?.data || (Array.isArray(listRes.data) ? listRes.data : {});
+                
+                // If grouped object { "PARENT_NAME": [ { Report_Id, Report_Name, ... } ] }
+                let allReports: any[] = [];
+                if (Array.isArray(allData)) {
+                    allReports = allData;
+                } else if (allData && typeof allData === "object") {
+                    Object.entries(allData).forEach(([parentKey, list]: [string, any]) => {
+                        if (Array.isArray(list)) {
+                            list.forEach((item: any) => {
+                                allReports.push({
+                                    ...item,
+                                    Parent_Report: item.Parent_Report || parentKey
+                                });
+                            });
+                        }
+                    });
+                }
+
+                if (allReports.length > 0) {
                     const matched = allReports.filter((r: any) => {
                         const rParent = String(r.Parent_Report || "").toLowerCase().replace(/[\s\-_/]/g, "");
                         const rName = String(r.Report_Name || "").toLowerCase().replace(/[\s\-_/]/g, "");
+                        if (isRecOrOut) {
+                            return rParent.includes("outstanding") || rParent.includes("recievable") || rParent.includes("receivable");
+                        }
                         return (
                             (rParent && (rParent === normClean || rParent.includes(normClean) || normClean.includes(rParent))) ||
                             (rName && (rName === normClean || rName.includes(normClean)))
@@ -1723,7 +1824,7 @@ const BatchExportScreen: React.FC = () => {
     };
 
     /* Save current selection as Preset Template (or update existing) */
-    const handleSavePreset = () => {
+    const handleSavePreset = async () => {
         if (!presetNameInput.trim()) {
             toast.error("Please provide a preset template name");
             return;
@@ -1734,94 +1835,130 @@ const BatchExportScreen: React.FC = () => {
         }
 
         const existingPreset = presetTemplates.find((p) => p.id === selectedPresetId);
+        const userData = JSON.parse(localStorage.getItem("user") || "{}");
+        const createdBy = userData?.id || 0;
 
-        if (existingPreset) {
-            // Update the existing preset
-            const updatedPreset: SavedPresetTemplate = {
-                ...existingPreset,
-                name: presetNameInput.trim(),
-                createdAt: dayjs().format("DD-MM-YYYY HH:mm"),
-                reports: selectedReports.map((r) => ({
-                    reportKey: r.reportKey,
-                    selectedModes: r.selectedModes,
-                    selectedTemplateId: r.selectedTemplateId,
-                    selectedExportType: r.selectedExportType,
-                })),
-            };
+        const reportsPayload = selectedReports.map((r) => ({
+            reportKey: r.reportKey,
+            selectedModes: r.selectedModes,
+            selectedTemplateId: r.selectedTemplateId,
+            selectedExportType: r.selectedExportType,
+        }));
 
-            const updatedList = presetTemplates.map((p) =>
-                p.id === selectedPresetId ? updatedPreset : p
-            );
-            setPresetTemplates(updatedList);
-            localStorage.setItem(STORAGE_PRESETS_KEY, JSON.stringify(updatedList));
-            setPresetNameInput("");
-            setSaveDialogOpen(false);
-            toast.success(`Preset "${updatedPreset.name}" updated successfully! ✅`);
-        } else {
-            // Create a new preset
-            const newPreset: SavedPresetTemplate = {
-                id: `preset_${Date.now()}`,
-                name: presetNameInput.trim(),
-                createdAt: dayjs().format("DD-MM-YYYY HH:mm"),
-                reports: selectedReports.map((r) => ({
-                    reportKey: r.reportKey,
-                    selectedModes: r.selectedModes,
-                    selectedTemplateId: r.selectedTemplateId,
-                    selectedExportType: r.selectedExportType,
-                })),
-            };
+        try {
+            if (existingPreset) {
+                // Update the existing preset in database
+                const res = await SettingsService.saveBatchPreset({
+                    id: selectedPresetId,
+                    name: presetNameInput.trim(),
+                    reports: reportsPayload,
+                    createdBy
+                });
 
-            const updated = [...presetTemplates, newPreset];
-            setPresetTemplates(updated);
-            localStorage.setItem(STORAGE_PRESETS_KEY, JSON.stringify(updated));
-            setSelectedPresetId(newPreset.id);
-            setPresetNameInput("");
-            setSaveDialogOpen(false);
-            toast.success(`Preset "${newPreset.name}" saved successfully! 🎉`);
+                const updatedPreset: SavedPresetTemplate = {
+                    ...existingPreset,
+                    id: res.data?.data?.id || existingPreset.id,
+                    name: presetNameInput.trim(),
+                    createdAt: res.data?.data?.createdAt || dayjs().format("DD-MM-YYYY HH:mm"),
+                    reports: reportsPayload,
+                };
+
+                const updatedList = presetTemplates.map((p) =>
+                    p.id === selectedPresetId ? updatedPreset : p
+                );
+                setPresetTemplates(updatedList);
+                localStorage.setItem(STORAGE_PRESETS_KEY, JSON.stringify(updatedList));
+                setPresetNameInput("");
+                setSaveDialogOpen(false);
+                toast.success(`Preset "${updatedPreset.name}" updated successfully! ✅`);
+            } else {
+                // Create a new preset in database
+                const res = await SettingsService.saveBatchPreset({
+                    name: presetNameInput.trim(),
+                    reports: reportsPayload,
+                    createdBy
+                });
+
+                const newPreset: SavedPresetTemplate = {
+                    id: String(res.data?.data?.id || `preset_${Date.now()}`),
+                    name: presetNameInput.trim(),
+                    createdAt: res.data?.data?.createdAt || dayjs().format("DD-MM-YYYY HH:mm"),
+                    reports: reportsPayload,
+                };
+
+                const updated = [...presetTemplates, newPreset];
+                setPresetTemplates(updated);
+                localStorage.setItem(STORAGE_PRESETS_KEY, JSON.stringify(updated));
+                setSelectedPresetId(newPreset.id);
+                setPresetNameInput("");
+                setSaveDialogOpen(false);
+                toast.success(`Preset "${newPreset.name}" saved successfully ✅`);
+            }
+        } catch (saveErr) {
+            console.error("Save preset to DB error:", saveErr);
+            toast.error("Failed to save preset ❌");
         }
     };
 
     /* Load Preset */
     const handleApplyPreset = async (presetId: string) => {
         setSelectedPresetId(presetId);
-        if (!presetId) return;
+        if (!presetId) {
+            return;
+        }
 
         const preset = presetTemplates.find((p) => p.id === presetId);
         if (!preset) return;
 
-        const reconstructed: SelectedReportConfig[] = [];
+        setLoadingPreset(true);
+        try {
+            const reconstructed: SelectedReportConfig[] = [];
 
-        for (const item of preset.reports) {
-            const foundMenu = availableMenuReports.find((c) =>
-                c.key === item.reportKey ||
-                c.path.toLowerCase().replace(/[\/\-_]/g, "") === item.reportKey.toLowerCase().replace(/[\/\-_]/g, "") ||
-                c.name.toLowerCase().replace(/[\s\-_]/g, "") === item.reportKey.toLowerCase().replace(/[\s\-_]/g, "")
-            );
-            const cat = foundMenu?.definition;
-            if (!cat) continue;
+            for (const item of preset.reports) {
+                const foundMenu = availableMenuReports.find((c) =>
+                    c.key === item.reportKey ||
+                    c.path.toLowerCase().replace(/[\/\-_]/g, "") === item.reportKey.toLowerCase().replace(/[\/\-_]/g, "") ||
+                    c.name.toLowerCase().replace(/[\s\-_]/g, "") === item.reportKey.toLowerCase().replace(/[\s\-_]/g, "")
+                );
+                const cat = foundMenu?.definition;
+                if (!cat) continue;
 
-            const templates = await fetchTemplatesForParent(cat.parentReportName);
+                const templates = await fetchTemplatesForParent(cat.parentReportName);
 
-            reconstructed.push({
-                id: `${cat.key}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                reportKey: cat.key,
-                reportName: cat.name,
-                path: cat.path,
-                availableModes: cat.modes,
-                selectedModes: item.selectedModes.length ? item.selectedModes : [cat.modes[0]],
-                availableTemplates: templates,
-                selectedTemplateId: item.selectedTemplateId ?? "default",
-                availableExportTypes: cat.exportTypes,
-                selectedExportType: item.selectedExportType || cat.exportTypes[0]
-            });
+                reconstructed.push({
+                    id: `${cat.key}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                    reportKey: cat.key,
+                    reportName: cat.name,
+                    path: cat.path,
+                    availableModes: cat.modes,
+                    selectedModes: item.selectedModes.length ? item.selectedModes : [cat.modes[0]],
+                    availableTemplates: templates,
+                    selectedTemplateId: item.selectedTemplateId ?? "default",
+                    availableExportTypes: cat.exportTypes,
+                    selectedExportType: item.selectedExportType || cat.exportTypes[0]
+                });
+            }
+
+            setSelectedReports(reconstructed);
+            toast.info(`Loaded preset: ${preset.name}`);
+        } catch (err) {
+            console.error("Failed to apply preset:", err);
+            toast.error("Failed to load preset");
+        } finally {
+            setLoadingPreset(false);
         }
-
-        setSelectedReports(reconstructed);
-        toast.info(`Loaded preset: ${preset.name}`);
     };
 
     /* Delete Preset */
-    const handleDeletePreset = (presetId: string) => {
+    const handleDeletePreset = async (presetId: string) => {
+        try {
+            if (presetId && !String(presetId).startsWith("preset_")) {
+                await SettingsService.deleteBatchPreset(presetId);
+            }
+        } catch (e) {
+            console.error("Delete preset from DB failed:", e);
+        }
+
         const updated = presetTemplates.filter((p) => p.id !== presetId);
         setPresetTemplates(updated);
         localStorage.setItem(STORAGE_PRESETS_KEY, JSON.stringify(updated));
@@ -2382,7 +2519,114 @@ const BatchExportScreen: React.FC = () => {
                         const safeTitle = `${cfg.reportName.replace(/[^a-zA-Z0-9]/g, "")}`.substring(0, 31);
                         XLSX.utils.book_append_sheet(wb, ws, safeTitle);
                     }
-                    // 8. STANDARD TABLE ROWS (Supports Template Columns & Yellow Header Box Layout)
+                    // 8. STOCK DIFFERENCE REPORT (Excel)
+                    else if (data.type === "stockDifference") {
+                        const activeCols: any[] = data.activeCols || [];
+                        const groupedData: any[] = data.groupedData || [];
+
+                        const headers = ["S.No", "Stock Group", ...activeCols.map((c: any) => c.label)];
+                        const exportAoa: any[][] = [];
+                        exportAoa.push(headers);
+
+                        let serial = 1;
+                        const groupRowIndices: number[] = [];
+
+                        groupedData.forEach((grp: any) => {
+                            const groupRowIndex = exportAoa.length;
+                            groupRowIndices.push(groupRowIndex);
+
+                            const groupRow: any[] = [
+                                "",
+                                grp.groupName,
+                            ];
+
+                            activeCols.forEach((c: any) => {
+                                if (/(?:System_Qty|Actual_Qty|Difference_Qty)/i.test(c.key)) {
+                                    const sum = (grp.rows || []).reduce(
+                                        (s: number, r: any) => s + Number(r[c.key] || 0),
+                                        0
+                                    );
+                                    groupRow.push(Number(sum.toFixed(1)));
+                                } else {
+                                    groupRow.push(grp.rows.length);
+                                }
+                            });
+                            exportAoa.push(groupRow);
+
+                            (grp.rows || []).forEach((row: any) => {
+                                const normalRow: any[] = [serial++, ""];
+                                activeCols.forEach((c: any) => {
+                                    normalRow.push(formatExportCellValue(row[c.key], c.key, row, false));
+                                });
+                                exportAoa.push(normalRow);
+                            });
+                        });
+
+                        const ws = XLSX.utils.aoa_to_sheet(exportAoa.length ? exportAoa : [["No records found"]]);
+
+                        if (exportAoa.length > 0) {
+                            const range = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
+                            const borderAll = {
+                                top: { style: "thin", color: { rgb: "CBD5E1" } },
+                                bottom: { style: "thin", color: { rgb: "CBD5E1" } },
+                                left: { style: "thin", color: { rgb: "CBD5E1" } },
+                                right: { style: "thin", color: { rgb: "CBD5E1" } },
+                            };
+
+                            for (let R = range.s.r; R <= range.e.r; ++R) {
+                                const isHeader = R === 0;
+                                const isGroup = groupRowIndices.includes(R);
+
+                                for (let C = range.s.c; C <= range.e.c; ++C) {
+                                    const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                                    const cell = ws[cellRef];
+                                    if (!cell) continue;
+
+                                    if (isHeader) {
+                                        cell.s = {
+                                            fill: { fgColor: { rgb: "1E3A8A" } },
+                                            font: { name: "Calibri", sz: 10, bold: true, color: { rgb: "FFFFFF" } },
+                                            alignment: { horizontal: C === 0 ? "center" : "left", vertical: "center" },
+                                            border: borderAll,
+                                        };
+                                    } else if (isGroup) {
+                                        cell.s = {
+                                            fill: { fgColor: { rgb: "F1F5F9" } },
+                                            font: { name: "Calibri", sz: 9.5, bold: true, color: { rgb: "1E3A8A" } },
+                                            alignment: { horizontal: C === 0 ? "center" : typeof cell.v === "number" ? "right" : "left", vertical: "center" },
+                                            border: borderAll,
+                                        };
+                                    } else {
+                                        const isNumeric = typeof cell.v === "number";
+                                        cell.s = {
+                                            font: { name: "Calibri", sz: 9, color: { rgb: "000000" } },
+                                            alignment: {
+                                                horizontal: C === 0 ? "center" : isNumeric ? "right" : "left",
+                                                vertical: "center",
+                                            },
+                                            border: borderAll,
+                                        };
+                                    }
+                                }
+                            }
+
+                            // Dynamic column widths
+                            const colWidths: Array<{ wch: number }> = [{ wch: 7 }, { wch: 18 }]; // S.No, Stock Group
+                            activeCols.forEach((c) => {
+                                let maxLen = (c.label || "").length;
+                                (data.rawRows || []).slice(0, 100).forEach((r: any) => {
+                                    const l = String(r[c.key] ?? "").length;
+                                    if (l > maxLen) maxLen = l;
+                                });
+                                colWidths.push({ wch: Math.min(Math.max(maxLen + 3, 10), 38) });
+                            });
+                            ws["!cols"] = colWidths;
+                        }
+
+                        const safeTitle = `${cfg.reportName.replace(/[^a-zA-Z0-9]/g, "")}`.substring(0, 31);
+                        XLSX.utils.book_append_sheet(wb, ws, safeTitle);
+                    }
+                    // 9. STANDARD TABLE ROWS (Supports Template Columns & Yellow Header Box Layout)
                     else {
                         const rawRows = data.rows || [];
                         const templateCols = data.templateCols || [];
@@ -3157,7 +3401,95 @@ const BatchExportScreen: React.FC = () => {
                             },
                         });
                     }
-                    // 8. STANDARD TABLE ROWS (Supports Template Columns & Yellow Header Box Layout)
+                    // 8. STOCK DIFFERENCE REPORT (PDF)
+                    else if (data.type === "stockDifference") {
+                        const activeCols: any[] = data.activeCols || [];
+                        const groupedData: any[] = data.groupedData || [];
+
+                        // Header banner matching parent screen theme
+                        doc.setFillColor(30, 58, 138);
+                        doc.rect(0, 0, 297, 18, "F");
+                        doc.setTextColor(255, 255, 255);
+                        doc.setFontSize(13);
+                        doc.text("Stock Difference Report", 14, 12);
+                        doc.setFontSize(9);
+                        doc.text(`Period: ${fromDate} to ${toDate}`, 210, 12);
+
+                        const headRow = ["S.No", "Stock Group", ...activeCols.map((c: any) => c.label)];
+                        const tableHead = [headRow];
+                        const tableBody: any[] = [];
+                        const groupRowIndices: number[] = [];
+
+                        let serial = 1;
+                        groupedData.forEach((grp: any) => {
+                            groupRowIndices.push(tableBody.length);
+
+                            const groupRow: any[] = [
+                                "",
+                                grp.groupName,
+                                ...activeCols.map((c: any) => {
+                                    if (/(?:System_Qty|Actual_Qty|Difference_Qty)/i.test(c.key)) {
+                                        const sum = (grp.rows || []).reduce(
+                                            (s: number, r: any) => s + Number(r[c.key] || 0),
+                                            0
+                                        );
+                                        return sum.toFixed(1);
+                                    }
+                                    return String((grp.rows || []).length);
+                                }),
+                            ];
+                            tableBody.push(groupRow);
+
+                            (grp.rows || []).forEach((row: any) => {
+                                tableBody.push([
+                                    serial++,
+                                    "",
+                                    ...activeCols.map((c: any) => {
+                                        return formatExportCellValue(row[c.key], c.key, row, true);
+                                    }),
+                                ]);
+                            });
+                        });
+
+                        // Calculate dynamic font size and column widths based on column count & printable width
+                        const allColConfigs = [{ key: "Stock_Group", label: "Stock Group" }, ...activeCols];
+                        const { pdfFontSize, cellPad, columnStyles } = getDynamicTableStyles(headRow, allColConfigs, 277);
+
+                        autoTable(doc, {
+                            startY: 22,
+                            head: tableHead,
+                            body: tableBody,
+                            theme: "grid",
+                            margin: { left: 10, right: 10 },
+                            tableWidth: 277,
+                            styles: {
+                                font: activeFontName,
+                                fontSize: pdfFontSize,
+                                cellPadding: cellPad,
+                                overflow: "linebreak",
+                                lineColor: [203, 213, 225],
+                                lineWidth: 0.15,
+                                textColor: [0, 0, 0],
+                            },
+                            headStyles: {
+                                font: activeFontName,
+                                fillColor: [30, 58, 138], // Parent report header theme (#1E3A8A)
+                                textColor: [255, 255, 255], // White text
+                                fontStyle: "bold",
+                                lineColor: [36, 72, 178],
+                                lineWidth: 0.2,
+                            },
+                            columnStyles,
+                            didParseCell: (cellData) => {
+                                if (groupRowIndices.includes(cellData.row.index)) {
+                                    cellData.cell.styles.fillColor = [241, 245, 249]; // Light slate group row (#F1F5F9)
+                                    cellData.cell.styles.textColor = [15, 23, 42]; // Dark text
+                                    cellData.cell.styles.fontStyle = "bold";
+                                }
+                            },
+                        });
+                    }
+                    // 9. STANDARD TABLE ROWS (Supports Template Columns & Yellow Header Box Layout)
                     else {
                         doc.setFillColor(30, 58, 138);
                         doc.rect(0, 0, 297, 18, "F");
@@ -3306,13 +3638,22 @@ const BatchExportScreen: React.FC = () => {
                 <Paper sx={{ p: 2, mb: 3, borderRadius: 2, border: "1px solid #e2e8f0" }}>
                     <Box display="grid" gridTemplateColumns={{ xs: "1fr", sm: "1fr 1fr", md: "1.2fr 1fr 1fr 1.5fr" }} gap={2} alignItems="center">
                         {/* Saved Preset Dropdown */}
-                        <FormControl size="small" fullWidth>
-                            <InputLabel id="preset-select-label">Load Saved Preset</InputLabel>
+                        <FormControl size="small" fullWidth disabled={loadingPreset}>
+                            <InputLabel id="preset-select-label">
+                                {loadingPreset ? "Loading Preset..." : "Load Saved Preset"}
+                            </InputLabel>
                             <Select
                                 labelId="preset-select-label"
-                                label="Load Saved Preset"
+                                label={loadingPreset ? "Loading Preset..." : "Load Saved Preset"}
                                 value={selectedPresetId}
                                 onChange={(e) => handleApplyPreset(e.target.value)}
+                                endAdornment={
+                                    loadingPreset ? (
+                                        <Box sx={{ display: "flex", alignItems: "center", mr: 2 }}>
+                                            <CircularProgress size={18} thickness={5} sx={{ color: "#1E3A8A" }} />
+                                        </Box>
+                                    ) : null
+                                }
                             >
                                 <MenuItem value="">
                                     <em>None (Custom Configuration)</em>
@@ -3406,16 +3747,52 @@ const BatchExportScreen: React.FC = () => {
                             flexShrink: 0
                         }}
                     >
-                        <TuneIcon sx={{ fontSize: 48, color: "#94a3b8", mb: 1 }} />
-                        <Typography fontWeight={600} color="#64748b">
-                            No reports added yet
-                        </Typography>
-                        <Typography variant="body2" color="#94a3b8" mb={2}>
-                            Use the dropdown above to choose reports, configure modes, templates, and export formats.
-                        </Typography>
+                        {loadingPreset ? (
+                            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", py: 4 }}>
+                                <CircularProgress size={36} sx={{ color: "#1E3A8A", mb: 2 }} />
+                                <Typography fontWeight={600} color="#1E3A8A">
+                                    Loading preset configuration & templates...
+                                </Typography>
+                            </Box>
+                        ) : (
+                            <>
+                                <TuneIcon sx={{ fontSize: 48, color: "#94a3b8", mb: 1 }} />
+                                <Typography fontWeight={600} color="#64748b">
+                                    No reports added yet
+                                </Typography>
+                                <Typography variant="body2" color="#94a3b8" mb={2}>
+                                    Use the dropdown above to choose reports, configure modes, templates, and export formats.
+                                </Typography>
+                            </>
+                        )}
                     </Paper>
                 ) : (
-                    <TableContainer
+                    <Box sx={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                        {loadingPreset && (
+                            <Box
+                                sx={{
+                                    position: "absolute",
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    bgcolor: "rgba(255, 255, 255, 0.7)",
+                                    zIndex: 10,
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    backdropFilter: "blur(2px)",
+                                    borderRadius: 2,
+                                }}
+                            >
+                                <CircularProgress size={40} sx={{ color: "#1E3A8A", mb: 1.5 }} />
+                                <Typography fontWeight={600} color="#1E3A8A" fontSize="0.9rem">
+                                    Loading Preset Configuration...
+                                </Typography>
+                            </Box>
+                        )}
+                        <TableContainer
                         component={Paper}
                         variant="outlined"
                         sx={{
@@ -3546,6 +3923,7 @@ const BatchExportScreen: React.FC = () => {
                             </TableBody>
                         </Table>
                     </TableContainer>
+                    </Box>
                 )}
             </Box>
 

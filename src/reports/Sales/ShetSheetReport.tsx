@@ -201,6 +201,7 @@ const ShetSheetReport: React.FC = () => {
     const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
     const [reportName, setReportName] = useState<string>("");
     const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
+    const [templateLoading, setTemplateLoading] = useState<boolean>(false);
 
     // Collapsed groups (Remarks grouping: Remarks || "No Remarks")
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -462,6 +463,7 @@ const ShetSheetReport: React.FC = () => {
 
     const handleLoadTemplate = async (templateId: number) => {
         try {
+            setTemplateLoading(true);
             setLoading(true);
             const res = await SettingsService.getReportEditData({
                 reportId: templateId,
@@ -501,32 +503,49 @@ const ShetSheetReport: React.FC = () => {
                 setStatusFilter(st);
                 setTempStatusFilter(st);
 
+                const effectiveFrom = isAll ? dayjs(toDate).subtract(60, "day").format("YYYY-MM-DD") : fromDate;
+                if (isAll) {
+                    setFromDate(effectiveFrom);
+                    setTempFromDate(effectiveFrom);
+                }
+
+                // Await full data load before clearing the template loading indicator so UI doesn't render partial data
+                await fetchData(effectiveFrom, toDate, isAll, st);
                 toast.success("Template Loaded ✅");
-                fetchData(fromDate, toDate, isAll, st);
             }
         } catch (err) {
             console.error(err);
             toast.error("Failed to load template ❌");
         } finally {
             setLoading(false);
+            setTemplateLoading(false);
         }
     };
 
-    const handleClearTemplate = () => {
-        setSelectedTemplateId(null);
-        setReportName("");
-        setAllDetails(false);
-        setTempAllDetails(false);
-        setStatusFilter("pending");
-        setTempStatusFilter("pending");
-        setColumns((prev) =>
-            prev.map((c, i) => ({
-                ...c,
-                enabled: DEFAULT_BASE_COLUMNS.some((d) => d.key === c.key && d.enabled),
-                order: i,
-            }))
-        );
-        fetchData(fromDate, toDate, false, "pending");
+    const handleClearTemplate = async () => {
+        try {
+            setTemplateLoading(true);
+            setLoading(true);
+            setSelectedTemplateId(null);
+            setReportName("");
+            setAllDetails(false);
+            setTempAllDetails(false);
+            setStatusFilter("pending");
+            setTempStatusFilter("pending");
+            setColumns((prev) =>
+                prev.map((c, i) => ({
+                    ...c,
+                    enabled: DEFAULT_BASE_COLUMNS.some((d) => d.key === c.key && d.enabled),
+                    order: i,
+                }))
+            );
+            await fetchData(fromDate, toDate, false, "pending");
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoading(false);
+            setTemplateLoading(false);
+        }
     };
 
     const handleQuickSave = async () => {
@@ -561,6 +580,10 @@ const ShetSheetReport: React.FC = () => {
                 localStorage.setItem(`template_allDetails_${selectedTemplateId}`, String(allDetails));
                 localStorage.setItem(`template_status_${selectedTemplateId}`, statusFilter);
                 toast.success("Template Updated Successfully ✅");
+                setSaveDialogOpen(false);
+                setTimeout(() => {
+                    window.location.reload();
+                }, 500);
             } else {
                 const saveRes: any = await SettingsService.saveReportSettings({
                     reportName: reportName.trim(),
@@ -571,16 +594,18 @@ const ShetSheetReport: React.FC = () => {
                     expandedColumns: payloadColumns,
                     createdBy,
                 });
-                const newId = saveRes?.data?.Report_Id || saveRes?.data?.data?.Report_Id;
+                const newId = (saveRes as any)?.data?.reportId || (saveRes as any)?.data?.data?.Report_Id || (saveRes as any)?.data?.Report_Id;
                 if (newId) {
                     setSelectedTemplateId(newId);
                     localStorage.setItem(`template_allDetails_${newId}`, String(allDetails));
                     localStorage.setItem(`template_status_${newId}`, statusFilter);
                 }
                 toast.success("Template Saved Successfully ✅");
+                setSaveDialogOpen(false);
+                setTimeout(() => {
+                    window.location.reload();
+                }, 500);
             }
-
-            setSaveDialogOpen(false);
         } catch (err) {
             console.error(err);
             toast.error("Save Template Failed ❌");
@@ -986,10 +1011,15 @@ const ShetSheetReport: React.FC = () => {
 
             {/* MAIN CONTENT AREA */}
             <AppLayout fullWidth>
-                <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
-                    {loading ? (
-                        <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", flex: 1 }}>
-                            <CircularProgress size={40} />
+                <Box sx={{ p: 1.5, display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
+                    {(loading || templateLoading) ? (
+                        <Box sx={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", flex: 1, gap: 1.5 }}>
+                            <CircularProgress size={42} sx={{ color: "#1E3A8A" }} />
+                            {templateLoading && (
+                                <Typography variant="body2" sx={{ color: "#1E3A8A", fontWeight: 600 }}>
+                                    Loading template configuration & data...
+                                </Typography>
+                            )}
                         </Box>
                     ) : (
                         <>

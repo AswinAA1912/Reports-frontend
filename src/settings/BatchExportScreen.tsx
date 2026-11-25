@@ -1350,17 +1350,25 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
         exportTypes: ["Standard"],
         fetchData: async ({ from, to, templateId }) => {
             let isAllDetails = false;
+            let status = "pending";
             if (templateId && templateId !== "default") {
                 const savedAll = localStorage.getItem(`template_allDetails_${templateId}`);
                 if (savedAll !== null) {
                     isAllDetails = savedAll === "true";
                 }
+                const savedStatus = localStorage.getItem(`template_status_${templateId}`);
+                if (savedStatus) {
+                    status = savedStatus;
+                }
             }
 
+            const effectiveFrom = isAllDetails ? dayjs(to).subtract(60, "day").format("YYYY-MM-DD") : from;
+
             const res = await ShetSheetReportService.getShetSheetReport({
-                Fromdate: from,
+                Fromdate: effectiveFrom,
                 Todate: to,
                 allDetails: isAllDetails,
+                status,
             });
             const rawItems: ShetSheetItem[] = res.data?.data || (Array.isArray(res.data) ? (res.data as any) : []);
 
@@ -3564,7 +3572,18 @@ const BatchExportScreen: React.FC = () => {
 
                         groupedData.forEach((grp: any) => {
                             groupRowIndices.push(tableBody.length);
-                            tableBody.push([`${grp.groupName} (Total Bags: ${grp.totalBags || 0})`, ...activeCols.map(() => "")]);
+                            tableBody.push([
+                                {
+                                    content: `${grp.groupName} (Total Bags: ${grp.totalBags || 0})`,
+                                    colSpan: headRow.length,
+                                    styles: {
+                                        fillColor: [219, 234, 254],
+                                        textColor: [30, 58, 138],
+                                        fontStyle: "bold",
+                                        halign: "left",
+                                    },
+                                },
+                            ]);
                             grp.items.forEach((item: any, idx: number) => {
                                 tableBody.push([
                                     idx + 1,

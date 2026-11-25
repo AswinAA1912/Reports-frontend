@@ -74,6 +74,11 @@ interface ReportFilterDrawerProps {
     saleOrderStatusValue?: "pending" | "cancelled";
     onSaleOrderStatusChange?: (value: "pending" | "cancelled") => void;
 
+    // SHET SHEET STATUS RADIO FILTER (pending | complete | all)
+    showShetSheetStatusFilter?: boolean;
+    shetSheetStatusValue?: "pending" | "complete" | "all";
+    onShetSheetStatusChange?: (value: "pending" | "complete" | "all") => void;
+
     // STAFF BASED REPORT VALUE DISPLAY MODE
     showStaffBasedDisplayMode?: boolean;
     staffBasedDisplayMode?: "qty" | "count";
@@ -152,6 +157,11 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
     showSaleOrderStatusFilter,
     saleOrderStatusValue,
     onSaleOrderStatusChange,
+
+    // SHET SHEET STATUS RADIO FILTER
+    showShetSheetStatusFilter,
+    shetSheetStatusValue,
+    onShetSheetStatusChange,
 
     // STAFF BASED REPORT VALUE DISPLAY MODE
     showStaffBasedDisplayMode,
@@ -458,6 +468,37 @@ const ReportFilterDrawer: React.FC<ReportFilterDrawerProps> = ({
                                     value="cancelled"
                                     control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
                                     label={<Typography sx={{ fontSize: "0.825rem" }}>Cancelled</Typography>}
+                                />
+                            </RadioGroup>
+                        </FormControl>
+                    )}
+
+                    {/* SHET SHEET STATUS FILTER (Pending, Complete, All) */}
+                    {showShetSheetStatusFilter && onShetSheetStatusChange && (
+                        <FormControl sx={{ mb: 2, display: "block" }}>
+                            <FormLabel sx={{ fontWeight: 600, color: "#1E3A8A", fontSize: "0.875rem", display: "block", mb: 0.5 }}>
+                                Status
+                            </FormLabel>
+                            <RadioGroup
+                                value={shetSheetStatusValue || "pending"}
+                                onChange={(e) =>
+                                    onShetSheetStatusChange(e.target.value as "pending" | "complete" | "all")
+                                }
+                            >
+                                <FormControlLabel
+                                    value="pending"
+                                    control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                                    label={<Typography sx={{ fontSize: "0.825rem" }}>Pending</Typography>}
+                                />
+                                <FormControlLabel
+                                    value="complete"
+                                    control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                                    label={<Typography sx={{ fontSize: "0.825rem" }}>Complete</Typography>}
+                                />
+                                <FormControlLabel
+                                    value="all"
+                                    control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
+                                    label={<Typography sx={{ fontSize: "0.825rem" }}>All</Typography>}
                                 />
                             </RadioGroup>
                         </FormControl>

@@ -182,10 +182,12 @@ const ShetSheetReport: React.FC = () => {
     const [fromDate, setFromDate] = useState<string>(today);
     const [toDate, setToDate] = useState<string>(today);
     const [allDetails, setAllDetails] = useState<boolean>(false);
+    const [statusFilter, setStatusFilter] = useState<"pending" | "complete" | "all">("pending");
     const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
     const [tempFromDate, setTempFromDate] = useState<string>(today);
     const [tempToDate, setTempToDate] = useState<string>(today);
     const [tempAllDetails, setTempAllDetails] = useState<boolean>(false);
+    const [tempStatusFilter, setTempStatusFilter] = useState<"pending" | "complete" | "all">("pending");
 
     // Data State
     const [rawItems, setRawItems] = useState<ShetSheetItem[]>([]);
@@ -390,13 +392,20 @@ const ShetSheetReport: React.FC = () => {
 
     /* ================= FETCH DATA ================= */
 
-    const fetchData = async (from = fromDate, to = toDate, isAll = allDetails) => {
+    const fetchData = async (
+        from = fromDate,
+        to = toDate,
+        isAll = allDetails,
+        stFilter = statusFilter
+    ) => {
         try {
             setLoading(true);
+            const actualFrom = isAll ? dayjs(to).subtract(60, "day").format("YYYY-MM-DD") : from;
             const res = await ShetSheetReportService.getShetSheetReport({
-                Fromdate: from,
+                Fromdate: actualFrom,
                 Todate: to,
                 allDetails: isAll,
+                status: stFilter,
             });
 
             const dataList: ShetSheetItem[] = res.data?.data || (Array.isArray(res.data) ? (res.data as any) : []);
@@ -486,8 +495,14 @@ const ShetSheetReport: React.FC = () => {
                 setAllDetails(isAll);
                 setTempAllDetails(isAll);
 
+                // Load status setting if saved with template
+                const savedStatus = localStorage.getItem(`template_status_${templateId}`) as ("pending" | "complete" | "all") | null;
+                const st = savedStatus || "pending";
+                setStatusFilter(st);
+                setTempStatusFilter(st);
+
                 toast.success("Template Loaded ✅");
-                fetchData(fromDate, toDate, isAll);
+                fetchData(fromDate, toDate, isAll, st);
             }
         } catch (err) {
             console.error(err);
@@ -502,6 +517,8 @@ const ShetSheetReport: React.FC = () => {
         setReportName("");
         setAllDetails(false);
         setTempAllDetails(false);
+        setStatusFilter("pending");
+        setTempStatusFilter("pending");
         setColumns((prev) =>
             prev.map((c, i) => ({
                 ...c,
@@ -509,7 +526,7 @@ const ShetSheetReport: React.FC = () => {
                 order: i,
             }))
         );
-        fetchData(fromDate, toDate, false);
+        fetchData(fromDate, toDate, false, "pending");
     };
 
     const handleQuickSave = async () => {
@@ -542,6 +559,7 @@ const ShetSheetReport: React.FC = () => {
                     columns: payloadColumns,
                 });
                 localStorage.setItem(`template_allDetails_${selectedTemplateId}`, String(allDetails));
+                localStorage.setItem(`template_status_${selectedTemplateId}`, statusFilter);
                 toast.success("Template Updated Successfully ✅");
             } else {
                 const saveRes: any = await SettingsService.saveReportSettings({
@@ -557,6 +575,7 @@ const ShetSheetReport: React.FC = () => {
                 if (newId) {
                     setSelectedTemplateId(newId);
                     localStorage.setItem(`template_allDetails_${newId}`, String(allDetails));
+                    localStorage.setItem(`template_status_${newId}`, statusFilter);
                 }
                 toast.success("Template Saved Successfully ✅");
             }
@@ -925,25 +944,43 @@ const ShetSheetReport: React.FC = () => {
                             setTempFromDate(fromDate);
                             setTempToDate(toDate);
                             setTempAllDetails(allDetails);
+                            setTempStatusFilter(statusFilter);
                         }
                         return !prev;
                     });
                 }}
                 onClose={() => setDrawerOpen(false)}
-                fromDate={tempFromDate}
+                fromDate={tempAllDetails ? dayjs(tempToDate).subtract(60, "day").format("YYYY-MM-DD") : tempFromDate}
                 onFromDateChange={setTempFromDate}
                 toDate={tempToDate}
-                onToDateChange={setTempToDate}
+                onToDateChange={(newTo) => {
+                    setTempToDate(newTo);
+                    if (tempAllDetails) {
+                        setTempFromDate(dayjs(newTo).subtract(60, "day").format("YYYY-MM-DD"));
+                    }
+                }}
                 disableFromDate={tempAllDetails}
                 showAllDetailsFilter={true}
                 allDetailsValue={tempAllDetails}
-                onAllDetailsChange={setTempAllDetails}
+                onAllDetailsChange={(checked) => {
+                    setTempAllDetails(checked);
+                    if (checked) {
+                        setTempFromDate(dayjs(tempToDate).subtract(60, "day").format("YYYY-MM-DD"));
+                    } else {
+                        setTempFromDate(today);
+                    }
+                }}
+                showShetSheetStatusFilter={true}
+                shetSheetStatusValue={tempStatusFilter}
+                onShetSheetStatusChange={setTempStatusFilter}
                 onApply={() => {
-                    setFromDate(tempFromDate);
+                    const finalFrom = tempAllDetails ? dayjs(tempToDate).subtract(60, "day").format("YYYY-MM-DD") : tempFromDate;
+                    setFromDate(finalFrom);
                     setToDate(tempToDate);
                     setAllDetails(tempAllDetails);
+                    setStatusFilter(tempStatusFilter);
                     setDrawerOpen(false);
-                    fetchData(tempFromDate, tempToDate, tempAllDetails);
+                    fetchData(finalFrom, tempToDate, tempAllDetails, tempStatusFilter);
                 }}
             />
 

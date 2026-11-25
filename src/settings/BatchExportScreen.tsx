@@ -34,6 +34,22 @@ import TableChartIcon from "@mui/icons-material/TableChart";
 import BookmarkBorderIcon from "@mui/icons-material/BookmarkBorder";
 import LayersIcon from "@mui/icons-material/Layers";
 import TuneIcon from "@mui/icons-material/Tune";
+import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
+import {
+    DndContext,
+    closestCenter,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    DragEndEvent,
+} from "@dnd-kit/core";
+import {
+    SortableContext,
+    useSortable,
+    verticalListSortingStrategy,
+    arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import dayjs from "dayjs";
 import { toast } from "react-toastify";
 import jsPDF from "jspdf";
@@ -118,6 +134,156 @@ export interface SavedPresetTemplate {
 }
 
 const STORAGE_PRESETS_KEY = "pukal_batch_export_presets";
+
+/* ================= DND SORTABLE REPORT ROW ================= */
+
+interface SortableReportRowProps {
+    cfg: SelectedReportConfig;
+    idx: number;
+    onUpdateReport: (id: string, updates: Partial<SelectedReportConfig>) => void;
+    onRemoveReport: (id: string) => void;
+}
+
+const SortableReportRow: React.FC<SortableReportRowProps> = ({
+    cfg,
+    idx,
+    onUpdateReport,
+    onRemoveReport,
+}) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+        id: cfg.id,
+    });
+
+    const style: React.CSSProperties = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+        backgroundColor: isDragging ? "#e2e8f0" : undefined,
+    };
+
+    return (
+        <TableRow
+            ref={setNodeRef}
+            style={style}
+            hover
+            sx={{ "&:nth-of-type(even)": { bgcolor: "#f8fafc" } }}
+        >
+            {/* Drag Handle & S.No */}
+            <TableCell align="center">
+                <Box display="flex" alignItems="center" justifyContent="center" gap={0.5}>
+                    <Box
+                        {...attributes}
+                        {...listeners}
+                        sx={{
+                            cursor: "grab",
+                            display: "flex",
+                            alignItems: "center",
+                            color: "#94a3b8",
+                            "&:hover": { color: "#1E3A8A" },
+                            "&:active": { cursor: "grabbing" },
+                        }}
+                    >
+                        <DragIndicatorIcon fontSize="small" />
+                    </Box>
+                    <Chip
+                        label={`#${idx + 1}`}
+                        size="small"
+                        sx={{
+                            bgcolor: "#e2e8f0",
+                            color: "#1e293b",
+                            fontWeight: 700,
+                            height: 22,
+                            fontSize: "0.75rem",
+                        }}
+                    />
+                </Box>
+            </TableCell>
+
+            {/* Report Name */}
+            <TableCell>
+                <Typography fontWeight={700} fontSize="0.88rem" color="#0f172a">
+                    {cfg.reportName}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                    {cfg.reportKey}
+                </Typography>
+            </TableCell>
+
+            {/* Multi-select Modes */}
+            <TableCell>
+                <FormControl size="small" fullWidth>
+                    <Select
+                        multiple
+                        value={cfg.selectedModes}
+                        onChange={(e) => {
+                            const val = typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value;
+                            onUpdateReport(cfg.id, { selectedModes: val.length ? val : [cfg.availableModes[0]] });
+                        }}
+                        renderValue={(selected) => (
+                            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                                {selected.map((v) => (
+                                    <Chip key={v} label={v} size="small" color="primary" sx={{ height: 22, fontSize: "0.72rem" }} />
+                                ))}
+                            </Box>
+                        )}
+                        sx={{ fontSize: "0.82rem", bgcolor: "#fff" }}
+                    >
+                        {cfg.availableModes.map((m) => (
+                            <MenuItem key={m} value={m}>
+                                <Checkbox checked={cfg.selectedModes.indexOf(m) > -1} size="small" />
+                                <ListItemText primary={m} primaryTypographyProps={{ fontSize: "0.82rem" }} />
+                            </MenuItem>
+                        ))}
+                    </Select>
+                </FormControl>
+            </TableCell>
+
+            {/* Saved Template Selector */}
+            <TableCell>
+                <FormControl size="small" fullWidth>
+                    <Select
+                        value={cfg.selectedTemplateId}
+                        onChange={(e) => onUpdateReport(cfg.id, { selectedTemplateId: e.target.value as any })}
+                        sx={{ fontSize: "0.82rem", bgcolor: "#fff" }}
+                    >
+                        <MenuItem value="default" sx={{ fontSize: "0.82rem" }}>Default Columns</MenuItem>
+                        {cfg.availableTemplates.map((t) => (
+                            <MenuItem key={t.id} value={t.id} sx={{ fontSize: "0.82rem" }}>
+                                {t.name}
+                            </MenuItem>
+                        ))}
+                    </Select>
+                </FormControl>
+            </TableCell>
+
+            {/* Export Type / Style */}
+            <TableCell>
+                <FormControl size="small" fullWidth>
+                    <Select
+                        value={cfg.selectedExportType}
+                        onChange={(e) => onUpdateReport(cfg.id, { selectedExportType: e.target.value })}
+                        sx={{ fontSize: "0.82rem", bgcolor: "#fff" }}
+                    >
+                        {cfg.availableExportTypes.map((et) => (
+                            <MenuItem key={et} value={et} sx={{ fontSize: "0.82rem" }}>
+                                {et}
+                            </MenuItem>
+                        ))}
+                    </Select>
+                </FormControl>
+            </TableCell>
+
+            {/* Action */}
+            <TableCell align="center">
+                <Tooltip title="Remove Report">
+                    <IconButton size="small" color="error" onClick={() => onRemoveReport(cfg.id)}>
+                        <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                </Tooltip>
+            </TableCell>
+        </TableRow>
+    );
+};
 
 /* ================= CASH BOX HELPER CONSTANTS & FUNCTIONS ================= */
 
@@ -253,8 +419,8 @@ export const getDynamicTableStyles = (
     printableWidth: number = 277
 ) => {
     const totalCols = headers.length; // includes S.No
-    const pdfFontSize = totalCols > 15 ? 5.2 : totalCols > 12 ? 6.0 : totalCols > 9 ? 7.0 : 8.0;
-    const cellPad = totalCols > 15 ? 0.6 : totalCols > 12 ? 0.8 : 1.2;
+    const pdfFontSize = totalCols > 15 ? 8 : totalCols > 12 ? 9 : totalCols > 9 ? 10 : 12;
+    const cellPad = totalCols > 15 ? 0.8 : totalCols > 12 ? 1.0 : 1.5;
 
     // Relative weight calculation
     const weights: number[] = [0.8]; // S.No index 0
@@ -1488,6 +1654,27 @@ const BatchExportScreen: React.FC = () => {
     const [exportStatusText, setExportStatusText] = useState<string>("" );
     const [loadingPreset, setLoadingPreset] = useState<boolean>(false);
 
+    /* DnD Sensors for Reordering Reports */
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: { distance: 5 },
+        })
+    );
+
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+
+        setSelectedReports((prev) => {
+            const oldIndex = prev.findIndex((item) => item.id === active.id);
+            const newIndex = prev.findIndex((item) => item.id === over.id);
+            if (oldIndex !== -1 && newIndex !== -1) {
+                return arrayMove(prev, oldIndex, newIndex);
+            }
+            return prev;
+        });
+    };
+
     /* Initialize available reports & presets */
     useEffect(() => {
         // Load presets from backend database (tbl_ERP_Report) with fallback to localStorage
@@ -1993,7 +2180,14 @@ const BatchExportScreen: React.FC = () => {
                 if (!cat) continue;
 
                 for (const mode of cfg.selectedModes) {
-                    setExportStatusText(`Fetching ${cfg.reportName} (${mode})...`);
+                    const templateName = cfg.selectedTemplateId !== "default"
+                        ? cfg.availableTemplates.find((t) => String(t.id) === String(cfg.selectedTemplateId))?.name
+                        : null;
+                    const fullReportTitle = templateName
+                        ? `${cfg.reportName} - ${mode} - ${templateName}`
+                        : `${cfg.reportName} - ${mode}`;
+
+                    setExportStatusText(`Fetching ${fullReportTitle}...`);
 
                     const data = await cat.fetchData({
                         from: fromDate,
@@ -2025,49 +2219,49 @@ const BatchExportScreen: React.FC = () => {
                                 right: { style: "thin", color: { rgb: "000000" } }
                             };
                             const headerStyle = {
-                                font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "000000" } },
+                                font: { bold: true, sz: 12, name: "Calibri", color: { rgb: "000000" } },
                                 fill: { fgColor: { rgb: "FFFF00" } },
                                 alignment: { horizontal: "center", vertical: "center" },
                                 border: borderAll
                             };
                             const colHeaderStyle = {
-                                font: { bold: true, sz: 10, name: "Calibri", color: { rgb: "000000" } },
-                                fill: { fgColor: { rgb: "FFFFFF" } },
+                                font: { bold: true, sz: 12, name: "Calibri", color: { rgb: "000000" } },
+                                fill: { fgColor: { rgb: "FFFF00" } },
                                 alignment: { horizontal: "center", vertical: "center" },
                                 border: borderAll
                             };
                             const groupStyle = {
-                                font: { bold: true, sz: 10, name: "Calibri", color: { rgb: "000000" } },
+                                font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "000000" } },
                                 alignment: { horizontal: "left", vertical: "center" },
                                 border: borderAll
                             };
                             const subGroupStyle = {
-                                font: { sz: 9.5, name: "Calibri", color: { rgb: "000000" } },
+                                font: { sz: 11, name: "Calibri", color: { rgb: "000000" } },
                                 alignment: { horizontal: "left", vertical: "center" },
                                 border: borderAll
                             };
                             const amountStyle = {
-                                font: { sz: 9.5, name: "Calibri", color: { rgb: "000000" } },
+                                font: { sz: 11, name: "Calibri", color: { rgb: "000000" } },
                                 alignment: { horizontal: "right", vertical: "center" },
                                 border: borderAll,
                                 numFmt: "#,##0.00"
                             };
                             const blankBorderedCell = { border: borderAll };
                             const footerTitleStyle = {
-                                font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "000000" } },
+                                font: { bold: true, sz: 12, name: "Calibri", color: { rgb: "000000" } },
                                 fill: { fgColor: { rgb: "FFFF00" } },
                                 alignment: { horizontal: "center", vertical: "center" },
                                 border: borderAll
                             };
                             const footerAmountStyle = {
-                                font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "000000" } },
+                                font: { bold: true, sz: 12, name: "Calibri", color: { rgb: "000000" } },
                                 fill: { fgColor: { rgb: "FFFF00" } },
                                 alignment: { horizontal: "right", vertical: "center" },
                                 border: borderAll,
                                 numFmt: "#,##0.00"
                             };
 
-                            const titleText = `${mode} Expenses`;
+                            const titleText = fullReportTitle;
                             const rows: any[][] = [];
 
                             rows.push([{ v: titleText, s: headerStyle }, { v: "", s: headerStyle }]);
@@ -2218,14 +2412,14 @@ const BatchExportScreen: React.FC = () => {
                                     if (R === 0) {
                                         cell.s = {
                                             fill: { fgColor: { rgb: "FFFF00" } },
-                                            font: { name: "Calibri", sz: 10, bold: true, color: { rgb: "000000" } },
+                                            font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "000000" } },
                                             alignment: { horizontal: C === 0 ? "center" : "center", vertical: "center" },
                                             border: borderAll
                                         };
                                     } else {
                                         const isNumeric = typeof cell.v === "number";
                                         cell.s = {
-                                            font: { name: "Calibri", sz: 9.5, color: { rgb: "000000" } },
+                                            font: { name: "Calibri", sz: 11, color: { rgb: "000000" } },
                                             alignment: {
                                                 horizontal: C === 0 ? "center" : isNumeric ? "right" : "left",
                                                 vertical: "center"
@@ -2368,6 +2562,7 @@ const BatchExportScreen: React.FC = () => {
                     // 6. OUTSTANDING MANAGEMENT
                     else if (data.type === "outstandingManagement") {
                         const exportAoa: any[][] = [];
+                        exportAoa.push([fullReportTitle]);
                         exportAoa.push(["Account Name", "Days", data.amountColumnTitle]);
                         exportAoa.push(["Total", "", data.grandTotalAmount]);
 
@@ -2384,6 +2579,9 @@ const BatchExportScreen: React.FC = () => {
                         });
 
                         const worksheet = XLSX.utils.aoa_to_sheet(exportAoa);
+                        worksheet["!merges"] = [
+                            { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }
+                        ];
 
                         // Styling cells with professional report theme (#1E3A8A)
                         const range = XLSX.utils.decode_range(worksheet["!ref"] || "A1:C1");
@@ -2394,28 +2592,32 @@ const BatchExportScreen: React.FC = () => {
                                 if (!cell) continue;
 
                                 cell.s = {
-                                    font: { name: "Arial", sz: 9 },
+                                    font: { name: "Calibri", sz: 11 },
                                     border: {
-                                        top: { style: "thin", color: { rgb: "E2E8F0" } },
-                                        bottom: { style: "thin", color: { rgb: "E2E8F0" } },
-                                        left: { style: "thin", color: { rgb: "E2E8F0" } },
-                                        right: { style: "thin", color: { rgb: "E2E8F0" } },
+                                        top: { style: "thin", color: { rgb: "000000" } },
+                                        bottom: { style: "thin", color: { rgb: "000000" } },
+                                        left: { style: "thin", color: { rgb: "000000" } },
+                                        right: { style: "thin", color: { rgb: "000000" } },
                                     },
                                 };
 
                                 if (R === 0) {
-                                    cell.s.fill = { fgColor: { rgb: "1E3A8A" } };
-                                    cell.s.font = { name: "Arial", sz: 10, bold: true, color: { rgb: "FFFFFF" } };
-                                    cell.s.alignment = { horizontal: C === 0 ? "left" : "center", vertical: "center" };
+                                    cell.s.fill = { fgColor: { rgb: "FFFF00" } };
+                                    cell.s.font = { name: "Calibri", sz: 12, bold: true, color: { rgb: "000000" } };
+                                    cell.s.alignment = { horizontal: "center", vertical: "center" };
                                 } else if (R === 1) {
+                                    cell.s.fill = { fgColor: { rgb: "FFFF00" } };
+                                    cell.s.font = { name: "Calibri", sz: 12, bold: true, color: { rgb: "000000" } };
+                                    cell.s.alignment = { horizontal: C === 0 ? "left" : "center", vertical: "center" };
+                                } else if (R === 2) {
                                     cell.s.fill = { fgColor: { rgb: "EFF6FF" } };
-                                    cell.s.font = { name: "Arial", sz: 10, bold: true, color: { rgb: "1E3A8A" } };
+                                    cell.s.font = { name: "Calibri", sz: 12, bold: true, color: { rgb: "1E3A8A" } };
                                     cell.s.alignment = { horizontal: C === 0 ? "left" : "right" };
                                 } else {
-                                    const rowData = flattenedRows[R - 2];
+                                    const rowData = flattenedRows[R - 3];
                                     if (rowData && rowData.__group) {
                                         cell.s.fill = { fgColor: { rgb: "F1F5F9" } };
-                                        cell.s.font = { name: "Arial", sz: 9.5, bold: true, color: { rgb: "0F172A" } };
+                                        cell.s.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "0F172A" } };
                                         cell.s.alignment = { horizontal: C === 0 ? "left" : "right" };
                                     } else {
                                         if (C === 1) cell.s.alignment = { horizontal: "center" };
@@ -2435,7 +2637,7 @@ const BatchExportScreen: React.FC = () => {
                         const groupedData: any[] = data.groupedData || [];
 
                         const exportAoa: any[][] = [];
-                        exportAoa.push(["Shet Sheet Pending Report Screen"]);
+                        exportAoa.push([fullReportTitle]);
                         exportAoa.push(["S.No", ...activeCols.map((c: any) => c.label)]);
 
                         groupedData.forEach((grp: any) => {
@@ -2474,7 +2676,7 @@ const BatchExportScreen: React.FC = () => {
                                 if (!cell) continue;
 
                                 cell.s = {
-                                    font: { name: "Calibri", sz: 10 },
+                                    font: { name: "Calibri", sz: 11 },
                                     border: {
                                         top: { style: "thin", color: { rgb: "000000" } },
                                         bottom: { style: "thin", color: { rgb: "000000" } },
@@ -2485,11 +2687,11 @@ const BatchExportScreen: React.FC = () => {
 
                                 if (R === 0) {
                                     cell.s.fill = { fgColor: { rgb: "FFFF00" } };
-                                    cell.s.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "000000" } };
+                                    cell.s.font = { name: "Calibri", sz: 12, bold: true, color: { rgb: "000000" } };
                                     cell.s.alignment = { horizontal: "center", vertical: "center" };
                                 } else if (R === 1) {
                                     cell.s.fill = { fgColor: { rgb: "FFFF00" } };
-                                    cell.s.font = { name: "Calibri", sz: 10, bold: true, color: { rgb: "000000" } };
+                                    cell.s.font = { name: "Calibri", sz: 12, bold: true, color: { rgb: "000000" } };
                                     cell.s.alignment = { horizontal: C === 0 || C === 3 ? "center" : "left", vertical: "center" };
                                 } else if (R === currentGroupRow) {
                                     cell.s.fill = { fgColor: { rgb: "DBEAFE" } };
@@ -2584,22 +2786,22 @@ const BatchExportScreen: React.FC = () => {
 
                                     if (isHeader) {
                                         cell.s = {
-                                            fill: { fgColor: { rgb: "1E3A8A" } },
-                                            font: { name: "Calibri", sz: 10, bold: true, color: { rgb: "FFFFFF" } },
+                                            fill: { fgColor: { rgb: "FFFF00" } },
+                                            font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "000000" } },
                                             alignment: { horizontal: C === 0 ? "center" : "left", vertical: "center" },
                                             border: borderAll,
                                         };
                                     } else if (isGroup) {
                                         cell.s = {
                                             fill: { fgColor: { rgb: "F1F5F9" } },
-                                            font: { name: "Calibri", sz: 9.5, bold: true, color: { rgb: "1E3A8A" } },
+                                            font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "1E3A8A" } },
                                             alignment: { horizontal: C === 0 ? "center" : typeof cell.v === "number" ? "right" : "left", vertical: "center" },
                                             border: borderAll,
                                         };
                                     } else {
                                         const isNumeric = typeof cell.v === "number";
                                         cell.s = {
-                                            font: { name: "Calibri", sz: 9, color: { rgb: "000000" } },
+                                            font: { name: "Calibri", sz: 11, color: { rgb: "000000" } },
                                             alignment: {
                                                 horizontal: C === 0 ? "center" : isNumeric ? "right" : "left",
                                                 vertical: "center",
@@ -2646,10 +2848,9 @@ const BatchExportScreen: React.FC = () => {
                             }));
                         }
 
-                        // Determine dynamic font size based on column count and width
-                        const colCount = colsToUse.length + 1; // including S.No
-                        const fontSize = colCount > 10 ? 8 : colCount > 6 ? 9 : 10;
-                        const headerFontSize = colCount > 10 ? 9 : 10;
+                        // Standard font size 12pt for headers and readable font size for data
+                        const headerFontSize = 12;
+                        const fontSize = 11;
 
                         const exportAoa: any[][] = [];
                         const headerRow = ["S.No", ...colsToUse.map((c) => c.label)];
@@ -2773,7 +2974,14 @@ const BatchExportScreen: React.FC = () => {
                 if (!cat) continue;
 
                 for (const mode of cfg.selectedModes) {
-                    setExportStatusText(`Fetching & Rendering ${cfg.reportName} (${mode})...`);
+                    const templateName = cfg.selectedTemplateId !== "default"
+                        ? cfg.availableTemplates.find((t) => String(t.id) === String(cfg.selectedTemplateId))?.name
+                        : null;
+                    const fullReportTitle = templateName
+                        ? `${cfg.reportName} - ${mode} - ${templateName}`
+                        : `${cfg.reportName} - ${mode}`;
+
+                    setExportStatusText(`Fetching & Rendering ${fullReportTitle}...`);
 
                     if (!isFirstPage) {
                         doc.addPage();
@@ -2802,7 +3010,7 @@ const BatchExportScreen: React.FC = () => {
                             const dateHeader = fromDate === toDate
                                 ? formatDisplayDate(toDate)
                                 : `${formatDisplayDate(fromDate)} - ${formatDisplayDate(toDate)}`;
-                            const titleText = `${mode} Expenses`;
+                            const titleText = fullReportTitle;
 
                             const bodyRows: any[] = [];
                             let grandTotal = 0;
@@ -2871,7 +3079,7 @@ const BatchExportScreen: React.FC = () => {
                             doc.rect(0, 0, 297, 18, "F");
                             doc.setTextColor(255, 255, 255);
                             doc.setFontSize(13);
-                            doc.text(`${cfg.reportName} - ${mode} View`, 14, 12);
+                            doc.text(fullReportTitle, 14, 12);
                             doc.setFontSize(9);
                             doc.text(`Period: ${fromDate} to ${toDate}`, 210, 12);
 
@@ -2929,7 +3137,7 @@ const BatchExportScreen: React.FC = () => {
                         doc.rect(0, 0, 297, 18, "F");
                         doc.setTextColor(255, 255, 255);
                         doc.setFontSize(13);
-                        doc.text("RATE MASTER ADMIN", 14, 12);
+                        doc.text(fullReportTitle, 14, 12);
                         doc.setFontSize(9);
                         doc.text(`As of Date: ${toDate}`, 220, 12);
 
@@ -3042,7 +3250,7 @@ const BatchExportScreen: React.FC = () => {
                         doc.rect(0, 0, 297, 18, "F");
                         doc.setTextColor(255, 255, 255);
                         doc.setFontSize(13);
-                        doc.text(`${data.title} - As of ${dayjs(toDate).format("DD/MM/YYYY")}`, 14, 12);
+                        doc.text(`${fullReportTitle} - As of ${dayjs(toDate).format("DD/MM/YYYY")}`, 14, 12);
 
                         const rows = data.rows || [];
                         const groupMap = new Map<string, any[]>();
@@ -3152,7 +3360,7 @@ const BatchExportScreen: React.FC = () => {
                         doc.rect(0, 0, 297, 18, "F");
                         doc.setTextColor(255, 255, 255);
                         doc.setFontSize(13);
-                        doc.text(`CASH BOX TRANSACTION - ${dateStr}`, 14, 12);
+                        doc.text(`${fullReportTitle} - ${dateStr}`, 14, 12);
 
                         const formatNum = (v: number) => (v === 0 ? "-" : formatINR(v));
                         const pdfBody: any[][] = [];
@@ -3233,7 +3441,7 @@ const BatchExportScreen: React.FC = () => {
                         doc.rect(0, 0, 297, 18, "F");
                         doc.setTextColor(255, 255, 255);
                         doc.setFontSize(13);
-                        doc.text(`CASH BOX DETAILED TRANSACTION - ${fromDate} to ${toDate}`, 14, 12);
+                        doc.text(`${fullReportTitle} - ${fromDate} to ${toDate}`, 14, 12);
 
                         const rows = data.detailedData?.Data || [];
                         const keys = rows.length > 0 ? Object.keys(rows[0]).slice(0, 8) : [];
@@ -3265,9 +3473,11 @@ const BatchExportScreen: React.FC = () => {
                     }
                     // 6. OUTSTANDING MANAGEMENT / RECIEVABLE PAYABLE MGT
                     else if (data.type === "outstandingManagement") {
-                        doc.setFontSize(12);
-                        doc.setTextColor(30, 58, 138);
-                        doc.text(`${data.title} - As of ${dayjs(toDate).format("DD/MM/YYYY")}`, 14, 12);
+                        doc.setFillColor(30, 58, 138);
+                        doc.rect(0, 0, 297, 18, "F");
+                        doc.setTextColor(255, 255, 255);
+                        doc.setFontSize(13);
+                        doc.text(`${fullReportTitle} - As of ${dayjs(toDate).format("DD/MM/YYYY")}`, 14, 12);
 
                         const formatNumber = (num: number) => {
                             return new Intl.NumberFormat("en-IN", {
@@ -3343,7 +3553,7 @@ const BatchExportScreen: React.FC = () => {
                         doc.rect(0, 0, 297, 18, "F");
                         doc.setTextColor(255, 255, 255);
                         doc.setFontSize(13);
-                        doc.text(`Shet Sheet Pending Report Screen`, 14, 12);
+                        doc.text(fullReportTitle, 14, 12);
                         doc.setFontSize(9);
                         doc.text(`Period: ${fromDate} to ${toDate}`, 210, 12);
 
@@ -3411,7 +3621,7 @@ const BatchExportScreen: React.FC = () => {
                         doc.rect(0, 0, 297, 18, "F");
                         doc.setTextColor(255, 255, 255);
                         doc.setFontSize(13);
-                        doc.text("Stock Difference Report", 14, 12);
+                        doc.text(fullReportTitle, 14, 12);
                         doc.setFontSize(9);
                         doc.text(`Period: ${fromDate} to ${toDate}`, 210, 12);
 
@@ -3495,7 +3705,7 @@ const BatchExportScreen: React.FC = () => {
                         doc.rect(0, 0, 297, 18, "F");
                         doc.setTextColor(255, 255, 255);
                         doc.setFontSize(13);
-                        doc.text(`${cfg.reportName} - ${mode} View`, 14, 12);
+                        doc.text(fullReportTitle, 14, 12);
                         doc.setFontSize(9);
                         doc.text(`Period: ${fromDate} to ${toDate}`, 210, 12);
 
@@ -3813,115 +4023,40 @@ const BatchExportScreen: React.FC = () => {
                             },
                         }}
                     >
-                        <Table stickyHeader size="small">
-                            <TableHead>
-                                <TableRow sx={{ "& th": { bgcolor: "#1E3A8A", color: "#ffffff", fontWeight: 700, fontSize: "0.82rem", py: 1.2 } }}>
-                                    <TableCell width={60} align="center">S.No</TableCell>
-                                    <TableCell width={240}>Report Name</TableCell>
-                                    <TableCell width={240}>Report Mode(s)</TableCell>
-                                    <TableCell width={220}>Saved Template</TableCell>
-                                    <TableCell width={180}>Export Style</TableCell>
-                                    <TableCell width={80} align="center">Action</TableCell>
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {selectedReports.map((cfg, idx) => (
-                                    <TableRow key={cfg.id} hover sx={{ "&:nth-of-type(even)": { bgcolor: "#f8fafc" } }}>
-                                        {/* S.No */}
-                                        <TableCell align="center">
-                                            <Chip
-                                                label={`#${idx + 1}`}
-                                                size="small"
-                                                sx={{ bgcolor: "#e2e8f0", color: "#1e293b", fontWeight: 700, height: 22, fontSize: "0.75rem" }}
-                                            />
-                                        </TableCell>
-
-                                        {/* Report Name */}
-                                        <TableCell>
-                                            <Typography fontWeight={700} fontSize="0.88rem" color="#0f172a">
-                                                {cfg.reportName}
-                                            </Typography>
-                                            <Typography variant="caption" color="text.secondary">
-                                                {cfg.reportKey}
-                                            </Typography>
-                                        </TableCell>
-
-                                        {/* Multi-select Modes */}
-                                        <TableCell>
-                                            <FormControl size="small" fullWidth>
-                                                <Select
-                                                    multiple
-                                                    value={cfg.selectedModes}
-                                                    onChange={(e) => {
-                                                        const val = typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value;
-                                                        handleUpdateReport(cfg.id, { selectedModes: val.length ? val : [cfg.availableModes[0]] });
-                                                    }}
-                                                    renderValue={(selected) => (
-                                                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                                                            {selected.map((v) => (
-                                                                <Chip key={v} label={v} size="small" color="primary" sx={{ height: 22, fontSize: "0.72rem" }} />
-                                                            ))}
-                                                        </Box>
-                                                    )}
-                                                    sx={{ fontSize: "0.82rem", bgcolor: "#fff" }}
-                                                >
-                                                    {cfg.availableModes.map((m) => (
-                                                        <MenuItem key={m} value={m}>
-                                                            <Checkbox checked={cfg.selectedModes.indexOf(m) > -1} size="small" />
-                                                            <ListItemText primary={m} primaryTypographyProps={{ fontSize: "0.82rem" }} />
-                                                        </MenuItem>
-                                                    ))}
-                                                </Select>
-                                            </FormControl>
-                                        </TableCell>
-
-                                        {/* Saved Template Selector */}
-                                        <TableCell>
-                                            <FormControl size="small" fullWidth>
-                                                <Select
-                                                    value={cfg.selectedTemplateId}
-                                                    onChange={(e) => handleUpdateReport(cfg.id, { selectedTemplateId: e.target.value as any })}
-                                                    sx={{ fontSize: "0.82rem", bgcolor: "#fff" }}
-                                                >
-                                                    <MenuItem value="default" sx={{ fontSize: "0.82rem" }}>Default Columns</MenuItem>
-                                                    {cfg.availableTemplates.map((t) => (
-                                                        <MenuItem key={t.id} value={t.id} sx={{ fontSize: "0.82rem" }}>
-                                                            {t.name}
-                                                        </MenuItem>
-                                                    ))}
-                                                </Select>
-                                            </FormControl>
-                                        </TableCell>
-
-                                        {/* Export Type / Style */}
-                                        <TableCell>
-                                            <FormControl size="small" fullWidth>
-                                                <Select
-                                                    value={cfg.selectedExportType}
-                                                    onChange={(e) => handleUpdateReport(cfg.id, { selectedExportType: e.target.value })}
-                                                    sx={{ fontSize: "0.82rem", bgcolor: "#fff" }}
-                                                >
-                                                    {cfg.availableExportTypes.map((et) => (
-                                                        <MenuItem key={et} value={et} sx={{ fontSize: "0.82rem" }}>
-                                                            {et}
-                                                        </MenuItem>
-                                                    ))}
-                                                </Select>
-                                            </FormControl>
-                                        </TableCell>
-
-                                        {/* Action */}
-                                        <TableCell align="center">
-                                            <Tooltip title="Remove Report">
-                                                <IconButton size="small" color="error" onClick={() => handleRemoveReport(cfg.id)}>
-                                                    <DeleteOutlineIcon fontSize="small" />
-                                                </IconButton>
-                                            </Tooltip>
-                                        </TableCell>
+                        <DndContext
+                            sensors={sensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={handleDragEnd}
+                        >
+                            <Table stickyHeader size="small">
+                                <TableHead>
+                                    <TableRow sx={{ "& th": { bgcolor: "#1E3A8A", color: "#ffffff", fontWeight: 700, fontSize: "0.82rem", py: 1.2 } }}>
+                                        <TableCell width={90} align="center">S.No</TableCell>
+                                        <TableCell width={240}>Report Name</TableCell>
+                                        <TableCell width={240}>Report Mode(s)</TableCell>
+                                        <TableCell width={220}>Saved Template</TableCell>
+                                        <TableCell width={180}>Export Style</TableCell>
+                                        <TableCell width={80} align="center">Action</TableCell>
                                     </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
+                                </TableHead>
+                                <TableBody>
+                                    <SortableContext
+                                        items={selectedReports.map((r) => r.id)}
+                                        strategy={verticalListSortingStrategy}
+                                    >
+                                        {selectedReports.map((cfg, idx) => (
+                                            <SortableReportRow
+                                                key={cfg.id}
+                                                cfg={cfg}
+                                                idx={idx}
+                                                onUpdateReport={handleUpdateReport}
+                                                onRemoveReport={handleRemoveReport}
+                                            />
+                                        ))}
+                                    </SortableContext>
+                                </TableBody>
+                            </Table>
+                        </DndContext>
                     </TableContainer>
                     </Box>
                 )}

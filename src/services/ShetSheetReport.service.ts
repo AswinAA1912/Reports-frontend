@@ -74,6 +74,7 @@ export interface ShetSheetReportParams {
   FromDate?: string;
   ToDate?: string;
   allDetails?: boolean | string;
+  status?: "pending" | "complete" | "all" | string;
 }
 
 /* ================= SERVICE ================= */
@@ -93,6 +94,7 @@ export const ShetSheetReportService = {
           Fromdate: from,
           toDate: to,
           allDetails: params?.allDetails,
+          status: params?.status,
         },
       }
     );

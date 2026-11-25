@@ -31,6 +31,7 @@ export interface SaveReportPayload {
     abstractColumns: ColumnPayload[];
     expandedColumns: ColumnPayload[];
     createdBy: number;
+    presetConfig?: any;
 }
 
 type UpdateReportPayload = {
@@ -42,6 +43,7 @@ type UpdateReportPayload = {
 
     abstractColumns?: any[];
     expandedColumns?: any[];
+    presetConfig?: any;
 };
 
 export interface SaveReportByTypePayload {

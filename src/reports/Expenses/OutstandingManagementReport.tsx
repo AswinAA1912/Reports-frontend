@@ -374,8 +374,29 @@ const OutstandingManagementReport: React.FC = () => {
                 setReportName(reportInfo.Report_Name);
             }
 
-            // Extract saved aging scale configuration from template columns if available
-            // Format of saved scale column key: "SCALE_from_to" or stored in localStorage
+            // Extract saved aging scale configuration from Database Preset_Config, columns, or fallback to localStorage
+            const rawPreset = reportInfo?.Preset_Config;
+            let dbScales: AgingScale[] | null = null;
+            if (rawPreset) {
+                try {
+                    const parsedPreset = typeof rawPreset === "string" ? JSON.parse(rawPreset) : rawPreset;
+                    if (Array.isArray(parsedPreset)) {
+                        dbScales = parsedPreset;
+                    } else if (parsedPreset && Array.isArray(parsedPreset.scales)) {
+                        dbScales = parsedPreset.scales;
+                    }
+                } catch (e) {
+                    console.warn("Failed to parse db Preset_Config in OutstandingManagement", e);
+                }
+            }
+
+            if (dbScales && dbScales.length > 0) {
+                setScales(dbScales);
+                setTempScales(dbScales);
+                toast.success("Template Loaded Successfully ✅");
+                return;
+            }
+
             const savedScalesJson = localStorage.getItem(`template_scales_${reportId}`);
             if (savedScalesJson) {
                 try {
@@ -443,6 +464,7 @@ const OutstandingManagementReport: React.FC = () => {
                     typeId: 1,
                     reportName: reportName.trim(),
                     columns: payloadColumns,
+                    presetConfig: { scales },
                 });
                 localStorage.setItem(`template_scales_${selectedTemplateId}`, JSON.stringify(scales));
                 toast.success("Template Updated Successfully ✅");
@@ -455,6 +477,7 @@ const OutstandingManagementReport: React.FC = () => {
                     abstractColumns: payloadColumns,
                     expandedColumns: payloadColumns,
                     createdBy,
+                    presetConfig: { scales },
                 });
                 const newId = (res as any)?.data?.reportId;
                 if (newId) {

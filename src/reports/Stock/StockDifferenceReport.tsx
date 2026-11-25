@@ -229,13 +229,31 @@ const StockDifferenceReport: React.FC = () => {
                     setReportName(info.Report_Name);
                 }
 
-                // Check stored Godown filter
+                // Check stored Godown filter & column filters in Database Preset_Config
                 let targetGodownId: string | number | null = null;
-                const storedGodownId = localStorage.getItem(`template_godown_${templateId}`);
-                if (storedGodownId) {
-                    targetGodownId = storedGodownId;
-                } else if (info?.Abstract_SP && !isNaN(Number(info.Abstract_SP))) {
-                    targetGodownId = info.Abstract_SP;
+                const rawPreset = info?.Preset_Config;
+                let dbConfig: any = null;
+                if (rawPreset) {
+                    try {
+                        dbConfig = typeof rawPreset === "string" ? JSON.parse(rawPreset) : rawPreset;
+                    } catch (e) {
+                        console.warn("Failed to parse db Preset_Config in StockDifference", e);
+                    }
+                }
+
+                if (dbConfig && typeof dbConfig === "object") {
+                    if (dbConfig.godownId) targetGodownId = dbConfig.godownId;
+                    if (dbConfig.columnFilters) setColumnFilters(dbConfig.columnFilters);
+                    if (dbConfig.rangeFilter) setNumRangeFilter(dbConfig.rangeFilter);
+                }
+
+                if (!targetGodownId) {
+                    const storedGodownId = localStorage.getItem(`template_godown_${templateId}`);
+                    if (storedGodownId) {
+                        targetGodownId = storedGodownId;
+                    } else if (info?.Abstract_SP && !isNaN(Number(info.Abstract_SP))) {
+                        targetGodownId = info.Abstract_SP;
+                    }
                 }
 
                 if (targetGodownId && godowns.length > 0) {
@@ -285,6 +303,11 @@ const StockDifferenceReport: React.FC = () => {
             }));
 
             const godownIdStr = selectedGodown ? String(selectedGodown.Godown_Id) : "";
+            const templateDbConfig = {
+                godownId: godownIdStr,
+                columnFilters,
+                rangeFilter: numRangeFilter,
+            };
 
             if (selectedTemplateId) {
                 await SettingsService.updateReport({
@@ -292,12 +315,14 @@ const StockDifferenceReport: React.FC = () => {
                     typeId: 1,
                     reportName: reportName.trim(),
                     columns: payloadColumns,
+                    presetConfig: templateDbConfig,
                 });
                 await SettingsService.updateReport({
                     reportId: selectedTemplateId,
                     typeId: 2,
                     reportName: reportName.trim(),
                     columns: payloadColumns,
+                    presetConfig: templateDbConfig,
                 });
 
                 if (godownIdStr) {
@@ -314,6 +339,7 @@ const StockDifferenceReport: React.FC = () => {
                     abstractColumns: payloadColumns,
                     expandedColumns: payloadColumns,
                     createdBy,
+                    presetConfig: templateDbConfig,
                 });
 
                 const newReportId = (res as any)?.data?.reportId || (res as any)?.data?.data?.Report_Id;

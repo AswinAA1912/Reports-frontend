@@ -491,17 +491,46 @@ const ShetSheetReport: React.FC = () => {
                 setSelectedTemplateId(templateId);
                 setReportName(settings.Report_Name || settings.reportInfo?.Report_Name || "");
 
-                // Load allDetails setting if saved with template
-                const savedAll = localStorage.getItem(`template_allDetails_${templateId}`);
-                const isAll = savedAll === "true";
+                // Load allDetails & status setting and header columnFilters from Database Preset_Config first, then fallback to localStorage
+                let isAll = false;
+                let st: "pending" | "complete" | "all" = "pending";
+                let savedColFilters: Record<string, string[]> = {};
+                let savedRange: Record<string, [number, number]> = {};
+
+                const dbPresetConfig = res.data.data?.reportInfo?.Preset_Config;
+                let dbParsed: any = null;
+                if (dbPresetConfig) {
+                    try {
+                        dbParsed = typeof dbPresetConfig === "string" ? JSON.parse(dbPresetConfig) : dbPresetConfig;
+                    } catch (e) {
+                        console.warn("Failed to parse db Preset_Config in ShetSheet", e);
+                    }
+                }
+
+                if (dbParsed && typeof dbParsed === "object") {
+                    if (dbParsed.allDetails !== undefined) isAll = Boolean(dbParsed.allDetails);
+                    if (dbParsed.status) st = dbParsed.status;
+                    if (dbParsed.columnFilters) savedColFilters = dbParsed.columnFilters;
+                    if (dbParsed.rangeFilter) savedRange = dbParsed.rangeFilter;
+                } else {
+                    const savedAll = localStorage.getItem(`template_allDetails_${templateId}`);
+                    isAll = savedAll === "true";
+                    const savedStatus = localStorage.getItem(`template_status_${templateId}`) as ("pending" | "complete" | "all") | null;
+                    if (savedStatus) st = savedStatus;
+                    const localColFilters = localStorage.getItem(`template_colFilters_${templateId}`);
+                    if (localColFilters) {
+                        try { savedColFilters = JSON.parse(localColFilters); } catch (e) { /* ignore */ }
+                    }
+                }
+
                 setAllDetails(isAll);
                 setTempAllDetails(isAll);
-
-                // Load status setting if saved with template
-                const savedStatus = localStorage.getItem(`template_status_${templateId}`) as ("pending" | "complete" | "all") | null;
-                const st = savedStatus || "pending";
                 setStatusFilter(st);
                 setTempStatusFilter(st);
+                setColumnFilters(savedColFilters);
+                if (Object.keys(savedRange).length > 0) {
+                    setNumRangeFilter(savedRange);
+                }
 
                 const effectiveFrom = isAll ? dayjs(toDate).subtract(60, "day").format("YYYY-MM-DD") : fromDate;
                 if (isAll) {
@@ -564,21 +593,32 @@ const ShetSheetReport: React.FC = () => {
                 groupBy: 0,
             }));
 
+            const templateDbConfig = {
+                allDetails,
+                status: statusFilter,
+                columnFilters,
+                rangeFilter: numRangeFilter,
+            };
+
             if (selectedTemplateId) {
                 await SettingsService.updateReport({
                     reportId: selectedTemplateId,
                     typeId: 1,
                     reportName: reportName.trim(),
                     columns: payloadColumns,
+                    presetConfig: templateDbConfig,
                 });
                 await SettingsService.updateReport({
                     reportId: selectedTemplateId,
                     typeId: 2,
                     reportName: reportName.trim(),
                     columns: payloadColumns,
+                    presetConfig: templateDbConfig,
                 });
                 localStorage.setItem(`template_allDetails_${selectedTemplateId}`, String(allDetails));
                 localStorage.setItem(`template_status_${selectedTemplateId}`, statusFilter);
+                localStorage.setItem(`template_colFilters_${selectedTemplateId}`, JSON.stringify(columnFilters));
+                localStorage.setItem(`template_rangeFilter_${selectedTemplateId}`, JSON.stringify(numRangeFilter));
                 toast.success("Template Updated Successfully ✅");
                 setSaveDialogOpen(false);
                 setTimeout(() => {
@@ -593,12 +633,15 @@ const ShetSheetReport: React.FC = () => {
                     abstractColumns: payloadColumns,
                     expandedColumns: payloadColumns,
                     createdBy,
+                    presetConfig: templateDbConfig,
                 });
                 const newId = (saveRes as any)?.data?.reportId || (saveRes as any)?.data?.data?.Report_Id || (saveRes as any)?.data?.Report_Id;
                 if (newId) {
                     setSelectedTemplateId(newId);
                     localStorage.setItem(`template_allDetails_${newId}`, String(allDetails));
                     localStorage.setItem(`template_status_${newId}`, statusFilter);
+                    localStorage.setItem(`template_colFilters_${newId}`, JSON.stringify(columnFilters));
+                    localStorage.setItem(`template_rangeFilter_${newId}`, JSON.stringify(numRangeFilter));
                 }
                 toast.success("Template Saved Successfully ✅");
                 setSaveDialogOpen(false);

@@ -1014,14 +1014,121 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
             });
 
             let templateCols: any[] = [];
+            let templateName = "";
+            let savedRangeFilter: Record<string, [number, number]> | null = null;
+            let savedColFilters: Record<string, string[] | undefined> | null = null;
+            let savedHideZeroDiff: boolean | null = null;
+            let savedDiffFilterMode: string | null = null;
+
             if (templateId && templateId !== "default") {
                 try {
                     const tRes = await SettingsService.getReportEditData({ reportId: Number(templateId), typeId: isExp ? 2 : 1 });
-                    if (tRes.data?.success && tRes.data.data?.columns) {
-                        templateCols = tRes.data.data.columns.filter((c: any) => c.enabled).sort((a: any, b: any) => a.order - b.order);
+                    if (tRes.data?.success && tRes.data.data) {
+                        templateName = tRes.data.data.reportInfo?.Report_Name || "";
+                        if (tRes.data.data.columns) {
+                            templateCols = tRes.data.data.columns.filter((c: any) => c.enabled).sort((a: any, b: any) => a.order - b.order);
+                        }
+                        // Check DB Preset_Config
+                        const rawPresetConfig = tRes.data.data.reportInfo?.Preset_Config;
+                        if (rawPresetConfig) {
+                            try {
+                                const dbConfig = typeof rawPresetConfig === "string" ? JSON.parse(rawPresetConfig) : rawPresetConfig;
+                                if (dbConfig && typeof dbConfig === "object") {
+                                    if (dbConfig.diffFilterMode) savedDiffFilterMode = dbConfig.diffFilterMode;
+                                    if (dbConfig.hideZeroDiff !== undefined) savedHideZeroDiff = dbConfig.hideZeroDiff;
+                                    if (dbConfig.rangeFilter) savedRangeFilter = dbConfig.rangeFilter;
+                                    if (dbConfig.columnFilters) savedColFilters = dbConfig.columnFilters;
+                                }
+                            } catch (e) {
+                                console.warn("Failed to parse db Preset_Config in BatchExport", e);
+                            }
+                        }
                     }
                 } catch (e) {
                     console.warn(e);
+                }
+
+                // Fallback to localStorage if not loaded from database
+                if (!savedRangeFilter) {
+                    const rfJson = localStorage.getItem(`template_rangeFilter_${templateId}`);
+                    if (rfJson) {
+                        try { savedRangeFilter = JSON.parse(rfJson); } catch (e) { /* ignore */ }
+                    }
+                }
+
+                if (!savedColFilters) {
+                    const cfJson = localStorage.getItem(`template_colFilters_${templateId}`);
+                    if (cfJson) {
+                        try { savedColFilters = JSON.parse(cfJson); } catch (e) { /* ignore */ }
+                    }
+                }
+
+                if (!savedDiffFilterMode) {
+                    savedDiffFilterMode = localStorage.getItem(`template_diffFilterMode_${templateId}`);
+                }
+                if (savedHideZeroDiff === null) {
+                    const hz = localStorage.getItem(`template_hideZeroDiff_${templateId}`);
+                    if (hz !== null) {
+                        savedHideZeroDiff = hz === "true";
+                    }
+                }
+            }
+
+            // Apply column categorical filters if saved in template
+            if (savedColFilters) {
+                rows = rows.filter((row: any) => {
+                    for (const [key, values] of Object.entries(savedColFilters!)) {
+                        if (values === undefined || !Array.isArray(values) || values.length === 0) continue;
+                        const rawVal = row[key];
+                        const formattedVal = key === "Created_on"
+                            ? (rawVal ? dayjs(rawVal).format("DD/MM/YYYY HH:mm") : "-")
+                            : key === "Ledger_Date"
+                                ? (rawVal ? dayjs(rawVal).format("DD/MM/YYYY") : "-")
+                                : String(rawVal ?? "");
+                        const match = values.some((v: any) => {
+                            const target = String(v ?? "").trim();
+                            return target === formattedVal.trim() || target === String(rawVal ?? "").trim();
+                        });
+                        if (!match) return false;
+                    }
+                    return true;
+                });
+            }
+
+            // Apply numerical range filters (scaling filters) if saved in template
+            if (savedRangeFilter) {
+                for (const [key, range] of Object.entries(savedRangeFilter)) {
+                    if (range && Array.isArray(range)) {
+                        rows = rows.filter((r: any) => {
+                            const val = Number(r[key]);
+                            return isNaN(val) || (val >= range[0] && val <= range[1]);
+                        });
+                    }
+                }
+            }
+
+            // Apply Diff filter:
+            // 1. If diffFilterMode === "outlier_2" or template name is "Rate Check" / mentions outlier:
+            //    Filter only items with differences below -2 and above +2 (Diff < -2 or Diff > 2)
+            // 2. Else if diffFilterMode === "non_zero" or hideZeroDiff === true or template name contains "diff":
+            //    Filter out 0 Diff rows (Diff !== 0)
+            const isRateCheck = templateName.toLowerCase().includes("rate check");
+            const isDiffOutlier = savedDiffFilterMode === "outlier_2" || isRateCheck;
+
+            if (isDiffOutlier) {
+                // Show only items with differences of below -2 and above +2
+                rows = rows.filter((r: any) => {
+                    const d = Number(r.Diff || 0);
+                    return d < -2 || d > 2;
+                });
+            } else {
+                const shouldFilterZeroDiff = savedHideZeroDiff === true ||
+                    savedDiffFilterMode === "non_zero" ||
+                    templateName.toLowerCase().includes("diff") ||
+                    (savedRangeFilter !== null && "Diff" in savedRangeFilter);
+
+                if (shouldFilterZeroDiff) {
+                    rows = rows.filter((r: any) => r.Diff !== 0 && Number(r.Diff) !== 0);
                 }
             }
 
@@ -1351,14 +1458,61 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
         fetchData: async ({ from, to, templateId }) => {
             let isAllDetails = false;
             let status = "pending";
+            let templateCols: any[] = [];
+            let savedColFilters: Record<string, string[] | undefined> | null = null;
+            let savedRangeFilter: Record<string, [number, number]> | null = null;
+
             if (templateId && templateId !== "default") {
+                try {
+                    const tRes = await SettingsService.getReportEditData({
+                        reportId: Number(templateId),
+                        typeId: 1,
+                    });
+                    if (tRes.data?.success && tRes.data.data) {
+                        const rawPresetConfig = tRes.data.data.reportInfo?.Preset_Config;
+                        if (rawPresetConfig) {
+                            try {
+                                const dbConfig = typeof rawPresetConfig === "string" ? JSON.parse(rawPresetConfig) : rawPresetConfig;
+                                if (dbConfig && typeof dbConfig === "object") {
+                                    if (dbConfig.allDetails !== undefined) isAllDetails = Boolean(dbConfig.allDetails);
+                                    if (dbConfig.status) status = dbConfig.status;
+                                    if (dbConfig.columnFilters) savedColFilters = dbConfig.columnFilters;
+                                    if (dbConfig.rangeFilter) savedRangeFilter = dbConfig.rangeFilter;
+                                }
+                            } catch (e) {
+                                console.warn("Failed to parse db Preset_Config for ShetSheet", e);
+                            }
+                        }
+                        if (tRes.data.data.columns) {
+                            templateCols = tRes.data.data.columns
+                                .filter((c: any) => c.enabled)
+                                .sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0));
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Could not load template for ShetSheet:", e);
+                }
+
+                // Fallback to localStorage if not specified in db Preset_Config
                 const savedAll = localStorage.getItem(`template_allDetails_${templateId}`);
-                if (savedAll !== null) {
+                if (savedAll !== null && isAllDetails === false) {
                     isAllDetails = savedAll === "true";
                 }
                 const savedStatus = localStorage.getItem(`template_status_${templateId}`);
-                if (savedStatus) {
+                if (savedStatus && status === "pending") {
                     status = savedStatus;
+                }
+                if (!savedColFilters) {
+                    const cfJson = localStorage.getItem(`template_colFilters_${templateId}`);
+                    if (cfJson) {
+                        try { savedColFilters = JSON.parse(cfJson); } catch (e) { /* ignore */ }
+                    }
+                }
+                if (!savedRangeFilter) {
+                    const rfJson = localStorage.getItem(`template_rangeFilter_${templateId}`);
+                    if (rfJson) {
+                        try { savedRangeFilter = JSON.parse(rfJson); } catch (e) { /* ignore */ }
+                    }
                 }
             }
 
@@ -1371,23 +1525,6 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
                 status,
             });
             const rawItems: ShetSheetItem[] = res.data?.data || (Array.isArray(res.data) ? (res.data as any) : []);
-
-            let templateCols: any[] = [];
-            if (templateId && templateId !== "default") {
-                try {
-                    const tRes = await SettingsService.getReportEditData({
-                        reportId: Number(templateId),
-                        typeId: 1,
-                    });
-                    if (tRes.data?.success && tRes.data.data?.columns) {
-                        templateCols = tRes.data.data.columns
-                            .filter((c: any) => c.enabled)
-                            .sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0));
-                    }
-                } catch (e) {
-                    console.warn("Could not load template for ShetSheet:", e);
-                }
-            }
 
             // Fallback default columns if template not selected or empty
             const activeCols = templateCols.length > 0 ? templateCols : [
@@ -1525,9 +1662,34 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
                 }
             });
 
+            // Apply saved header column filters if present
+            let filteredShetRows = flattened;
+            if (savedColFilters) {
+                filteredShetRows = filteredShetRows.filter((row: any) => {
+                    for (const [key, values] of Object.entries(savedColFilters!)) {
+                        if (values === undefined || !Array.isArray(values) || values.length === 0) continue;
+                        const rawVal = row[key];
+                        const strVal = rawVal !== undefined && rawVal !== null ? String(rawVal) : "";
+                        if (!values.includes(strVal)) return false;
+                    }
+                    return true;
+                });
+            }
+            if (savedRangeFilter) {
+                filteredShetRows = filteredShetRows.filter((row: any) => {
+                    for (const [colKey, range] of Object.entries(savedRangeFilter!)) {
+                        if (range && Array.isArray(range)) {
+                            const num = Number(row[colKey] || 0);
+                            if (num < range[0] || num > range[1]) return false;
+                        }
+                    }
+                    return true;
+                });
+            }
+
             // Group by Remarks
             const groupsMap = new Map<string, any[]>();
-            flattened.forEach((row) => {
+            filteredShetRows.forEach((row) => {
                 const grp = row.RemarksGroup;
                 if (!groupsMap.has(grp)) groupsMap.set(grp, []);
                 groupsMap.get(grp)!.push(row);
@@ -1557,13 +1719,10 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
         fetchData: async ({ from, to, templateId }) => {
             let godownId = 0;
             let templateCols: any[] = [];
+            let savedColFilters: Record<string, string[] | undefined> | null = null;
+            let savedRangeFilter: Record<string, [number, number]> | null = null;
 
             if (templateId && templateId !== "default") {
-                const storedGodownId = localStorage.getItem(`template_godown_${templateId}`);
-                if (storedGodownId && !isNaN(Number(storedGodownId))) {
-                    godownId = Number(storedGodownId);
-                }
-
                 try {
                     const tRes = await SettingsService.getReportEditData({
                         reportId: Number(templateId),
@@ -1571,6 +1730,20 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
                     });
                     if (tRes.data?.success && tRes.data.data) {
                         const info = tRes.data.data.reportInfo || tRes.data.data;
+                        const rawPreset = info?.Preset_Config;
+                        if (rawPreset) {
+                            try {
+                                const dbConfig = typeof rawPreset === "string" ? JSON.parse(rawPreset) : rawPreset;
+                                if (dbConfig && typeof dbConfig === "object") {
+                                    if (dbConfig.godownId) godownId = Number(dbConfig.godownId);
+                                    if (dbConfig.columnFilters) savedColFilters = dbConfig.columnFilters;
+                                    if (dbConfig.rangeFilter) savedRangeFilter = dbConfig.rangeFilter;
+                                }
+                            } catch (e) {
+                                console.warn("Failed to parse db Preset_Config in StockDifference export", e);
+                            }
+                        }
+
                         if (!godownId && info?.Abstract_SP && !isNaN(Number(info.Abstract_SP))) {
                             godownId = Number(info.Abstract_SP);
                         }
@@ -1581,6 +1754,13 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
                     }
                 } catch (e) {
                     console.warn("Could not load template for Stock Difference Report:", e);
+                }
+
+                if (!godownId) {
+                    const storedGodownId = localStorage.getItem(`template_godown_${templateId}`);
+                    if (storedGodownId && !isNaN(Number(storedGodownId))) {
+                        godownId = Number(storedGodownId);
+                    }
                 }
             }
 
@@ -1606,9 +1786,33 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
 
             const activeCols = templateCols.length > 0 ? templateCols : defaultFrontendCols;
 
+            let filteredItems = rawItems;
+            if (savedColFilters) {
+                filteredItems = filteredItems.filter((row: any) => {
+                    for (const [key, values] of Object.entries(savedColFilters!)) {
+                        if (values === undefined || !Array.isArray(values) || values.length === 0) continue;
+                        const rawVal = row[key];
+                        const strVal = rawVal !== undefined && rawVal !== null ? String(rawVal) : "";
+                        if (!values.includes(strVal)) return false;
+                    }
+                    return true;
+                });
+            }
+            if (savedRangeFilter) {
+                filteredItems = filteredItems.filter((row: any) => {
+                    for (const [colKey, range] of Object.entries(savedRangeFilter!)) {
+                        if (range && Array.isArray(range)) {
+                            const num = Number(row[colKey] || 0);
+                            if (num < range[0] || num > range[1]) return false;
+                        }
+                    }
+                    return true;
+                });
+            }
+
             // Group by Stock_Group exactly like the parent StockDifferenceReport.tsx screen
             const groupMap = new Map<string, StockDifferenceItem[]>();
-            rawItems.forEach((item) => {
+            filteredItems.forEach((item) => {
                 const grpName = String(item.Stock_Group || "Others").trim();
                 if (!groupMap.has(grpName)) {
                     groupMap.set(grpName, []);

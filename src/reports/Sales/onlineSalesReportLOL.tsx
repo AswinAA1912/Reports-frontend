@@ -378,6 +378,7 @@ const OnlineSalesReportLOL: React.FC = () => {
     const [exportDialogOpen, setExportDialogOpen] = useState(false);
     const [exportTargetType, setExportTargetType] = useState<"Excel" | "PDF">("Excel");
 
+    const [diffFilterMode, setDiffFilterMode] = useState<"all" | "non_zero" | "outlier_2">("all");
     const [abstractGrouping, setAbstractGrouping] = useState<string[]>([]);
     const [expandedGrouping, setExpandedGrouping] = useState<string[]>([]);
 
@@ -563,6 +564,9 @@ const OnlineSalesReportLOL: React.FC = () => {
         });
         setNumRangeFilter({});
 
+        // ✅ Reset diffFilterMode
+        setDiffFilterMode("all");
+
         // ✅ Reset grouping
         // Reset BOTH modes
         setAbstractGrouping([]);
@@ -731,8 +735,17 @@ const OnlineSalesReportLOL: React.FC = () => {
             }
         }
 
-        return Array.from(map.values());
-    }, [filteredRows, enabledColumns, dimensionCols]);
+        return Array.from(map.values()).filter(row => {
+            const diffVal = Number(row.Diff || 0);
+            if (diffFilterMode === "non_zero") {
+                if (diffVal === 0) return false;
+            } else if (diffFilterMode === "outlier_2") {
+                // Show only items with differences below -2 and above +2 (i.e. diff < -5 or diff > 5)
+                if (diffVal >= -2 && diffVal <= 2) return false;
+            }
+            return true;
+        });
+    }, [filteredRows, enabledColumns, dimensionCols, diffFilterMode]);
 
     const {
         sortConfig: numSortConfig,
@@ -1375,33 +1388,66 @@ const OnlineSalesReportLOL: React.FC = () => {
             });
 
             // Restore saved header filters / numerical range filters for this template
-            const savedRangeFilter = localStorage.getItem(`template_rangeFilter_${reportId}`);
-            if (savedRangeFilter) {
+            // Check Database Preset_Config first, then fallback to localStorage
+            let dbConfig: any = null;
+            const rawPresetConfig = absRes.data.data.reportInfo?.Preset_Config || expRes.data.data.reportInfo?.Preset_Config;
+            if (rawPresetConfig) {
                 try {
-                    setNumRangeFilter(JSON.parse(savedRangeFilter));
+                    dbConfig = typeof rawPresetConfig === "string" ? JSON.parse(rawPresetConfig) : rawPresetConfig;
                 } catch (e) {
-                    console.warn("Failed to parse saved range filter", e);
+                    console.warn("Failed to parse db Preset_Config", e);
                 }
-            } else {
-                setNumRangeFilter({});
             }
 
-            const savedColFilters = localStorage.getItem(`template_colFilters_${reportId}`);
-            if (savedColFilters) {
-                try {
-                    const parsedFilters = JSON.parse(savedColFilters);
-                    setFilters(prev => ({
-                        ...prev,
-                        columnFilters: parsedFilters,
-                    }));
-                } catch (e) {
-                    console.warn("Failed to parse saved column filters", e);
+            if (dbConfig && typeof dbConfig === "object") {
+                if (dbConfig.diffFilterMode) {
+                    setDiffFilterMode(dbConfig.diffFilterMode);
+                } else if (dbConfig.hideZeroDiff !== undefined) {
+                    setDiffFilterMode(dbConfig.hideZeroDiff ? "non_zero" : "all");
+                }
+                if (dbConfig.rangeFilter) {
+                    setNumRangeFilter(dbConfig.rangeFilter);
+                }
+                if (dbConfig.columnFilters) {
+                    setFilters(prev => ({ ...prev, columnFilters: dbConfig.columnFilters }));
                 }
             } else {
-                setFilters(prev => ({
-                    ...prev,
-                    columnFilters: {},
-                }));
+                const savedDiffMode = localStorage.getItem(`template_diffFilterMode_${reportId}`);
+                if (savedDiffMode === "outlier_2" || savedDiffMode === "non_zero" || savedDiffMode === "all") {
+                    setDiffFilterMode(savedDiffMode as any);
+                } else {
+                    const savedHideZero = localStorage.getItem(`template_hideZeroDiff_${reportId}`);
+                    setDiffFilterMode(savedHideZero === "true" ? "non_zero" : "all");
+                }
+
+                const savedRangeFilter = localStorage.getItem(`template_rangeFilter_${reportId}`);
+                if (savedRangeFilter) {
+                    try {
+                        setNumRangeFilter(JSON.parse(savedRangeFilter));
+                    } catch (e) {
+                        console.warn("Failed to parse saved range filter", e);
+                    }
+                } else {
+                    setNumRangeFilter({});
+                }
+
+                const savedColFilters = localStorage.getItem(`template_colFilters_${reportId}`);
+                if (savedColFilters) {
+                    try {
+                        const parsedFilters = JSON.parse(savedColFilters);
+                        setFilters(prev => ({
+                            ...prev,
+                            columnFilters: parsedFilters,
+                        }));
+                    } catch (e) {
+                        console.warn("Failed to parse saved column filters", e);
+                    }
+                } else {
+                    setFilters(prev => ({
+                        ...prev,
+                        columnFilters: {},
+                    }));
+                }
             }
 
             if (absRes.data.data.reportInfo?.Report_Name) {
@@ -1552,6 +1598,14 @@ const OnlineSalesReportLOL: React.FC = () => {
                 dataType: "nvarchar"
             }));
 
+            // Configuration to persist in DB (Preset_Config) and localStorage
+            const templateDbConfig = {
+                diffFilterMode,
+                hideZeroDiff: diffFilterMode !== "all",
+                rangeFilter: numRangeFilter,
+                columnFilters: filters.columnFilters
+            };
+
             /* =========================================
                EDIT MODE
             ========================================= */
@@ -1560,19 +1614,23 @@ const OnlineSalesReportLOL: React.FC = () => {
                     reportId: selectedTemplateId,
                     typeId: 1,
                     reportName: reportName.trim(),
-                    columns: abstractPayload
+                    columns: abstractPayload,
+                    presetConfig: templateDbConfig
                 });
 
                 await SettingsService.updateReport({
                     reportId: selectedTemplateId,
                     typeId: 2,
                     reportName: reportName.trim(),
-                    columns: expandedPayload
+                    columns: expandedPayload,
+                    presetConfig: templateDbConfig
                 });
 
-                // Persist current range filters and header column filters for this template
+                // Persist to localStorage as well for offline/instant availability
                 localStorage.setItem(`template_rangeFilter_${selectedTemplateId}`, JSON.stringify(numRangeFilter));
                 localStorage.setItem(`template_colFilters_${selectedTemplateId}`, JSON.stringify(filters.columnFilters));
+                localStorage.setItem(`template_hideZeroDiff_${selectedTemplateId}`, String(diffFilterMode !== "all"));
+                localStorage.setItem(`template_diffFilterMode_${selectedTemplateId}`, diffFilterMode);
 
                 toast.success("Template Updated Successfully ✅");
             }
@@ -1588,13 +1646,26 @@ const OnlineSalesReportLOL: React.FC = () => {
                     expandedSP: spConfig.expandedSP,
                     abstractColumns: abstractPayload,
                     expandedColumns: expandedPayload,
-                    createdBy
+                    createdBy,
+                    presetConfig: templateDbConfig
                 });
 
-                const newReportId = (res as any)?.data?.reportId || (res as any)?.data?.data?.Report_Id || (res as any)?.data?.Report_Id;
+                let newReportId = (res as any)?.data?.reportId || (res as any)?.data?.data?.Report_Id || (res as any)?.data?.Report_Id;
+                if (!newReportId) {
+                    try {
+                        const listRes = await SettingsService.getReportsByParent(parentReportName);
+                        const list = listRes.data?.data || [];
+                        const found = list.find((r: any) => r.Report_Name?.trim().toLowerCase() === reportName.trim().toLowerCase());
+                        if (found) newReportId = found.Report_Id;
+                    } catch (e) {
+                        console.warn(e);
+                    }
+                }
                 if (newReportId) {
                     localStorage.setItem(`template_rangeFilter_${newReportId}`, JSON.stringify(numRangeFilter));
                     localStorage.setItem(`template_colFilters_${newReportId}`, JSON.stringify(filters.columnFilters));
+                    localStorage.setItem(`template_hideZeroDiff_${newReportId}`, String(diffFilterMode !== "all"));
+                    localStorage.setItem(`template_diffFilterMode_${newReportId}`, diffFilterMode);
                 }
 
                 toast.success("Template Saved Successfully ✅");
@@ -1646,6 +1717,7 @@ const OnlineSalesReportLOL: React.FC = () => {
                             columnFilters: {},
                         });
                         setNumRangeFilter({});
+                        setDiffFilterMode("all");
 
                         setSortConfig({
                             key: null,
@@ -1696,7 +1768,66 @@ const OnlineSalesReportLOL: React.FC = () => {
                     setSaveDialogOpen(true);
                 }}
                 settingsSlot={
-                    <Box display="flex" gap={1}>
+                    <Box display="flex" gap={1} alignItems="center">
+                        {/* DIFF FILTER BUTTON */}
+                        <Tooltip title={
+                            diffFilterMode === "outlier_2"
+                                ? "Currently showing Diff < -5 and Diff > +5 (Click to show All)"
+                                : diffFilterMode === "non_zero"
+                                    ? "Currently showing Diff ≠ 0 (Click for Diff < -5 & > +5)"
+                                    : "Filter Diff (Click for Diff ≠ 0 or Diff < -5 & > +5)"
+                        }>
+                            <Button
+                                size="small"
+                                variant={diffFilterMode !== "all" ? "contained" : "outlined"}
+                                onClick={() => {
+                                    setDiffFilterMode(prev => {
+                                        if (prev === "all") return "outlier_2";
+                                        if (prev === "outlier_2") return "non_zero";
+                                        return "all";
+                                    });
+                                }}
+                                sx={{
+                                    height: 24,
+                                    fontSize: "0.68rem",
+                                    fontWeight: 700,
+                                    textTransform: "none",
+                                    px: 1,
+                                    py: 0,
+                                    borderRadius: 0.5,
+                                    bgcolor: diffFilterMode === "outlier_2"
+                                        ? "#f59e0b"
+                                        : diffFilterMode === "non_zero"
+                                            ? "#10b981"
+                                            : "#ffffff",
+                                    color: diffFilterMode !== "all" ? "#ffffff" : "#1E3A8A",
+                                    borderColor: diffFilterMode === "outlier_2"
+                                        ? "#f59e0b"
+                                        : diffFilterMode === "non_zero"
+                                            ? "#10b981"
+                                            : "#ffffff",
+                                    "&:hover": {
+                                        bgcolor: diffFilterMode === "outlier_2"
+                                            ? "#d97706"
+                                            : diffFilterMode === "non_zero"
+                                                ? "#059669"
+                                                : "#f1f5f9",
+                                        borderColor: diffFilterMode === "outlier_2"
+                                            ? "#d97706"
+                                            : diffFilterMode === "non_zero"
+                                                ? "#059669"
+                                                : "#e2e8f0",
+                                    }
+                                }}
+                            >
+                                {diffFilterMode === "outlier_2"
+                                    ? "Diff: < -5 & > +5"
+                                    : diffFilterMode === "non_zero"
+                                        ? "Diff ≠ 0"
+                                        : "Diff: All"}
+                            </Button>
+                        </Tooltip>
+
                         {/* GROUP BY ICON */}
                         <Tooltip title="Group By">
                             <IconButton

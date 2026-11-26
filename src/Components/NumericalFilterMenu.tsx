@@ -1,5 +1,15 @@
 import React from "react";
-import { Menu, Box, Typography, TextField, Slider, Button } from "@mui/material";
+import {
+  Menu,
+  Box,
+  Typography,
+  TextField,
+  Slider,
+  Button,
+  ToggleButtonGroup,
+  ToggleButton,
+  Divider,
+} from "@mui/material";
 
 interface NumericalFilterMenuProps {
   anchorEl: HTMLElement | null;
@@ -11,6 +21,9 @@ interface NumericalFilterMenuProps {
   rangeFilter: Record<string, [number, number]>;
   onRangeChange: (key: string, range: [number, number]) => void;
   onClear: (key: string) => void;
+  // Optional aggregation mode (Sum / Avg)
+  aggregationMode?: Record<string, "sum" | "avg">;
+  onAggregationModeChange?: (key: string, mode: "sum" | "avg") => void;
 }
 
 export const NumericalFilterMenu: React.FC<NumericalFilterMenuProps> = ({
@@ -23,10 +36,13 @@ export const NumericalFilterMenu: React.FC<NumericalFilterMenuProps> = ({
   rangeFilter,
   onRangeChange,
   onClear,
+  aggregationMode,
+  onAggregationModeChange,
 }) => {
   if (!activeHeader) return null;
 
   const currentRange = rangeFilter[activeHeader] || [min, max];
+  const currentMode = aggregationMode ? aggregationMode[activeHeader] || "sum" : "sum";
 
   const handleSliderChange = (newValue: number[]) => {
     onRangeChange(activeHeader, newValue as [number, number]);
@@ -48,7 +64,46 @@ export const NumericalFilterMenu: React.FC<NumericalFilterMenuProps> = ({
 
   return (
     <Menu anchorEl={anchorEl} open={open} onClose={onClose}>
-      <Box p={2} sx={{ minWidth: 250 }}>
+      <Box p={2} sx={{ minWidth: 260 }}>
+        {onAggregationModeChange && (
+          <Box mb={2}>
+            <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 700, mb: 0.75, display: "block" }}>
+              Calculation Type
+            </Typography>
+            <ToggleButtonGroup
+              size="small"
+              value={currentMode}
+              exclusive
+              onChange={(_, newMode) => {
+                if (newMode && onAggregationModeChange) {
+                  onAggregationModeChange(activeHeader, newMode);
+                }
+              }}
+              fullWidth
+              sx={{
+                height: 30,
+                "& .MuiToggleButton-root": {
+                  fontSize: "0.75rem",
+                  py: 0.25,
+                  fontWeight: 600,
+                  textTransform: "none",
+                  "&.Mui-selected": {
+                    backgroundColor: "#1E3A8A",
+                    color: "#fff",
+                    "&:hover": {
+                      backgroundColor: "#172e6b",
+                    },
+                  },
+                },
+              }}
+            >
+              <ToggleButton value="sum">Sum</ToggleButton>
+              <ToggleButton value="avg">Avg</ToggleButton>
+            </ToggleButtonGroup>
+            <Divider sx={{ my: 1.5 }} />
+          </Box>
+        )}
+
         <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600 }}>
           Filter Range
         </Typography>

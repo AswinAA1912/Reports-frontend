@@ -10,827 +10,1029 @@ import {
     Paper,
     TextField,
     CircularProgress,
-    Autocomplete,
-    Radio,
-    RadioGroup,
-    FormControlLabel,
-    FormControl,
-    FormLabel,
     Typography,
+    IconButton,
+    Button,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
 } from "@mui/material";
-
+import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx-js-style";
 import { toast } from "react-toastify";
 
-import AppLayout from "../../Layout/appLayout";
 import PageHeader, { ToggleMode } from "../../Layout/PageHeader";
 import ReportFilterDrawer from "../../Components/ReportFilterDrawer";
 import CommonPagination from "../../Components/CommonPagination";
-import { SortableHeaderLabel } from "../../Components/SortableHeaderLabel";
-import { NumericalFilterMenu } from "../../Components/NumericalFilterMenu";
 import HeaderFilterMenu from "../../Components/HeaderFilterMenu";
-import { useNumericalFilter } from "../../hooks/useNumericalFilter";
-import { RecievablePayableReportService, RecievablePayableItem } from "../../services/recievablePayableReport.service";
+import {
+    OutstandingManagementReportService,
+    OutstandingManagementItem,
+} from "../../services/outstandingManagementReport.service";
+import { SettingsService } from "../../services/reportSettings.services";
 
-/* ================= HELPERS ================= */
+/* ================= TYPES & HELPERS ================= */
 
-const formatINR = (value: number) =>
-    new Intl.NumberFormat("en-IN", {
-        style: "currency",
-        currency: "INR",
-    }).format(value || 0);
+export interface AgingScale {
+    id: string;
+    from: number | string;
+    to: number | string;
+}
+
+export interface ProcessedOutstandingRow {
+    id: string;
+    Acc_Id: string;
+    Account_name: string;
+    invoice_date: string;
+    invoice_no: string;
+    Bal_Amount: number;
+    CR_DR: string;
+    Group_Name: string;
+    days: number;
+    scaleLabel: string;
+    invoice_count?: number;
+}
+
+const formatNumber = (num: number) => {
+    return new Intl.NumberFormat("en-IN", {
+        maximumFractionDigits: 2,
+        minimumFractionDigits: 0,
+    }).format(num || 0);
+};
+
+export const calculateDays = (invoiceDateStr: string, toDateStr: string): number => {
+    if (!invoiceDateStr) return 0;
+    const inv = dayjs(invoiceDateStr);
+    const target = dayjs(toDateStr);
+    if (!inv.isValid() || !target.isValid()) return 0;
+    const diff = target.diff(inv, "day");
+    return diff > 0 ? diff : 0;
+};
+
+// Compute label for a given day count against configured scales
+export const getScaleLabelForDays = (days: number, scales: AgingScale[]): string => {
+    for (const sc of scales) {
+        const fromNum = sc.from === "" ? 0 : Number(sc.from);
+        const toNum = sc.to === "" ? Infinity : Number(sc.to);
+        if (days >= fromNum && days <= toNum) {
+            if (sc.to === "" || !isFinite(toNum)) {
+                return `Above ${fromNum} Days`;
+            }
+            return `${fromNum} to ${toNum} Days`;
+        }
+    }
+    // If not matched by any interval, fallback
+    return `Other Days (${days})`;
+};
+
+// Initial default scale: single range 0 to Max (user adds more as needed)
+const INITIAL_DEFAULT_SCALES: AgingScale[] = [
+    { id: "s1", from: 0, to: "" },
+];
 
 /* ================= COMPONENT ================= */
 
-const RecievablePayableReport: React.FC = () => {
+const OutstandingManagementReport: React.FC = () => {
     const today = dayjs().format("YYYY-MM-DD");
 
-    const [rows, setRows] = useState<RecievablePayableItem[]>([]);
+    // Toggle: Abstract = Receivable (CR), Expanded = Payable (DR)
+    const [toggleMode, setToggleMode] = useState<ToggleMode>("Abstract");
+    const [rawRows, setRawRows] = useState<OutstandingManagementItem[]>([]);
     const [loading, setLoading] = useState(false);
-    const [toggleMode, setToggleMode] = useState<ToggleMode>("Abstract"); // Abstract = Receivable, Expanded = Payable
 
-    const [page, setPage] = useState(1);
-    const [rowsPerPage, setRowsPerPage] = useState(100);
-    const [drawerOpen, setDrawerOpen] = useState(false);
+    // Date Filters
+    const [toDate, setToDate] = useState<string>(today);
+    const [tempToDate, setTempToDate] = useState<string>(today);
+    const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
 
-    const [toDate, setToDate] = useState(today);
-    const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
-    const [tempGroups, setTempGroups] = useState<string[]>([]);
-    const [groupMode, setGroupMode] = useState<"withGroup" | "withoutGroup">("withGroup");
-    const [tempGroupMode, setTempGroupMode] = useState<"withGroup" | "withoutGroup">("withGroup");
-    
-    const [selectedAccountNames, setSelectedAccountNames] = useState<string[] | undefined>(undefined);
+    // Aging Scales (scale like inputs in drawer) - starts with single range 0 to Max
+    const [scales, setScales] = useState<AgingScale[]>(INITIAL_DEFAULT_SCALES);
+    const [tempScales, setTempScales] = useState<AgingScale[]>(INITIAL_DEFAULT_SCALES);
+
+    // Template state
+    const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+    const [reportName, setReportName] = useState<string>("");
+    const [saveDialogOpen, setSaveDialogOpen] = useState<boolean>(false);
+    const [parentReportName, setParentReportName] = useState<string>("RECIEVABLE PAYABLE");
+
+    const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
+
+    // Pagination
+    const [page, setPage] = useState<number>(1);
+    const [rowsPerPage, setRowsPerPage] = useState<number>(100);
+
+    // Account Name Header Filter
     const [accountFilterAnchor, setAccountFilterAnchor] = useState<null | HTMLElement>(null);
-
-    const [filters, setFilters] = useState({
-        Date: {
-            to: today,
-        },
-        Group: [] as string[],
-        GroupMode: "withGroup" as "withGroup" | "withoutGroup",
-    });
+    const [selectedAccountNames, setSelectedAccountNames] = useState<string[] | undefined>(undefined);
 
     /* ================= DATA LOADING ================= */
 
-    useEffect(() => {
-        loadReport();
-    }, [filters.Date.to, toggleMode]);
-
-    const loadReport = async () => {
+    const loadData = async (targetDate: string) => {
+        setLoading(true);
         try {
-            setLoading(true);
-            const apiCall =
-                toggleMode === "Abstract"
-                    ? RecievablePayableReportService.getReceivables
-                    : RecievablePayableReportService.getPayables;
-
-            const res = await apiCall({ Todate: filters.Date.to });
-            setRows(res.data.data || []);
-            setSelectedAccountNames(undefined);
-            setPage(1);
-        } catch (err: any) {
-            console.error("Error loading report data:", err);
-            toast.error(err?.response?.data?.message || "Failed to load report data ❌");
-            setRows([]);
+            const res = await OutstandingManagementReportService.getRecievablePayableMgt({ Todate: targetDate });
+            const list: OutstandingManagementItem[] = Array.isArray(res)
+                ? res
+                : (res.data && Array.isArray(res.data) ? res.data : (res as any)?.data?.data || []);
+            setRawRows(list);
+        } catch (err) {
+            console.error("Failed to load recievablepayablemgt report:", err);
+            toast.error("Failed to load report data");
+            setRawRows([]);
         } finally {
             setLoading(false);
         }
     };
 
-    // Reset filters when toggleMode changes
     useEffect(() => {
-        setSelectedGroups([]);
-        setTempGroups([]);
-        setGroupMode("withGroup");
-        setTempGroupMode("withGroup");
-        setFilters((prev) => ({
-            ...prev,
-            Group: [],
-            GroupMode: "withGroup",
-        }));
-    }, [toggleMode]);
+        loadData(toDate);
+    }, [toDate]);
 
-    /* ================= FILTERS & SEARCH ================= */
+    /* ================= FILTER BY TOGGLE MODE ================= */
 
-    // Unique group names list
-    const uniqueGroupNames = useMemo(() => {
-        const groups = new Set(rows.map((r: any) => r.Group_Name).filter(Boolean));
-        return Array.from(groups).sort((a: any, b: any) => a.localeCompare(b));
-    }, [rows]);
+    // "CR_DR": "CR" show Cr fully as Recievable and DR as Payable
+    const targetCrDr = toggleMode === "Abstract" ? "CR" : "DR";
+    const amountColumnTitle = toggleMode === "Abstract" ? "Recievable Amt" : "Payable Amt";
+    const reportTitle = toggleMode === "Abstract" ? "RECIEVABLE PAYABLE - Receivable" : "RECIEVABLE PAYABLE - Payable";
 
-    // Unique account names list (filtered by selected groups)
-    const uniqueAccountNames = useMemo(() => {
-        let source = rows;
-        if (filters.GroupMode === "withGroup" && filters.Group && filters.Group.length > 0) {
-            source = source.filter((r: any) => r.Group_Name && filters.Group.includes(r.Group_Name));
-        }
-        const names = new Set(source.map((r) => r.Account_name).filter(Boolean));
-        return Array.from(names).sort((a, b) => a.localeCompare(b));
-    }, [rows, filters.Group, filters.GroupMode]);
+    const processedData: ProcessedOutstandingRow[] = useMemo(() => {
+        const filtered = rawRows.filter((r) => String(r.CR_DR || "").toUpperCase() === targetCrDr);
 
-    // Apply group filter and header filter selection on account names
-    const filteredBySearch = useMemo(() => {
-        let source = rows.map((r: any) => {
-            const debit = r.CR_DR === "DR" ? Number(r.Bal_Amount) || 0 : 0;
-            const credit = r.CR_DR === "CR" ? Number(r.Bal_Amount) || 0 : 0;
-            return {
-                ...r,
-                Debit_Amount: debit,
-                Credit_Amount: credit,
-            };
+        // Group by Account_name so if the same Account name has multiple pending invoices,
+        // show them as a single row with the MAXIMUM number of Pending Days, sum the Bal_Amount,
+        // and assign to the scale interval corresponding to the max pending days.
+        const accountMap = new Map<string, {
+            baseItem: OutstandingManagementItem;
+            maxDays: number;
+            totalAmount: number;
+            invoiceCount: number;
+        }>();
+
+        filtered.forEach((r) => {
+            const days = calculateDays(r.invoice_date, toDate);
+            const accName = r.Account_name || "Unknown";
+
+            if (!accountMap.has(accName)) {
+                accountMap.set(accName, {
+                    baseItem: r,
+                    maxDays: days,
+                    totalAmount: Number(r.Bal_Amount) || 0,
+                    invoiceCount: 1,
+                });
+            } else {
+                const existing = accountMap.get(accName)!;
+                existing.totalAmount += Number(r.Bal_Amount) || 0;
+                existing.invoiceCount += 1;
+                if (days > existing.maxDays) {
+                    existing.maxDays = days;
+                    existing.baseItem = r;
+                }
+            }
         });
 
-        // Filter by selected Groups
-        if (filters.GroupMode === "withGroup" && filters.Group && filters.Group.length > 0) {
-            source = source.filter((r: any) => r.Group_Name && filters.Group.includes(r.Group_Name));
-        }
-
-        if (selectedAccountNames !== undefined) {
-            source = source.filter(
-                (row) =>
-                    row.Account_name && selectedAccountNames.includes(row.Account_name)
-            );
-        }
-        return source;
-    }, [rows, selectedAccountNames, filters.Group, filters.GroupMode]);
-
-    const {
-        sortConfig,
-        rangeFilter,
-        setRangeFilter,
-        filterAnchor,
-        setFilterAnchor,
-        activeHeader,
-        clearRangeFilter,
-        getMinMax,
-        handleSort,
-        openFilter,
-        filteredAndSortedData,
-    } = useNumericalFilter(filteredBySearch, ["Debit_Amount", "Credit_Amount"]);
-
-    const finalData = useMemo(() => {
-        let result = [...filteredAndSortedData];
-
-        if (!sortConfig) {
-            // Default order: invoice_date descending (from today's date to lowest)
-            result.sort((a, b) => {
-                const dateA = a.invoice_date ? dayjs(a.invoice_date).valueOf() : 0;
-                const dateB = b.invoice_date ? dayjs(b.invoice_date).valueOf() : 0;
-                return dateB - dateA;
+        const list: ProcessedOutstandingRow[] = [];
+        let idx = 0;
+        accountMap.forEach((val) => {
+            idx++;
+            const { baseItem, maxDays, totalAmount, invoiceCount } = val;
+            const scaleLabel = getScaleLabelForDays(maxDays, scales);
+            list.push({
+                id: `${baseItem.Acc_Id || ""}-${maxDays}-${idx}`,
+                Acc_Id: baseItem.Acc_Id,
+                Account_name: baseItem.Account_name || "Unknown",
+                invoice_date: baseItem.invoice_date,
+                invoice_no: baseItem.invoice_no,
+                Bal_Amount: totalAmount,
+                CR_DR: baseItem.CR_DR,
+                Group_Name: baseItem.Group_Name || "General Group",
+                days: maxDays,
+                scaleLabel,
+                invoice_count: invoiceCount,
             });
+        });
+
+        return list;
+    }, [rawRows, targetCrDr, toDate, scales]);
+
+    // Unique Account Names for Header Filter
+    const uniqueAccountNames = useMemo(() => {
+        const setNames = new Set<string>();
+        processedData.forEach((row) => {
+            if (row.Account_name) setNames.add(row.Account_name);
+        });
+        return Array.from(setNames).sort((a, b) => a.localeCompare(b));
+    }, [processedData]);
+
+    // Filter by selected Account Names
+    const filteredProcessedData = useMemo(() => {
+        if (!selectedAccountNames) return processedData;
+        const setAllowed = new Set(selectedAccountNames);
+        return processedData.filter((row) => setAllowed.has(row.Account_name));
+    }, [processedData, selectedAccountNames]);
+
+    const grandTotalAmount = useMemo(() => {
+        return filteredProcessedData.reduce((acc, row) => acc + (row.Bal_Amount || 0), 0);
+    }, [filteredProcessedData]);
+
+    /* ================= GROUPING BY SCALE INTERVALS ================= */
+
+    const groupedData = useMemo(() => {
+        // Build groups ordered by defined scales
+        const map = new Map<string, ProcessedOutstandingRow[]>();
+        scales.forEach((sc) => {
+            const fromNum = sc.from === "" ? 0 : Number(sc.from);
+            const toNum = sc.to === "" ? Infinity : Number(sc.to);
+            const label = sc.to === "" || !isFinite(toNum) ? `Above ${fromNum} Days` : `${fromNum} to ${toNum} Days`;
+            map.set(label, []);
+        });
+
+        filteredProcessedData.forEach((row) => {
+            if (!map.has(row.scaleLabel)) {
+                map.set(row.scaleLabel, []);
+            }
+            map.get(row.scaleLabel)!.push(row);
+        });
+
+        const groups: { label: string; subtotal: number; items: ProcessedOutstandingRow[] }[] = [];
+        map.forEach((items, label) => {
+            const subtotal = items.reduce((sum, it) => sum + it.Bal_Amount, 0);
+            groups.push({
+                label,
+                subtotal,
+                items,
+            });
+        });
+
+        return groups;
+    }, [filteredProcessedData, scales]);
+
+    // Default: only the LAST level of grouping is expanded so its Account names are listed below
+    useEffect(() => {
+        if (groupedData.length > 0) {
+            const lastGroup = groupedData[groupedData.length - 1];
+            if (lastGroup) {
+                setExpandedKeys([lastGroup.label]);
+            }
         }
+    }, [groupedData]);
+
+    // Toggle expand/collapse: ONLY the last level of grouping can be expanded to show Account names!
+    const handleToggleExpand = (groupKey: string, level: number) => {
+        const lastGroupLevel = scales.length - 1;
+        // If not the last level, prevent expanding
+        if (level < lastGroupLevel) {
+            return;
+        }
+
+        setExpandedKeys((prev) =>
+            prev.includes(groupKey) ? prev.filter((k) => k !== groupKey) : [...prev, groupKey]
+        );
+    };
+
+    // Flatten rows for display with pagination
+    const flattenedRows = useMemo(() => {
+        const lastGroupLevel = scales.length - 1;
+        const result: any[] = [];
+
+        groupedData.forEach((group, idx) => {
+            const isLastLevel = idx === lastGroupLevel;
+            const isExpanded = expandedKeys.includes(group.label);
+
+            result.push({
+                __group: true,
+                __key: group.label,
+                __label: group.label,
+                __subtotal: group.subtotal,
+                __count: group.items.length,
+                __level: idx,
+                __isLastLevel: isLastLevel,
+            });
+
+            // ONLY show the Account names if this is the last level and it is expanded
+            // Sort items ascending: lower number of days to larger number of days, and then by Account name
+            if (isLastLevel && isExpanded) {
+                const sortedItems = [...group.items].sort((a, b) => {
+                    if (a.days !== b.days) {
+                        return a.days - b.days;
+                    }
+                    return (a.Account_name || "").localeCompare(b.Account_name || "");
+                });
+
+                sortedItems.forEach((item) => {
+                    result.push(item);
+                });
+            }
+        });
 
         return result;
-    }, [filteredAndSortedData, sortConfig]);
-
-    /* ================= PAGINATION & GROUPING ================= */
+    }, [groupedData, expandedKeys, scales.length]);
 
     const paginatedRows = useMemo(() => {
         const start = (page - 1) * rowsPerPage;
-        const end = start + rowsPerPage;
-        return finalData.slice(start, end);
-    }, [finalData, page, rowsPerPage]);
+        return flattenedRows.slice(start, start + rowsPerPage);
+    }, [flattenedRows, page, rowsPerPage]);
 
-    const groupedPaginatedData = useMemo(() => {
-        const groupsMap = new Map<string, any[]>();
-        
-        paginatedRows.forEach((row) => {
-            const groupName = row.Group_Name || "No Group";
-            if (!groupsMap.has(groupName)) {
-                groupsMap.set(groupName, []);
-            }
-            groupsMap.get(groupName)!.push(row);
-        });
+    /* ================= SCALE EDITING IN DRAWER ================= */
 
-        const groups: {
-            groupName: string;
-            items: any[];
-            subtotalDebit: number;
-            subtotalCredit: number;
-        }[] = [];
-
-        groupsMap.forEach((items, groupName) => {
-            const subtotalDebit = items.reduce((sum, r) => sum + (Number(r.Debit_Amount) || 0), 0);
-            const subtotalCredit = items.reduce((sum, r) => sum + (Number(r.Credit_Amount) || 0), 0);
-            groups.push({
-                groupName,
-                items,
-                subtotalDebit,
-                subtotalCredit,
-            });
-        });
-
-        groups.sort((a, b) => a.groupName.localeCompare(b.groupName));
-        return groups;
-    }, [paginatedRows]);
-
-    useEffect(() => {
-        setPage(1);
-    }, [finalData.length]);
-
-    /* ================= CALCULATIONS ================= */
-
-    const totalDebitAmount = useMemo(() => {
-        return finalData.reduce((sum, r: any) => sum + (Number(r.Debit_Amount) || 0), 0);
-    }, [finalData]);
-
-    const totalCreditAmount = useMemo(() => {
-        return finalData.reduce((sum, r: any) => sum + (Number(r.Credit_Amount) || 0), 0);
-    }, [finalData]);
-
-    /* ================= EXPORT ================= */
-
-    const reportTitle = toggleMode === "Abstract" ? "Receivable Report" : "Payable Report";
-
-    const getGroupedDataForExport = () => {
-        const groupsMap = new Map<string, any[]>();
-        finalData.forEach((row) => {
-            const groupName = row.Group_Name || "No Group";
-            if (!groupsMap.has(groupName)) {
-                groupsMap.set(groupName, []);
-            }
-            groupsMap.get(groupName)!.push(row);
-        });
-
-        const groups: {
-            groupName: string;
-            items: any[];
-            subtotalDebit: number;
-            subtotalCredit: number;
-        }[] = [];
-
-        groupsMap.forEach((items, groupName) => {
-            const subtotalDebit = items.reduce((sum, r) => sum + (Number(r.Debit_Amount) || 0), 0);
-            const subtotalCredit = items.reduce((sum, r) => sum + (Number(r.Credit_Amount) || 0), 0);
-            groups.push({ groupName, items, subtotalDebit, subtotalCredit });
-        });
-
-        groups.sort((a, b) => a.groupName.localeCompare(b.groupName));
-        return groups;
+    const handleScaleChange = (id: string, field: "from" | "to", val: string) => {
+        setTempScales((prev) =>
+            prev.map((sc) => (sc.id === id ? { ...sc, [field]: val === "" ? "" : Number(val) } : sc))
+        );
     };
 
+    const handleAddScale = () => {
+        const newId = `s-${Date.now()}`;
+        setTempScales((prev) => {
+            const last = prev[prev.length - 1];
+            const nextFrom = last && last.to !== "" && !isNaN(Number(last.to)) ? Number(last.to) + 1 : 0;
+            return [...prev, { id: newId, from: nextFrom, to: "" }];
+        });
+    };
+
+    const handleRemoveScale = (id: string) => {
+        setTempScales((prev) => prev.filter((sc) => sc.id !== id));
+    };
+
+    /* ================= TEMPLATE LOADING & SAVING ================= */
+
+    const loadTemplate = async (reportId: number) => {
+        try {
+            setSelectedTemplateId(reportId);
+            const res = await SettingsService.getReportEditData({
+                reportId,
+                typeId: 1,
+            });
+
+            const templateCols = res?.data?.data?.columns || [];
+            const reportInfo = res?.data?.data?.reportInfo;
+
+            if (reportInfo?.Report_Name) {
+                setReportName(reportInfo.Report_Name);
+            }
+
+            // Extract saved aging scale configuration from Database Preset_Config, columns, or fallback to localStorage
+            const rawPreset = reportInfo?.Preset_Config;
+            let dbScales: AgingScale[] | null = null;
+            if (rawPreset) {
+                try {
+                    const parsedPreset = typeof rawPreset === "string" ? JSON.parse(rawPreset) : rawPreset;
+                    if (Array.isArray(parsedPreset)) {
+                        dbScales = parsedPreset;
+                    } else if (parsedPreset && Array.isArray(parsedPreset.scales)) {
+                        dbScales = parsedPreset.scales;
+                    }
+                } catch (e) {
+                    console.warn("Failed to parse db Preset_Config in OutstandingManagement", e);
+                }
+            }
+
+            if (dbScales && dbScales.length > 0) {
+                setScales(dbScales);
+                setTempScales(dbScales);
+                toast.success("Template Loaded Successfully ✅");
+                return;
+            }
+
+            const savedScalesJson = localStorage.getItem(`template_scales_${reportId}`);
+            if (savedScalesJson) {
+                try {
+                    const parsed = JSON.parse(savedScalesJson);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        setScales(parsed);
+                        setTempScales(parsed);
+                        toast.success("Template Loaded Successfully ✅");
+                        return;
+                    }
+                } catch (e) {
+                    // fallback
+                }
+            }
+
+            // Or parse from template column keys
+            const scaleCols = templateCols.filter((c: any) => c.key && c.key.startsWith("SCALE_"));
+            if (scaleCols.length > 0) {
+                const parsedScales: AgingScale[] = scaleCols.map((c: any, sIdx: number) => {
+                    const parts = c.key.replace("SCALE_", "").split("_");
+                    return {
+                        id: `s-${sIdx + 1}`,
+                        from: parts[0] === "" ? 0 : Number(parts[0]),
+                        to: parts[1] === "" || parts[1] === "MAX" ? "" : Number(parts[1]),
+                    };
+                });
+                setScales(parsedScales);
+                setTempScales(parsedScales);
+            }
+
+            toast.success("Template Loaded Successfully ✅");
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to load template ❌");
+        }
+    };
+
+    const handleSaveTemplate = async () => {
+        try {
+            if (!reportName.trim()) {
+                toast.error("Enter Report Name");
+                return;
+            }
+
+            const userData = JSON.parse(localStorage.getItem("user") || "{}");
+            const createdBy = userData.id || 1;
+
+            // Encode scale ranges into columns payload
+            const payloadColumns = scales.map((sc, sIdx) => {
+                const toStr = sc.to === "" ? "MAX" : sc.to;
+                return {
+                    key: `SCALE_${sc.from}_${toStr}`,
+                    label: sc.to === "" ? `Above ${sc.from} Days` : `${sc.from} to ${sc.to} Days`,
+                    order: sIdx + 1,
+                    groupBy: sIdx + 1,
+                    enabled: true,
+                    isNumeric: false,
+                    dataType: "nvarchar",
+                };
+            });
+
+            if (selectedTemplateId) {
+                await SettingsService.updateReport({
+                    reportId: selectedTemplateId,
+                    typeId: 1,
+                    reportName: reportName.trim(),
+                    columns: payloadColumns,
+                    presetConfig: { scales },
+                });
+                localStorage.setItem(`template_scales_${selectedTemplateId}`, JSON.stringify(scales));
+                toast.success("Template Updated Successfully ✅");
+            } else {
+                const res = await SettingsService.saveReportSettings({
+                    reportName: reportName.trim(),
+                    parentReport: parentReportName,
+                    abstractSP: "EXTERNAL_API",
+                    expandedSP: "EXTERNAL_API",
+                    abstractColumns: payloadColumns,
+                    expandedColumns: payloadColumns,
+                    createdBy,
+                    presetConfig: { scales },
+                });
+                const newId = (res as any)?.data?.reportId;
+                if (newId) {
+                    localStorage.setItem(`template_scales_${newId}`, JSON.stringify(scales));
+                }
+                toast.success("Template Saved Successfully ✅");
+            }
+
+            setSaveDialogOpen(false);
+            setTimeout(() => {
+                window.location.reload();
+            }, 500);
+        } catch (err) {
+            console.error(err);
+            toast.error("Save Failed ❌");
+        }
+    };
+
+    /* ================= EXPORT FUNCTIONS ================= */
+
     const handleExportExcel = () => {
-        if (!finalData.length) {
+        if (!processedData.length) {
             toast.warning("No data to export");
             return;
         }
 
         const workbook = XLSX.utils.book_new();
-        const exportRows: any[] = [];
+        const exportAoa: any[][] = [];
 
-        if (filters.GroupMode === "withGroup") {
-            const groups = getGroupedDataForExport();
-            let sNo = 1;
-            const headerRowIndices = new Set<number>();
+        exportAoa.push(["Account Name", "Days", amountColumnTitle]);
+        exportAoa.push(["Total", "", grandTotalAmount]);
 
-            groups.forEach((group) => {
-                // Group Header & Totals Row
-                headerRowIndices.add(exportRows.length + 2); // Excel 1-based index (including offset)
-                exportRows.push({
-                    "S.No": "",
-                    "Account Name": group.groupName,
-                    "Invoice Date": "",
-                    "Invoice No": "",
-                    "Recievable": group.subtotalDebit || "",
-                    "Payable": group.subtotalCredit || "",
-                });
-
-                group.items.forEach((row) => {
-                    exportRows.push({
-                        "S.No": sNo++,
-                        "Account Name": row.Account_name || "",
-                        "Invoice Date": row.invoice_date ? dayjs(row.invoice_date).format("DD/MM/YYYY") : "",
-                        "Invoice No": row.invoice_no || "",
-                        "Recievable": row.Debit_Amount || 0,
-                        "Payable": row.Credit_Amount || 0,
-                    });
-                });
-            });
-
-            // Grand Total Row
-            const bal = toggleMode === "Abstract"
-                ? totalDebitAmount - totalCreditAmount
-                : totalCreditAmount - totalDebitAmount;
-            exportRows.push({
-                "S.No": "",
-                "Account Name": `Grand Total (Bal: ${formatINR(bal)})`,
-                "Invoice Date": "",
-                "Invoice No": "",
-                "Recievable": totalDebitAmount || 0,
-                "Payable": totalCreditAmount || 0,
-            });
-
-            const worksheet = XLSX.utils.json_to_sheet(exportRows);
-            XLSX.utils.book_append_sheet(workbook, worksheet, reportTitle);
-
-            // Styling cells in excel
-            const range = XLSX.utils.decode_range(worksheet["!ref"] || "");
-            const borderStyle = {
-                top: { style: "thin", color: { rgb: "CFCFCF" } },
-                bottom: { style: "thin", color: { rgb: "CFCFCF" } },
-                left: { style: "thin", color: { rgb: "CFCFCF" } },
-                right: { style: "thin", color: { rgb: "CFCFCF" } }
-            };
-
-            for (let R = range.s.r; R <= range.e.r; ++R) {
-                for (let C = range.s.c; C <= range.e.c; ++C) {
-                    const cell = worksheet[XLSX.utils.encode_cell({ r: R, c: C })];
-                    if (!cell) continue;
-
-                    cell.s = {
-                        font: { name: "Arial", sz: 9 },
-                        border: borderStyle
-                    };
-
-                    const val = String(cell.v || "");
-                    if (headerRowIndices.has(R + 1)) {
-                        cell.s.font = { name: "Arial", sz: 9, bold: true, color: { rgb: "1E3A8A" } };
-                        cell.s.fill = { fgColor: { rgb: "E2E8F0" } };
-                    } else if (val.startsWith("Grand Total")) {
-                        cell.s.font = { name: "Arial", sz: 9, bold: true };
-                        cell.s.fill = { fgColor: { rgb: "F1F5F9" } };
-                    }
-                }
+        flattenedRows.forEach((row) => {
+            if (row.__group) {
+                exportAoa.push([row.__label, "", row.__subtotal]);
+            } else {
+                const accDisplay = row.invoice_count && row.invoice_count > 1
+                    ? `${row.Account_name} (${row.invoice_count})`
+                    : row.Account_name;
+                exportAoa.push([accDisplay, row.days, row.Bal_Amount]);
             }
-        } else {
-            // Flat list view
-            finalData.forEach((row, index) => {
-                exportRows.push({
-                    "S.No": index + 1,
-                    "Account Name": row.Account_name || "",
-                    "Invoice Date": row.invoice_date ? dayjs(row.invoice_date).format("DD/MM/YYYY") : "",
-                    "Invoice No": row.invoice_no || "",
-                    "Recievable": row.Debit_Amount || 0,
-                    "Payable": row.Credit_Amount || 0,
-                });
-            });
+        });
 
-            // Grand Total Row
-            const bal = toggleMode === "Abstract"
-                ? totalDebitAmount - totalCreditAmount
-                : totalCreditAmount - totalDebitAmount;
-            exportRows.push({
-                "S.No": "",
-                "Account Name": `Grand Total (Bal: ${formatINR(bal)})`,
-                "Invoice Date": "",
-                "Invoice No": "",
-                "Recievable": totalDebitAmount || 0,
-                "Payable": totalCreditAmount || 0,
-            });
+        const worksheet = XLSX.utils.aoa_to_sheet(exportAoa);
 
-            const worksheet = XLSX.utils.json_to_sheet(exportRows);
-            XLSX.utils.book_append_sheet(workbook, worksheet, reportTitle);
+        // Styling cells with professional report theme (#1E3A8A)
+        const range = XLSX.utils.decode_range(worksheet["!ref"] || "A1:C1");
+        for (let R = range.s.r; R <= range.e.r; ++R) {
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                const cell = worksheet[cellRef];
+                if (!cell) continue;
 
-            // Styling cells in excel
-            const range = XLSX.utils.decode_range(worksheet["!ref"] || "");
-            const borderStyle = {
-                top: { style: "thin", color: { rgb: "CFCFCF" } },
-                bottom: { style: "thin", color: { rgb: "CFCFCF" } },
-                left: { style: "thin", color: { rgb: "CFCFCF" } },
-                right: { style: "thin", color: { rgb: "CFCFCF" } }
-            };
+                cell.s = {
+                    font: { name: "Arial", sz: 9 },
+                    border: {
+                        top: { style: "thin", color: { rgb: "E2E8F0" } },
+                        bottom: { style: "thin", color: { rgb: "E2E8F0" } },
+                        left: { style: "thin", color: { rgb: "E2E8F0" } },
+                        right: { style: "thin", color: { rgb: "E2E8F0" } },
+                    },
+                };
 
-            for (let R = range.s.r; R <= range.e.r; ++R) {
-                for (let C = range.s.c; C <= range.e.c; ++C) {
-                    const cell = worksheet[XLSX.utils.encode_cell({ r: R, c: C })];
-                    if (!cell) continue;
-
-                    cell.s = {
-                        font: { name: "Arial", sz: 9 },
-                        border: borderStyle
-                    };
-
-                    const val = String(cell.v || "");
-                    if (val.startsWith("Grand Total")) {
-                        cell.s.font = { name: "Arial", sz: 9, bold: true };
+                if (R === 0) {
+                    // Table Header: Deep Blue (#1E3A8A) with White Bold text
+                    cell.s.fill = { fgColor: { rgb: "1E3A8A" } };
+                    cell.s.font = { name: "Arial", sz: 10, bold: true, color: { rgb: "FFFFFF" } };
+                    cell.s.alignment = { horizontal: C === 0 ? "left" : "center", vertical: "center" };
+                } else if (R === 1) {
+                    // Total Row: Subtle slate-blue highlight
+                    cell.s.fill = { fgColor: { rgb: "EFF6FF" } };
+                    cell.s.font = { name: "Arial", sz: 10, bold: true, color: { rgb: "1E3A8A" } };
+                    cell.s.alignment = { horizontal: C === 0 ? "left" : "right" };
+                } else {
+                    const rowData = flattenedRows[R - 2];
+                    if (rowData && rowData.__group) {
+                        // Group Subtotal Row: Soft slate header (#F1F5F9)
                         cell.s.fill = { fgColor: { rgb: "F1F5F9" } };
+                        cell.s.font = { name: "Arial", sz: 9.5, bold: true, color: { rgb: "0F172A" } };
+                        cell.s.alignment = { horizontal: C === 0 ? "left" : "right" };
+                    } else {
+                        if (C === 1) cell.s.alignment = { horizontal: "center" };
+                        if (C === 2) cell.s.alignment = { horizontal: "right" };
                     }
                 }
             }
         }
 
-        XLSX.writeFile(
-            workbook,
-            `${reportTitle.replace(" ", "_")}_${dayjs().format("DDMMYYYY")}.xlsx`
-        );
-        toast.success("Excel exported successfully 📊");
+        worksheet["!cols"] = [{ wch: 45 }, { wch: 12 }, { wch: 20 }];
+
+        XLSX.utils.book_append_sheet(workbook, worksheet, "OutstandingManagement");
+        XLSX.writeFile(workbook, `Outstanding_Management_${dayjs().format("YYYYMMDD_HHmmss")}.xlsx`);
+        toast.success("Excel exported successfully! 📊");
     };
 
     const handleExportPDF = () => {
-        if (!finalData.length) {
+        if (!processedData.length) {
             toast.warning("No data to export");
             return;
         }
 
         const doc = new jsPDF("p", "mm", "a4");
-        doc.setFontSize(14);
-        doc.text(`${reportTitle} - As of ${dayjs(filters.Date.to).format("DD/MM/YYYY")}`, 14, 12);
+        doc.setFontSize(12);
+        doc.setTextColor(30, 58, 138);
+        doc.text(`${reportTitle} - As of ${dayjs(toDate).format("DD/MM/YYYY")}`, 14, 12);
 
-        const tableHeaders = [["S.No", "Account Name", "Invoice Date", "Invoice No", "Recievable", "Payable"]];
         const tableBody: any[] = [];
+        tableBody.push(["Total", "", formatNumber(grandTotalAmount)]);
 
-        if (filters.GroupMode === "withGroup") {
-            const groups = getGroupedDataForExport();
-            let sNo = 1;
-            const headerIndices = new Set<number>();
-
-            groups.forEach((group) => {
-                // Group Header & Totals Row in PDF table body
-                headerIndices.add(tableBody.length);
+        flattenedRows.forEach((row) => {
+            if (row.__group) {
+                tableBody.push([row.__label, "", formatNumber(row.__subtotal)]);
+            } else {
+                const accDisplay = row.invoice_count && row.invoice_count > 1
+                    ? `${row.Account_name} (${row.invoice_count})`
+                    : (row.Account_name || "-");
                 tableBody.push([
-                    "",
-                    group.groupName,
-                    "",
-                    "",
-                    group.subtotalDebit !== 0 ? group.subtotalDebit.toFixed(2) : "0.00",
-                    group.subtotalCredit !== 0 ? group.subtotalCredit.toFixed(2) : "0.00",
+                    "    " + accDisplay,
+                    row.days !== undefined ? String(row.days) : "-",
+                    formatNumber(row.Bal_Amount),
                 ]);
+            }
+        });
 
-                group.items.forEach((row) => {
-                    tableBody.push([
-                        sNo++,
-                        row.Account_name || "",
-                        row.invoice_date ? dayjs(row.invoice_date).format("DD/MM/YYYY") : "",
-                        row.invoice_no || "",
-                        row.Debit_Amount ? row.Debit_Amount.toFixed(2) : "0.00",
-                        row.Credit_Amount ? row.Credit_Amount.toFixed(2) : "0.00",
-                    ]);
-                });
-            });
-
-            // Add Grand Total Row to PDF body
-            const bal = toggleMode === "Abstract"
-                ? totalDebitAmount - totalCreditAmount
-                : totalCreditAmount - totalDebitAmount;
-            tableBody.push([
-                "",
-                `Grand Total (Bal: ${formatINR(bal)})`,
-                "",
-                "",
-                totalDebitAmount.toFixed(2),
-                totalCreditAmount.toFixed(2),
-            ]);
-
-            autoTable(doc, {
-                startY: 18,
-                head: tableHeaders,
-                body: tableBody,
-                styles: { fontSize: 8 },
-                headStyles: { fillColor: [30, 58, 138] },
-                didParseCell: (cellData) => {
-                    if (cellData.row.index === tableBody.length - 1) {
-                        cellData.cell.styles.fontStyle = "bold";
-                        cellData.cell.styles.fillColor = [241, 245, 249];
-                        if (cellData.column.index === 4 || cellData.column.index === 5) {
-                            cellData.cell.styles.halign = "right";
-                        }
-                    } else if (headerIndices.has(cellData.row.index)) {
-                        cellData.cell.styles.fontStyle = "bold";
-                        cellData.cell.styles.fillColor = [226, 232, 240]; // slate-200
-                        cellData.cell.styles.textColor = [30, 58, 138]; // navy
-                        if (cellData.column.index === 4 || cellData.column.index === 5) {
-                            cellData.cell.styles.halign = "right";
-                        }
-                    } else {
-                        if (cellData.column.index === 4 || cellData.column.index === 5) {
-                            cellData.cell.styles.halign = "right";
-                        }
+        autoTable(doc, {
+            startY: 18,
+            head: [["Account Name", "Days", amountColumnTitle]],
+            body: tableBody,
+            styles: { fontSize: 8.5, cellPadding: 2 },
+            headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255], fontStyle: "bold" },
+            didParseCell: (data) => {
+                if (data.row.index === 0) {
+                    data.cell.styles.fillColor = [239, 246, 255];
+                    data.cell.styles.textColor = [30, 58, 138];
+                    data.cell.styles.fontStyle = "bold";
+                } else {
+                    const rowData = flattenedRows[data.row.index - 1];
+                    if (rowData && rowData.__group) {
+                        data.cell.styles.fillColor = [241, 245, 249];
+                        data.cell.styles.textColor = [15, 23, 42];
+                        data.cell.styles.fontStyle = "bold";
                     }
                 }
-            });
-        } else {
-            // Flat list view
-            finalData.forEach((row, index) => {
-                tableBody.push([
-                    index + 1,
-                    row.Account_name || "",
-                    row.invoice_date ? dayjs(row.invoice_date).format("DD/MM/YYYY") : "",
-                    row.invoice_no || "",
-                    row.Debit_Amount ? row.Debit_Amount.toFixed(2) : "0.00",
-                    row.Credit_Amount ? row.Credit_Amount.toFixed(2) : "0.00",
-                ]);
-            });
+                if (data.column.index === 1) data.cell.styles.halign = "center";
+                if (data.column.index === 2) data.cell.styles.halign = "right";
+            },
+        });
 
-            // Add Grand Total Row to PDF body
-            const bal = toggleMode === "Abstract"
-                ? totalDebitAmount - totalCreditAmount
-                : totalCreditAmount - totalDebitAmount;
-            tableBody.push([
-                "",
-                `Grand Total (Bal: ${formatINR(bal)})`,
-                "",
-                "",
-                totalDebitAmount.toFixed(2),
-                totalCreditAmount.toFixed(2),
-            ]);
-
-            autoTable(doc, {
-                startY: 18,
-                head: tableHeaders,
-                body: tableBody,
-                styles: { fontSize: 8 },
-                headStyles: { fillColor: [30, 58, 138] },
-                didParseCell: (cellData) => {
-                    if (cellData.row.index === tableBody.length - 1) {
-                        cellData.cell.styles.fontStyle = "bold";
-                        cellData.cell.styles.fillColor = [241, 245, 249];
-                        if (cellData.column.index === 4 || cellData.column.index === 5) {
-                            cellData.cell.styles.halign = "right";
-                        }
-                    } else {
-                        if (cellData.column.index === 4 || cellData.column.index === 5) {
-                            cellData.cell.styles.halign = "right";
-                        }
-                    }
-                }
-            });
-        }
-
-        doc.save(`${reportTitle.replace(" ", "_")}_${dayjs().format("DDMMYYYY")}.pdf`);
-        toast.success("PDF exported successfully 📄");
+        doc.save(`Outstanding_Management_${dayjs().format("YYYYMMDD_HHmmss")}.pdf`);
+        toast.success("PDF exported successfully! 📄");
     };
 
-    /* ================= INTERACTION HANDLERS ================= */
+    /* ================= THEME STYLES ================= */
 
-    /* ================= RENDER ================= */
-
-    const headerStyle = {
-        color: "#fff",
-        fontWeight: 600,
-        backgroundColor: "#1E3A8A",
-    };
+    const themeNavy = "#1E3A8A"; // Standard system header color
+    const groupRowBg = "#F1F5F9"; // Standard clean slate subtotal background
 
     return (
-        <>
+        <Box sx={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden" }}>
+            {/* PAGE HEADER: Save Template & Select Template enabled for Authorized User Types */}
             <PageHeader
                 toggleMode={toggleMode}
                 onToggleChange={(mode) => setToggleMode(mode)}
-                abstractLabel="Debtors"
-                expandedLabel="Creditors"
+                abstractLabel="Recievable"
+                expandedLabel="Payable"
                 onExportExcel={handleExportExcel}
                 onExportPDF={handleExportPDF}
+                parentReportName={parentReportName}
+                onReportChange={(template) => {
+                    if (!template) {
+                        setSelectedTemplateId(null);
+                        setReportName("");
+                        setScales(INITIAL_DEFAULT_SCALES);
+                        setTempScales(INITIAL_DEFAULT_SCALES);
+                        return;
+                    }
+                    setSelectedTemplateId(template.Report_Id);
+                    setReportName(template.Report_Name);
+                    loadTemplate(template.Report_Id);
+                }}
+                onQuickSave={(parentName) => {
+                    setParentReportName(parentName || "RECIEVABLE PAYABLE");
+                    if (!selectedTemplateId) {
+                        setReportName("");
+                    }
+                    setSaveDialogOpen(true);
+                }}
             />
 
+            {/* FILTER DRAWER: ToDate and Scale-Like Group By Inputs */}
             <ReportFilterDrawer
                 open={drawerOpen}
                 onToggle={() => {
                     setDrawerOpen((prev) => {
                         if (!prev) {
-                            setTempGroups(selectedGroups);
-                            setTempGroupMode(groupMode);
+                            setTempToDate(toDate);
+                            setTempScales(scales.map((s) => ({ ...s })));
                         }
                         return !prev;
                     });
                 }}
                 onClose={() => setDrawerOpen(false)}
                 hideFromDate={true}
-                toDate={toDate}
-                onToDateChange={setToDate}
+                toDate={tempToDate}
+                onToDateChange={setTempToDate}
                 onApply={() => {
-                    setFilters({
-                        Date: { to: toDate },
-                        Group: tempGroupMode === "withGroup" ? tempGroups : [],
-                        GroupMode: tempGroupMode,
-                    });
-                    setSelectedGroups(tempGroupMode === "withGroup" ? tempGroups : []);
-                    setGroupMode(tempGroupMode);
+                    setToDate(tempToDate);
+                    setScales(tempScales.map((s) => ({ ...s })));
                     setDrawerOpen(false);
                 }}
             >
-                <FormControl sx={{ mb: 2, display: "block" }}>
-                    <FormLabel sx={{ fontWeight: 600, color: "#1E3A8A", fontSize: "0.875rem", display: "block", mb: 0.5 }}>
-                        Grouping Mode
-                    </FormLabel>
-                    <RadioGroup
-                        row
-                        value={tempGroupMode}
-                        onChange={(e) => setTempGroupMode(e.target.value as "withGroup" | "withoutGroup")}
-                    >
-                        <FormControlLabel
-                            value="withGroup"
-                            control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
-                            label={<Typography sx={{ fontSize: "0.825rem" }}>With Group</Typography>}
-                        />
-                        <FormControlLabel
-                            value="withoutGroup"
-                            control={<Radio size="small" sx={{ color: "#1E3A8A", "&.Mui-checked": { color: "#1E3A8A" } }} />}
-                            label={<Typography sx={{ fontSize: "0.825rem" }}>Without Group</Typography>}
-                        />
-                    </RadioGroup>
-                </FormControl>
+                <Box sx={{ mt: 2, mb: 1 }}>
+                    <Typography sx={{ fontWeight: 700, color: themeNavy, fontSize: "0.88rem", mb: 0.5 }}>
+                        Day Scales / Aging Ranges
+                    </Typography>
 
-                {tempGroupMode === "withGroup" && (
-                    <Autocomplete
-                        multiple
-                        disableCloseOnSelect
-                        options={uniqueGroupNames}
-                        value={tempGroups}
-                        onChange={(_, newValue) => setTempGroups(newValue)}
-                        renderInput={(params) => (
+                    {tempScales.map((sc, sIdx) => (
+                        <Box
+                            key={sc.id}
+                            sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 1,
+                                mb: 1.2,
+                                bgcolor: "#f8fafc",
+                                p: 1,
+                                borderRadius: 1,
+                                border: "1px solid #e2e8f0",
+                            }}
+                        >
+                            <Typography sx={{ fontSize: "0.75rem", fontWeight: 700, color: "#475569", minWidth: 20 }}>
+                                #{sIdx + 1}
+                            </Typography>
                             <TextField
-                                {...params}
-                                label="Group Names"
-                                placeholder="Select Groups..."
-                                InputLabelProps={{ shrink: true }}
+                                size="small"
+                                type="number"
+                                placeholder="From"
+                                value={sc.from}
+                                onChange={(e) => handleScaleChange(sc.id, "from", e.target.value)}
+                                sx={{
+                                    width: 80,
+                                    bgcolor: "#fff",
+                                    "& input": { py: 0.7, fontSize: "0.82rem", textAlign: "center" },
+                                }}
                             />
-                        )}
-                        sx={{ mb: 3 }}
-                    />
-                )}
+                            <Typography sx={{ fontSize: "0.82rem", fontWeight: 700, color: "#64748b" }}>
+                                to
+                            </Typography>
+                            <TextField
+                                size="small"
+                                type="number"
+                                placeholder="Max"
+                                value={sc.to}
+                                onChange={(e) => handleScaleChange(sc.id, "to", e.target.value)}
+                                sx={{
+                                    width: 80,
+                                    bgcolor: "#fff",
+                                    "& input": { py: 0.7, fontSize: "0.82rem", textAlign: "center" },
+                                }}
+                            />
+                            <Typography sx={{ fontSize: "0.75rem", color: "#64748b" }}>Days</Typography>
+
+                            {tempScales.length > 1 && (
+                                <IconButton
+                                    size="small"
+                                    color="error"
+                                    onClick={() => handleRemoveScale(sc.id)}
+                                    sx={{ ml: "auto", p: 0.5 }}
+                                >
+                                    <DeleteOutlineIcon fontSize="small" />
+                                </IconButton>
+                            )}
+                        </Box>
+                    ))}
+
+                    <Button
+                        size="small"
+                        startIcon={<AddCircleOutlineIcon />}
+                        onClick={handleAddScale}
+                        sx={{
+                            mt: 0.5,
+                            textTransform: "none",
+                            fontSize: "0.78rem",
+                            fontWeight: 600,
+                            color: themeNavy,
+                        }}
+                    >
+                        Add Another Scale
+                    </Button>
+                </Box>
             </ReportFilterDrawer>
 
-            <AppLayout fullWidth>
-                <Box sx={{ mt: 1, overflow: "hidden" }}>
-                    {loading ? (
-                        <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
-                            <CircularProgress size={40} />
-                        </Box>
-                    ) : (
-                        <>
-                            <TableContainer
-                                component={Paper}
-                                sx={{
-                                    maxHeight: "calc(100vh - 115px)",
-                                    borderRadius: 0,
-                                    border: "1px solid #cbd5e1",
-                                    overflow: "auto",
-                                    "& th, & td": {
-                                        fontSize: "0.75rem",
+            {/* MAIN TABLE CONTAINER: System Reporting Theme */}
+            <Box sx={{ flex: 1, minHeight: 0, p: { xs: 1, md: 2 }, display: "flex", flexDirection: "column" }}>
+                <TableContainer
+                    component={Paper}
+                    sx={{
+                        flex: 1,
+                        minHeight: 0,
+                        border: "1px solid #cbd5e1",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                        borderRadius: 1.5,
+                        overflow: "auto",
+                    }}
+                >
+                    <Table size="small" stickyHeader sx={{ minWidth: 650 }}>
+                        {/* HEADER: Standard System Theme (#1E3A8A) */}
+                        <TableHead>
+                            <TableRow>
+                                <TableCell
+                                    sx={{
+                                        bgcolor: themeNavy,
+                                        color: "#ffffff",
+                                        fontWeight: 700,
+                                        fontSize: "0.82rem",
                                         py: 1,
-                                    },
-                                }}
-                            >
-                                <Table size="small" stickyHeader sx={{ tableLayout: "fixed", width: "100%" }}>
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell sx={{ ...headerStyle, width: "60px" }}>S.No</TableCell>
-                                            <TableCell
-                                                sx={{ ...headerStyle, cursor: "pointer" }}
-                                                onClick={(e) => setAccountFilterAnchor(e.currentTarget)}
+                                        borderRight: "1px solid rgba(255,255,255,0.15)",
+                                        width: "60%",
+                                        cursor: "pointer",
+                                    }}
+                                    onClick={(e) => setAccountFilterAnchor(e.currentTarget)}
+                                >
+                                    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                                        <span>Account Name</span>
+                                        <Typography
+                                            component="span"
+                                            sx={{
+                                                fontSize: "0.7rem",
+                                                opacity: selectedAccountNames ? 1 : 0.6,
+                                                bgcolor: selectedAccountNames ? "rgba(255,255,255,0.2)" : "transparent",
+                                                px: 0.8,
+                                                py: 0.2,
+                                                borderRadius: 0.5,
+                                            }}
+                                        >
+                                            {selectedAccountNames ? `(${selectedAccountNames.length})` : "▼"}
+                                        </Typography>
+                                    </Box>
+                                </TableCell>
+                                <TableCell
+                                    align="center"
+                                    sx={{
+                                        bgcolor: themeNavy,
+                                        color: "#ffffff",
+                                        fontWeight: 700,
+                                        fontSize: "0.82rem",
+                                        py: 1,
+                                        borderRight: "1px solid rgba(255,255,255,0.15)",
+                                        width: "15%",
+                                    }}
+                                >
+                                    Days
+                                </TableCell>
+                                <TableCell
+                                    align="right"
+                                    sx={{
+                                        bgcolor: themeNavy,
+                                        color: "#ffffff",
+                                        fontWeight: 700,
+                                        fontSize: "0.82rem",
+                                        py: 1,
+                                        width: "25%",
+                                        pr: 2,
+                                    }}
+                                >
+                                    {amountColumnTitle}
+                                </TableCell>
+                            </TableRow>
+                        </TableHead>
+
+                        <TableBody>
+                            {/* TOTAL ROW (Top): Standard System Style (#EFF6FF) */}
+                            <TableRow sx={{ bgcolor: "#EFF6FF", borderBottom: "2px solid #bfdbfe" }}>
+                                <TableCell
+                                    sx={{
+                                        color: themeNavy,
+                                        fontWeight: 800,
+                                        fontSize: "0.85rem",
+                                        py: 0.9,
+                                    }}
+                                >
+                                    Total
+                                </TableCell>
+                                <TableCell sx={{ py: 0.9 }} />
+                                <TableCell
+                                    align="right"
+                                    sx={{
+                                        color: themeNavy,
+                                        fontWeight: 800,
+                                        fontSize: "0.85rem",
+                                        py: 0.9,
+                                        pr: 2,
+                                    }}
+                                >
+                                    {formatNumber(grandTotalAmount)}
+                                </TableCell>
+                            </TableRow>
+
+                            {/* LOADING STATE */}
+                            {loading ? (
+                                <TableRow>
+                                    <TableCell colSpan={3} align="center" sx={{ py: 6 }}>
+                                        <CircularProgress size={30} sx={{ color: themeNavy }} />
+                                        <Typography sx={{ mt: 1, fontSize: "0.82rem", color: "#64748b" }}>
+                                            Loading data...
+                                        </Typography>
+                                    </TableCell>
+                                </TableRow>
+                            ) : paginatedRows.length === 0 ? (
+                                <TableRow>
+                                    <TableCell colSpan={3} align="center" sx={{ py: 6 }}>
+                                        <Typography sx={{ fontSize: "0.85rem", color: "#64748b" }}>
+                                            No outstanding records found
+                                        </Typography>
+                                    </TableCell>
+                                </TableRow>
+                            ) : (
+                                paginatedRows.map((row: any, rIdx: number) => {
+                                    // GROUP ROW (Scale Header)
+                                    if (row.__group) {
+                                        const isExpanded = expandedKeys.includes(row.__key);
+                                        const isLastLevel = Boolean(row.__isLastLevel);
+
+                                        return (
+                                            <TableRow
+                                                key={`grp-${row.__key}-${rIdx}`}
+                                                sx={{
+                                                    bgcolor: groupRowBg,
+                                                    cursor: isLastLevel ? "pointer" : "default",
+                                                    borderTop: "1px solid #e2e8f0",
+                                                    borderBottom: "1px solid #e2e8f0",
+                                                    "&:hover": { bgcolor: isLastLevel ? "#e2e8f0" : groupRowBg },
+                                                }}
+                                                onClick={() => {
+                                                    if (isLastLevel) {
+                                                        handleToggleExpand(row.__key, row.__level);
+                                                    }
+                                                }}
                                             >
-                                                Account Name
+                                                <TableCell
+                                                    sx={{
+                                                        color: "#0f172a",
+                                                        fontWeight: 700,
+                                                        fontSize: "0.83rem",
+                                                        py: 0.8,
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        gap: 0.5,
+                                                    }}
+                                                >
+                                                    {isLastLevel ? (
+                                                        <IconButton size="small" sx={{ p: 0.2 }}>
+                                                            {isExpanded ? (
+                                                                <KeyboardArrowDownIcon sx={{ fontSize: 18, color: themeNavy }} />
+                                                            ) : (
+                                                                <KeyboardArrowRightIcon sx={{ fontSize: 18, color: themeNavy }} />
+                                                            )}
+                                                        </IconButton>
+                                                    ) : (
+                                                        <Box sx={{ width: 22, display: "inline-block" }} />
+                                                    )}
+                                                    <Typography sx={{ fontWeight: 700, fontSize: "0.83rem", color: themeNavy }}>
+                                                        {row.__label}
+                                                    </Typography>
+                                                    <Typography sx={{ fontSize: "0.72rem", color: "#64748b", ml: 0.5 }}>
+                                                        ({row.__count} records)
+                                                    </Typography>
+                                                </TableCell>
+                                                <TableCell sx={{ py: 0.8 }} />
+                                                <TableCell
+                                                    align="right"
+                                                    sx={{
+                                                        color: "#0f172a",
+                                                        fontWeight: 700,
+                                                        fontSize: "0.83rem",
+                                                        py: 0.8,
+                                                        pr: 2,
+                                                    }}
+                                                >
+                                                    {formatNumber(row.__subtotal)}
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    }
+
+                                    // DETAIL ROW
+                                    return (
+                                        <TableRow
+                                            key={`item-${row.id}-${rIdx}`}
+                                            sx={{
+                                                bgcolor: "#ffffff",
+                                                borderBottom: "1px solid #f1f5f9",
+                                                "&:hover": { bgcolor: "#f8fafc" },
+                                            }}
+                                        >
+                                            <TableCell
+                                                sx={{
+                                                    color: "#334155",
+                                                    fontSize: "0.8rem",
+                                                    py: 0.65,
+                                                    pl: 4,
+                                                }}
+                                            >
+                                                {row.Account_name}
+                                                {row.invoice_count && row.invoice_count > 1 ? ` (${row.invoice_count})` : ""}
                                             </TableCell>
-                                            <TableCell sx={{ ...headerStyle, width: "110px" }}>Invoice Date</TableCell>
-                                            <TableCell sx={{ ...headerStyle, width: "160px" }}>Invoice No</TableCell>
-                                            <TableCell sx={{ ...headerStyle, width: "160px" }} align="right">
-                                                <SortableHeaderLabel
-                                                    label="Recievable"
-                                                    columnKey="Debit_Amount"
-                                                    sortConfig={sortConfig}
-                                                    onSort={handleSort}
-                                                    onOpenFilter={(e) => openFilter(e, "Debit_Amount")}
-                                                />
+                                            <TableCell
+                                                align="center"
+                                                sx={{
+                                                    color: "#475569",
+                                                    fontSize: "0.8rem",
+                                                    py: 0.65,
+                                                }}
+                                            >
+                                                {row.days}
                                             </TableCell>
-                                            <TableCell sx={{ ...headerStyle, width: "160px" }} align="right">
-                                                <SortableHeaderLabel
-                                                    label="Payable"
-                                                    columnKey="Credit_Amount"
-                                                    sortConfig={sortConfig}
-                                                    onSort={handleSort}
-                                                    onOpenFilter={(e) => openFilter(e, "Credit_Amount")}
-                                                />
+                                            <TableCell
+                                                align="right"
+                                                sx={{
+                                                    color: "#1e293b",
+                                                    fontSize: "0.8rem",
+                                                    fontWeight: 500,
+                                                    py: 0.65,
+                                                    pr: 2,
+                                                }}
+                                            >
+                                                {formatNumber(row.Bal_Amount)}
                                             </TableCell>
                                         </TableRow>
-                                    </TableHead>
-
-                                    <TableBody>
-                                        {/* Grand Total Row (Top) */}
-                                        {finalData.length > 0 && (() => {
-                                            const bal = toggleMode === "Abstract"
-                                                ? totalDebitAmount - totalCreditAmount
-                                                : totalCreditAmount - totalDebitAmount;
-                                            return (
-                                                <TableRow sx={{ backgroundColor: "#F8FAFC", borderBottom: "2px solid #cbd5e1" }}>
-                                                    <TableCell colSpan={4} sx={{ fontWeight: 700, fontSize: "0.8rem", color: "#1E3A8A" }}>
-                                                        Grand Total (Bal: {formatINR(bal)})
-                                                    </TableCell>
-                                                    <TableCell align="right" sx={{ fontWeight: 700, fontSize: "0.8rem", color: "#1E3A8A" }}>
-                                                        {totalDebitAmount !== 0 ? formatINR(totalDebitAmount) : "-"}
-                                                    </TableCell>
-                                                    <TableCell align="right" sx={{ fontWeight: 700, fontSize: "0.8rem", color: "#1E3A8A" }}>
-                                                        {totalCreditAmount !== 0 ? formatINR(totalCreditAmount) : "-"}
-                                                    </TableCell>
-                                                </TableRow>
-                                            );
-                                        })()}
-
-                                        {filters.GroupMode === "withGroup" ? (
-                                            groupedPaginatedData.length > 0 ? (
-                                                (() => {
-                                                    let sNoCounter = (page - 1) * rowsPerPage;
-                                                    return groupedPaginatedData.map((group, groupIdx) => {
-                                                        const rowsHtml = group.items.map((row, itemIdx) => {
-                                                            sNoCounter++;
-                                                            return (
-                                                                <TableRow key={row.Acc_Id + itemIdx} hover>
-                                                                    <TableCell>{sNoCounter}</TableCell>
-                                                                    <TableCell sx={{ fontWeight: 500, color: "#1E293B", wordBreak: "break-word", whiteSpace: "normal" }}>
-                                                                        {row.Account_name}
-                                                                    </TableCell>
-                                                                    <TableCell>
-                                                                        {row.invoice_date
-                                                                            ? dayjs(row.invoice_date).format("DD/MM/YYYY")
-                                                                            : "-"}
-                                                                    </TableCell>
-                                                                    <TableCell sx={{ wordBreak: "break-all", whiteSpace: "normal" }}>{row.invoice_no || "-"}</TableCell>
-                                                                    <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                                                        {row.Debit_Amount !== 0 ? formatINR(row.Debit_Amount) : "-"}
-                                                                    </TableCell>
-                                                                    <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                                                        {row.Credit_Amount !== 0 ? formatINR(row.Credit_Amount) : "-"}
-                                                                    </TableCell>
-                                                                </TableRow>
-                                                            );
-                                                        });
-
-                                                        return (
-                                                            <React.Fragment key={group.groupName + groupIdx}>
-                                                                {/* Group Header Row showing totals directly */}
-                                                                <TableRow sx={{ backgroundColor: "#E2E8F0" }}>
-                                                                    <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }} />
-                                                                    <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A", py: 1 }}>
-                                                                        {group.groupName}
-                                                                    </TableCell>
-                                                                    <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }} />
-                                                                    <TableCell sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }} />
-                                                                    <TableCell align="right" sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }}>
-                                                                        {group.subtotalDebit !== 0 ? formatINR(group.subtotalDebit) : "-"}
-                                                                    </TableCell>
-                                                                    <TableCell align="right" sx={{ fontWeight: 800, fontSize: "0.8rem", color: "#1E3A8A" }}>
-                                                                        {group.subtotalCredit !== 0 ? formatINR(group.subtotalCredit) : "-"}
-                                                                    </TableCell>
-                                                                </TableRow>
-
-                                                                {/* Group Items */}
-                                                                {rowsHtml}
-                                                            </React.Fragment>
-                                                        );
-                                                    });
-                                                })()
-                                            ) : (
-                                                <TableRow>
-                                                    <TableCell colSpan={6} align="center" sx={{ py: 6, color: "text.secondary" }}>
-                                                        No records found.
-                                                    </TableCell>
-                                                </TableRow>
-                                            )
-                                        ) : (
-                                            // Flat list view ("Without Group")
-                                            paginatedRows.length > 0 ? (
-                                                paginatedRows.map((row: any, i) => {
-                                                    const sNo = (page - 1) * rowsPerPage + i + 1;
-                                                    return (
-                                                        <TableRow key={row.Acc_Id + i} hover>
-                                                            <TableCell>{sNo}</TableCell>
-                                                            <TableCell sx={{ fontWeight: 500, color: "#1E293B", wordBreak: "break-word", whiteSpace: "normal" }}>
-                                                                {row.Account_name}
-                                                            </TableCell>
-                                                            <TableCell>
-                                                                {row.invoice_date
-                                                                    ? dayjs(row.invoice_date).format("DD/MM/YYYY")
-                                                                    : "-"}
-                                                            </TableCell>
-                                                            <TableCell sx={{ wordBreak: "break-all", whiteSpace: "normal" }}>{row.invoice_no || "-"}</TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                                                {row.Debit_Amount !== 0 ? formatINR(row.Debit_Amount) : "-"}
-                                                            </TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                                                {row.Credit_Amount !== 0 ? formatINR(row.Credit_Amount) : "-"}
-                                                            </TableCell>
-                                                        </TableRow>
-                                                    );
-                                                })
-                                            ) : (
-                                                <TableRow>
-                                                    <TableCell colSpan={6} align="center" sx={{ py: 6, color: "text.secondary" }}>
-                                                        No records found.
-                                                    </TableCell>
-                                                </TableRow>
-                                            )
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-
-                            {/* Pagination */}
-                            {finalData.length > 0 && (
-                                <CommonPagination
-                                    totalRows={finalData.length}
-                                    page={page}
-                                    rowsPerPage={rowsPerPage}
-                                    onPageChange={setPage}
-                                    onRowsPerPageChange={setRowsPerPage}
-                                />
+                                    );
+                                })
                             )}
-                        </>
-                    )}
-                </Box>
-            </AppLayout>
+                        </TableBody>
+                    </Table>
+                </TableContainer>
 
-            {/* Account Name Header Filter Menu */}
+                {/* COMMON PAGINATION */}
+                {flattenedRows.length > 0 && (
+                    <CommonPagination
+                        totalRows={flattenedRows.length}
+                        page={page}
+                        rowsPerPage={rowsPerPage}
+                        onPageChange={setPage}
+                        onRowsPerPageChange={(newRpp) => {
+                            setRowsPerPage(newRpp);
+                            setPage(1);
+                        }}
+                    />
+                )}
+            </Box>
+
+            {/* ACCOUNT NAME HEADER FILTER MENU */}
             <HeaderFilterMenu
                 anchorEl={accountFilterAnchor}
                 open={Boolean(accountFilterAnchor)}
@@ -844,20 +1046,103 @@ const RecievablePayableReport: React.FC = () => {
                 }}
             />
 
-            {/* Numerical Filter Menu */}
-            <NumericalFilterMenu
-                anchorEl={filterAnchor}
-                open={Boolean(filterAnchor)}
-                onClose={() => setFilterAnchor(null)}
-                activeHeader={activeHeader}
-                min={activeHeader ? getMinMax(activeHeader).min : 0}
-                max={activeHeader ? getMinMax(activeHeader).max : 100}
-                rangeFilter={rangeFilter}
-                onRangeChange={(key, range) => setRangeFilter((p) => ({ ...p, [key]: range }))}
-                onClear={clearRangeFilter}
-            />
-        </>
+            {/* SAVE TEMPLATE DIALOG */}
+            <Dialog
+                open={saveDialogOpen}
+                onClose={() => setSaveDialogOpen(false)}
+                fullWidth
+                maxWidth="xs"
+            >
+                <DialogTitle sx={{ fontWeight: 700, color: themeNavy, fontSize: "1rem" }}>
+                    {selectedTemplateId ? "Update Template" : "Save as Template"}
+                </DialogTitle>
+                <DialogContent>
+                    <TextField
+                        autoFocus
+                        margin="dense"
+                        label="Template Name"
+                        fullWidth
+                        size="small"
+                        value={reportName}
+                        onChange={(e) => setReportName(e.target.value)}
+                        placeholder="Template name"
+                        sx={{ mt: 1 }}
+                    />
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 2 }}>
+                    <Button
+                        onClick={() => setSaveDialogOpen(false)}
+                        color="inherit"
+                        size="small"
+                        sx={{ textTransform: "none" }}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={handleSaveTemplate}
+                        variant="contained"
+                        size="small"
+                        sx={{
+                            bgcolor: themeNavy,
+                            "&:hover": { bgcolor: "#172554" },
+                            textTransform: "none",
+                            fontWeight: 600,
+                        }}
+                    >
+                        {selectedTemplateId ? "Update" : "Save"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* SAVE TEMPLATE DIALOG */}
+            <Dialog
+                open={saveDialogOpen}
+                onClose={() => setSaveDialogOpen(false)}
+                fullWidth
+                maxWidth="xs"
+            >
+                <DialogTitle sx={{ fontWeight: 700, color: themeNavy, fontSize: "1rem" }}>
+                    {selectedTemplateId ? "Update Template" : "Save as Template"}
+                </DialogTitle>
+                <DialogContent>
+                    <TextField
+                        autoFocus
+                        margin="dense"
+                        label="Template Name"
+                        fullWidth
+                        size="small"
+                        value={reportName}
+                        onChange={(e) => setReportName(e.target.value)}
+                        placeholder="Template name"
+                        sx={{ mt: 1 }}
+                    />
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 2 }}>
+                    <Button
+                        onClick={() => setSaveDialogOpen(false)}
+                        color="inherit"
+                        size="small"
+                        sx={{ textTransform: "none" }}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={handleSaveTemplate}
+                        variant="contained"
+                        size="small"
+                        sx={{
+                            bgcolor: themeNavy,
+                            "&:hover": { bgcolor: "#172554" },
+                            textTransform: "none",
+                            fontWeight: 600,
+                        }}
+                    >
+                        {selectedTemplateId ? "Update" : "Save"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+        </Box>
     );
 };
 
-export default RecievablePayableReport;
+export default OutstandingManagementReport;

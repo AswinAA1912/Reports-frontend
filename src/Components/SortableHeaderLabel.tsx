@@ -10,6 +10,7 @@ interface SortableHeaderLabelProps {
   onSort: (key: string) => void;
   onOpenFilter: (e: React.MouseEvent<HTMLElement>) => void;
   disableLabelFilterClick?: boolean;
+  aggregationMode?: "sum" | "avg";
 }
 
 export const SortableHeaderLabel: React.FC<SortableHeaderLabelProps> = ({
@@ -19,6 +20,7 @@ export const SortableHeaderLabel: React.FC<SortableHeaderLabelProps> = ({
   onSort,
   onOpenFilter,
   disableLabelFilterClick = false,
+  aggregationMode,
 }) => {
   const isActive = sortConfig?.key === columnKey;
   const direction = sortConfig?.direction;
@@ -40,9 +42,25 @@ export const SortableHeaderLabel: React.FC<SortableHeaderLabelProps> = ({
           e.stopPropagation();
           onOpenFilter(e);
         }}
-        style={{ cursor: "pointer" }}
+        style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
       >
         {label}
+        {aggregationMode === "avg" && (
+          <span
+            style={{
+              fontSize: "0.65rem",
+              backgroundColor: "#2563eb",
+              color: "#fff",
+              padding: "1px 4px",
+              borderRadius: "4px",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              lineHeight: 1.1,
+            }}
+          >
+            Avg
+          </span>
+        )}
       </span>
       <Box
         component="span"

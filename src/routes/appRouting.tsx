@@ -45,8 +45,8 @@ import InStockReport from "../reports/Stock/InStockReport";
 import SalesDeliveryReport from "../reports/Sales/salesDeliveryReport";
 import PurchaseReport from "../reports/Purchase/PurchaseReport";
 import RetailerLocations from "./RetailerLocations";
-import RecievablePayableReport from "../reports/Expenses/recievablePayableReport";
-import OutstandingManagementReport from "../reports/Expenses/OutstandingManagementReport";
+import PendingInvoiceReport from "../reports/Expenses/PendingInvoiceReport";
+import OutstandingManagementReport from "../reports/Expenses/recievablePayableReport";
 import OverallStaffReport from "../reports/StaffBased/overallStaffReport";
 import SalesStockGodown from "../reports/Stock/SalesStockGodown";
 import UserRights from "../settings/UserRights";
@@ -80,7 +80,8 @@ const URLSyncHandler: React.FC<{ setActiveCategory: (cat: string) => void }> = (
       "/salesreport": "Online Sales Report",
       "/uniteconomics": "Unit Economics Report",
       "/recievablePayable": "Receivable & Payable Report",
-      "/outstandingManagement": "Outstanding Management Report",
+      "/pendingInvoice": "Pending Invoice Report",
+      "/outstandingManagement": "Receivable & Payable Report",
       "/purchasedelivery": "Purchase Delivery Funnel Report",
       "/purchaseDelivery": "Purchase Delivery Funnel Report",
       "/purchasepayment": "Purchase Payment Report",
@@ -456,23 +457,37 @@ const AppRouting: React.FC<AppRoutingProps> = ({
           }
         />
 
+        {/* Recievable & Payable Report (formerly OutstandingManagementReport) */}
         <Route
           path="/recievablePayable"
           element={
             <RequireAuth>
               <AppLayout fullWidth>
-                <RecievablePayableReport />
+                <OutstandingManagementReport />
               </AppLayout>
             </RequireAuth>
           }
         />
 
+        {/* Alias path for backwards-compatibility */}
         <Route
           path="/outstandingManagement"
           element={
             <RequireAuth>
               <AppLayout fullWidth>
                 <OutstandingManagementReport />
+              </AppLayout>
+            </RequireAuth>
+          }
+        />
+
+        {/* Pending Invoice Report (formerly recievablePayableReport) */}
+        <Route
+          path="/pendingInvoice"
+          element={
+            <RequireAuth>
+              <AppLayout fullWidth>
+                <PendingInvoiceReport />
               </AppLayout>
             </RequireAuth>
           }

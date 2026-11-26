@@ -63,7 +63,7 @@ import { SalesReportLedgerService, SalesReportItemService } from "../services/Sa
 import { onlinePaymentReportService } from "../services/expenseReport.service";
 import { mapExpenseData } from "../reports/Expenses/ExpensesReport";
 import { OutstandingManagementReportService } from "../services/outstandingManagementReport.service";
-import { AgingScale, calculateDays, getScaleLabelForDays } from "../reports/Expenses/OutstandingManagementReport";
+import { AgingScale, calculateDays, getScaleLabelForDays } from "../reports/Expenses/recievablePayableReport";
 import { RateMasterAdminService } from "../services/rateMasterAdmin.service";
 import { RecievablePayableReportService } from "../services/recievablePayableReport.service";
 import { cashboxService } from "../services/cashbox.service";
@@ -715,18 +715,37 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
             const mappedIds = new Set(data2.map((d: any) => String(d.Product_Id)));
             const filteredRows = data1.filter((r: any) => mappedIds.has(String(r.Product_Id)));
 
-            // Check if template columns & grouping apply
+            // Check if template columns, grouping, and aggregationMode apply
             let templateCols: any[] = [];
             let groupingCols: string[] = [];
+            let aggregationMode: Record<string, "sum" | "avg"> = {};
             if (templateId && templateId !== "default") {
                 try {
                     const tRes = await SettingsService.getReportEditData({ reportId: Number(templateId), typeId: 1 });
-                    if (tRes.data?.success && tRes.data.data?.columns) {
-                        templateCols = tRes.data.data.columns.filter((c: any) => c.enabled).sort((a: any, b: any) => a.order - b.order);
-                        groupingCols = templateCols
-                            .filter((c: any) => c.groupBy && c.groupBy > 0)
-                            .sort((a: any, b: any) => (a.groupBy || 0) - (b.groupBy || 0))
-                            .map((c: any) => c.key);
+                    if (tRes.data?.success && tRes.data.data) {
+                        const rawPreset = tRes.data.data.reportInfo?.Preset_Config || tRes.data.data.Preset_Config;
+                        if (rawPreset) {
+                            try {
+                                const dbConfig = typeof rawPreset === "string" ? JSON.parse(rawPreset) : rawPreset;
+                                if (dbConfig?.aggregationMode) aggregationMode = dbConfig.aggregationMode;
+                            } catch (e) {
+                                console.warn("Failed to parse db Preset_Config in RateMasterAdmin export", e);
+                            }
+                        }
+                        if (Object.keys(aggregationMode).length === 0) {
+                            const localAgg = localStorage.getItem(`template_aggMode_${templateId}`);
+                            if (localAgg) {
+                                try { aggregationMode = JSON.parse(localAgg); } catch (e) { /* ignore */ }
+                            }
+                        }
+
+                        if (tRes.data.data.columns) {
+                            templateCols = tRes.data.data.columns.filter((c: any) => c.enabled).sort((a: any, b: any) => a.order - b.order);
+                            groupingCols = templateCols
+                                .filter((c: any) => c.groupBy && c.groupBy > 0)
+                                .sort((a: any, b: any) => (a.groupBy || 0) - (b.groupBy || 0))
+                                .map((c: any) => c.key);
+                        }
                     }
                 } catch (e) {
                     console.warn("Could not load template for RateMasterAdmin:", e);
@@ -739,6 +758,7 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
                 rows: filteredRows,
                 templateCols,
                 groupingCols,
+                aggregationMode,
                 toDate: to
             };
         }
@@ -801,41 +821,44 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
                 }
 
                 const filtered = list.filter((r) => String(r.CR_DR || "").toUpperCase() === targetCrDr);
-                const accountDaysMap = new Map<string, {
+                // Group by Account_name to consolidate multiple invoices into a single row with the maximum pending days
+                const accountMap = new Map<string, {
                     baseItem: any;
-                    days: number;
-                    scaleLabel: string;
+                    maxDays: number;
                     totalAmount: number;
                     invoiceCount: number;
                 }>();
 
                 filtered.forEach((r) => {
                     const days = calculateDays(r.invoice_date, to);
-                    const scaleLabel = getScaleLabelForDays(days, scales);
-                    const key = `${r.Account_name || "Unknown"}__${days}`;
+                    const accName = r.Account_name || "Unknown";
 
-                    if (!accountDaysMap.has(key)) {
-                        accountDaysMap.set(key, {
+                    if (!accountMap.has(accName)) {
+                        accountMap.set(accName, {
                             baseItem: r,
-                            days,
-                            scaleLabel,
+                            maxDays: days,
                             totalAmount: Number(r.Bal_Amount) || 0,
                             invoiceCount: 1,
                         });
                     } else {
-                        const existing = accountDaysMap.get(key)!;
+                        const existing = accountMap.get(accName)!;
                         existing.totalAmount += Number(r.Bal_Amount) || 0;
                         existing.invoiceCount += 1;
+                        if (days > existing.maxDays) {
+                            existing.maxDays = days;
+                            existing.baseItem = r;
+                        }
                     }
                 });
 
                 const processedData: any[] = [];
                 let idx = 0;
-                accountDaysMap.forEach((val) => {
+                accountMap.forEach((val) => {
                     idx++;
-                    const { baseItem, days, scaleLabel, totalAmount, invoiceCount } = val;
+                    const { baseItem, maxDays, totalAmount, invoiceCount } = val;
+                    const scaleLabel = getScaleLabelForDays(maxDays, scales);
                     processedData.push({
-                        id: `${baseItem.Acc_Id || ""}-${days}-${idx}`,
+                        id: `${baseItem.Acc_Id || ""}-${maxDays}-${idx}`,
                         Acc_Id: baseItem.Acc_Id,
                         Account_name: baseItem.Account_name || "Unknown",
                         invoice_date: baseItem.invoice_date,
@@ -843,7 +866,7 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
                         Bal_Amount: totalAmount,
                         CR_DR: baseItem.CR_DR,
                         Group_Name: baseItem.Group_Name || "General Group",
-                        days,
+                        days: maxDays,
                         scaleLabel,
                         invoice_count: invoiceCount,
                     });
@@ -1237,42 +1260,44 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
             // Filter by targetCrDr
             const filtered = list.filter((r) => String(r.CR_DR || "").toUpperCase() === targetCrDr);
 
-            // Group by Account_name + days to consolidate duplicate invoices
-            const accountDaysMap = new Map<string, {
+            // Group by Account_name to consolidate multiple invoices into a single row with the maximum pending days
+            const accountMap = new Map<string, {
                 baseItem: any;
-                days: number;
-                scaleLabel: string;
+                maxDays: number;
                 totalAmount: number;
                 invoiceCount: number;
             }>();
 
             filtered.forEach((r) => {
                 const days = calculateDays(r.invoice_date, to);
-                const scaleLabel = getScaleLabelForDays(days, scales);
-                const key = `${r.Account_name || "Unknown"}__${days}`;
+                const accName = r.Account_name || "Unknown";
 
-                if (!accountDaysMap.has(key)) {
-                    accountDaysMap.set(key, {
+                if (!accountMap.has(accName)) {
+                    accountMap.set(accName, {
                         baseItem: r,
-                        days,
-                        scaleLabel,
+                        maxDays: days,
                         totalAmount: Number(r.Bal_Amount) || 0,
                         invoiceCount: 1,
                     });
                 } else {
-                    const existing = accountDaysMap.get(key)!;
+                    const existing = accountMap.get(accName)!;
                     existing.totalAmount += Number(r.Bal_Amount) || 0;
                     existing.invoiceCount += 1;
+                    if (days > existing.maxDays) {
+                        existing.maxDays = days;
+                        existing.baseItem = r;
+                    }
                 }
             });
 
             const processedData: any[] = [];
             let idx = 0;
-            accountDaysMap.forEach((val) => {
+            accountMap.forEach((val) => {
                 idx++;
-                const { baseItem, days, scaleLabel, totalAmount, invoiceCount } = val;
+                const { baseItem, maxDays, totalAmount, invoiceCount } = val;
+                const scaleLabel = getScaleLabelForDays(maxDays, scales);
                 processedData.push({
-                    id: `${baseItem.Acc_Id || ""}-${days}-${idx}`,
+                    id: `${baseItem.Acc_Id || ""}-${maxDays}-${idx}`,
                     Acc_Id: baseItem.Acc_Id,
                     Account_name: baseItem.Account_name || "Unknown",
                     invoice_date: baseItem.invoice_date,
@@ -1280,7 +1305,7 @@ const CUSTOM_CATALOG_OVERRIDES: Record<string, Partial<ReportDefinition>> = {
                     Bal_Amount: totalAmount,
                     CR_DR: baseItem.CR_DR,
                     Group_Name: baseItem.Group_Name || "General Group",
-                    days,
+                    days: maxDays,
                     scaleLabel,
                     invoice_count: invoiceCount,
                 });
@@ -1863,7 +1888,7 @@ const BatchExportScreen: React.FC = () => {
 
     /* Loading state */
     const [exporting, setExporting] = useState<boolean>(false);
-    const [exportStatusText, setExportStatusText] = useState<string>("" );
+    const [exportStatusText, setExportStatusText] = useState<string>("");
     const [loadingPreset, setLoadingPreset] = useState<boolean>(false);
 
     /* DnD Sensors for Reordering Reports */
@@ -2121,7 +2146,7 @@ const BatchExportScreen: React.FC = () => {
             try {
                 const listRes = await SettingsService.getReportList();
                 const allData = listRes.data?.data || (Array.isArray(listRes.data) ? listRes.data : {});
-                
+
                 // If grouped object { "PARENT_NAME": [ { Report_Id, Report_Name, ... } ] }
                 let allReports: any[] = [];
                 if (Array.isArray(allData)) {
@@ -2537,6 +2562,7 @@ const BatchExportScreen: React.FC = () => {
                         const rawRows = data.rows || [];
                         const templateCols = data.templateCols || [];
                         const groupingCols = data.groupingCols || [];
+                        const aggMode: Record<string, "sum" | "avg"> = data.aggregationMode || {};
 
                         // Enabled columns projection
                         const enabledCols = templateCols.length > 0
@@ -2558,7 +2584,7 @@ const BatchExportScreen: React.FC = () => {
 
                         let serial = 1;
                         if (groupingCols.length > 0) {
-                            // Group by first grouping col
+                            // Group by first grouping col - output only grouped summary rows
                             const grpKey = groupingCols[0];
                             const groupMap = new Map<string, any[]>();
                             rawRows.forEach((r: any) => {
@@ -2569,28 +2595,25 @@ const BatchExportScreen: React.FC = () => {
 
                             groupMap.forEach((grpRows, val) => {
                                 const groupRow = [
-                                    "",
-                                    `Group: ${grpKey} = ${val}`,
-                                    ...enabledCols.slice(1).map((c: any) => {
-                                        if (c.isNumeric || c.key === "Rate" || c.key === "Min_Rate" || c.key === "Max_Rate" || c.key === "COGS" || c.key === "Margin") {
-                                            const sum = grpRows.reduce((s: number, r: any) => s + (Number(r[c.key]) || 0), 0);
-                                            return c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage"
-                                                ? (sum / grpRows.length).toFixed(1)
+                                    serial++,
+                                    ...enabledCols.map((c: any) => {
+                                        if (c.key === grpKey) {
+                                            return val;
+                                        }
+                                        const numKey = c.key;
+                                        const isNumberCol = Boolean(c.isNumeric) || ["Rate", "Min_Rate", "Max_Rate", "COGS", "Margin", "Margin_Percentage", "GP_Percentage_COGS"].includes(numKey);
+                                        if (isNumberCol) {
+                                            const sum = grpRows.reduce((s: number, r: any) => s + (Number(r[numKey]) || 0), 0);
+                                            const isAvg = aggMode[numKey] === "avg" || numKey === "GP_Percentage_COGS" || numKey === "Margin_Percentage";
+                                            const finalNum = isAvg
+                                                ? (sum / grpRows.length)
                                                 : sum;
+                                            return Number(finalNum.toFixed(2));
                                         }
                                         return "";
                                     })
                                 ];
                                 exportAoa.push(groupRow);
-
-                                grpRows.forEach((r: any) => {
-                                    exportAoa.push([
-                                        serial++,
-                                        ...enabledCols.map((c: any) => {
-                                            return formatExportCellValue(r[c.key], c.key, r, false);
-                                        })
-                                    ]);
-                                });
                             });
                         } else {
                             rawRows.forEach((r: any) => {
@@ -3356,6 +3379,7 @@ const BatchExportScreen: React.FC = () => {
                         const rawRows = data.rows || [];
                         const templateCols = data.templateCols || [];
                         const groupingCols = data.groupingCols || [];
+                        const aggMode: Record<string, "sum" | "avg"> = data.aggregationMode || {};
 
                         // Enabled columns projection matching user desired table format
                         const enabledCols = templateCols.length > 0
@@ -3374,6 +3398,7 @@ const BatchExportScreen: React.FC = () => {
                         const groupRowIndices: number[] = [];
 
                         if (groupingCols.length > 0) {
+                            // Group by first grouping col - output only grouped summary rows
                             const grpKey = groupingCols[0];
                             const groupMap = new Map<string, any[]>();
                             rawRows.forEach((r: any) => {
@@ -3383,31 +3408,30 @@ const BatchExportScreen: React.FC = () => {
                             });
 
                             groupMap.forEach((grpRows, val) => {
-                                groupRowIndices.push(body.length);
                                 const groupRow = [
-                                    "",
-                                    `Group: ${grpKey} = ${val}`,
-                                    ...enabledCols.slice(1).map((c: any) => {
-                                        if (c.isNumeric || c.key === "Rate" || c.key === "Min_Rate" || c.key === "Max_Rate" || c.key === "COGS" || c.key === "Margin") {
-                                            const sum = grpRows.reduce((s: number, r: any) => s + (Number(r[c.key]) || 0), 0);
-                                            const finalNum = c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage"
+                                    String(serial++),
+                                    ...enabledCols.map((c: any) => {
+                                        if (c.key === grpKey) {
+                                            return val;
+                                        }
+                                        const numKey = c.key;
+                                        const isNumberCol = Boolean(c.isNumeric) || ["Rate", "Min_Rate", "Max_Rate", "COGS", "Margin", "Margin_Percentage", "GP_Percentage_COGS"].includes(numKey);
+                                        if (isNumberCol) {
+                                            const sum = grpRows.reduce((s: number, r: any) => s + (Number(r[numKey]) || 0), 0);
+                                            const isAvg = aggMode[numKey] === "avg" || numKey === "GP_Percentage_COGS" || numKey === "Margin_Percentage";
+                                            const finalNum = isAvg
                                                 ? (sum / grpRows.length)
                                                 : sum;
-                                            return finalNum.toFixed(1);
+                                            return numKey === "GP_Percentage_COGS" || numKey === "Margin_Percentage"
+                                                ? `${finalNum.toFixed(2)}%`
+                                                : ["Rate", "Min_Rate", "Max_Rate", "COGS", "Margin"].includes(numKey)
+                                                    ? formatINR(finalNum)
+                                                    : finalNum.toFixed(2);
                                         }
                                         return "";
                                     })
                                 ];
                                 body.push(groupRow);
-
-                                grpRows.forEach((r: any) => {
-                                    body.push([
-                                        String(serial++),
-                                        ...enabledCols.map((c: any) => {
-                                            return formatExportCellValue(r[c.key], c.key, r, true);
-                                        })
-                                    ]);
-                                });
                             });
                         } else {
                             rawRows.forEach((r: any) => {
@@ -4226,61 +4250,61 @@ const BatchExportScreen: React.FC = () => {
                             </Box>
                         )}
                         <TableContainer
-                        component={Paper}
-                        variant="outlined"
-                        sx={{
-                            flex: 1,
-                            minHeight: 0,
-                            overflowY: "auto",
-                            overflowX: "auto",
-                            borderRadius: 2,
-                            borderColor: "#cbd5e1",
-                            boxShadow: "0 1px 3px 0 rgb(0 0 0 / 0.1)",
-                            "&::-webkit-scrollbar": {
-                                width: "8px",
-                                height: "8px",
-                            },
-                            "&::-webkit-scrollbar-thumb": {
-                                backgroundColor: "#94a3b8",
-                                borderRadius: "4px",
-                            },
-                        }}
-                    >
-                        <DndContext
-                            sensors={sensors}
-                            collisionDetection={closestCenter}
-                            onDragEnd={handleDragEnd}
+                            component={Paper}
+                            variant="outlined"
+                            sx={{
+                                flex: 1,
+                                minHeight: 0,
+                                overflowY: "auto",
+                                overflowX: "auto",
+                                borderRadius: 2,
+                                borderColor: "#cbd5e1",
+                                boxShadow: "0 1px 3px 0 rgb(0 0 0 / 0.1)",
+                                "&::-webkit-scrollbar": {
+                                    width: "8px",
+                                    height: "8px",
+                                },
+                                "&::-webkit-scrollbar-thumb": {
+                                    backgroundColor: "#94a3b8",
+                                    borderRadius: "4px",
+                                },
+                            }}
                         >
-                            <Table stickyHeader size="small">
-                                <TableHead>
-                                    <TableRow sx={{ "& th": { bgcolor: "#1E3A8A", color: "#ffffff", fontWeight: 700, fontSize: "0.82rem", py: 1.2 } }}>
-                                        <TableCell width={90} align="center">S.No</TableCell>
-                                        <TableCell width={240}>Report Name</TableCell>
-                                        <TableCell width={240}>Report Mode(s)</TableCell>
-                                        <TableCell width={220}>Saved Template</TableCell>
-                                        <TableCell width={180}>Export Style</TableCell>
-                                        <TableCell width={80} align="center">Action</TableCell>
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    <SortableContext
-                                        items={selectedReports.map((r) => r.id)}
-                                        strategy={verticalListSortingStrategy}
-                                    >
-                                        {selectedReports.map((cfg, idx) => (
-                                            <SortableReportRow
-                                                key={cfg.id}
-                                                cfg={cfg}
-                                                idx={idx}
-                                                onUpdateReport={handleUpdateReport}
-                                                onRemoveReport={handleRemoveReport}
-                                            />
-                                        ))}
-                                    </SortableContext>
-                                </TableBody>
-                            </Table>
-                        </DndContext>
-                    </TableContainer>
+                            <DndContext
+                                sensors={sensors}
+                                collisionDetection={closestCenter}
+                                onDragEnd={handleDragEnd}
+                            >
+                                <Table stickyHeader size="small">
+                                    <TableHead>
+                                        <TableRow sx={{ "& th": { bgcolor: "#1E3A8A", color: "#ffffff", fontWeight: 700, fontSize: "0.82rem", py: 1.2 } }}>
+                                            <TableCell width={90} align="center">S.No</TableCell>
+                                            <TableCell width={240}>Report Name</TableCell>
+                                            <TableCell width={240}>Report Mode(s)</TableCell>
+                                            <TableCell width={220}>Saved Template</TableCell>
+                                            <TableCell width={180}>Export Style</TableCell>
+                                            <TableCell width={80} align="center">Action</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        <SortableContext
+                                            items={selectedReports.map((r) => r.id)}
+                                            strategy={verticalListSortingStrategy}
+                                        >
+                                            {selectedReports.map((cfg, idx) => (
+                                                <SortableReportRow
+                                                    key={cfg.id}
+                                                    cfg={cfg}
+                                                    idx={idx}
+                                                    onUpdateReport={handleUpdateReport}
+                                                    onRemoveReport={handleRemoveReport}
+                                                />
+                                            ))}
+                                        </SortableContext>
+                                    </TableBody>
+                                </Table>
+                            </DndContext>
+                        </TableContainer>
                     </Box>
                 )}
             </Box>

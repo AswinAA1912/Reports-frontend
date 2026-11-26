@@ -234,6 +234,7 @@ const RateMasterAdminReport: React.FC = () => {
     const [reportName, setReportName] = useState("");
 
     const [columnFilters, setColumnFilters] = useState<Record<string, string[] | undefined>>({});
+    const [aggregationMode, setAggregationMode] = useState<Record<string, "sum" | "avg">>({});
 
     const [grouping, setGrouping] = useState<string[]>([]);
     const [pendingGrouping, setPendingGrouping] = useState<string[]>([]);
@@ -305,6 +306,33 @@ const RateMasterAdminReport: React.FC = () => {
                 const settings = res.data.data;
                 const templateCols = settings.columns || [];
 
+                // Load aggregationMode, columnFilters, rangeFilter from Database Preset_Config (or localStorage fallback)
+                let dbConfig: any = null;
+                const rawPreset = settings.reportInfo?.Preset_Config || settings.Preset_Config;
+                if (rawPreset) {
+                    try {
+                        dbConfig = typeof rawPreset === "string" ? JSON.parse(rawPreset) : rawPreset;
+                    } catch (e) {
+                        console.warn("Failed to parse db Preset_Config in RateMasterAdmin", e);
+                    }
+                }
+
+                if (dbConfig && typeof dbConfig === "object") {
+                    if (dbConfig.aggregationMode) setAggregationMode(dbConfig.aggregationMode);
+                    if (dbConfig.columnFilters) setColumnFilters(dbConfig.columnFilters);
+                    if (dbConfig.rangeFilter) setNumRangeFilter(dbConfig.rangeFilter);
+                    if (dbConfig.zeroFilter) setZeroFilter(dbConfig.zeroFilter);
+                } else {
+                    const localAgg = localStorage.getItem(`template_aggMode_${templateId}`);
+                    if (localAgg) {
+                        try { setAggregationMode(JSON.parse(localAgg)); } catch (e) { /* ignore */ }
+                    }
+                    const localCol = localStorage.getItem(`template_colFilters_${templateId}`);
+                    if (localCol) {
+                        try { setColumnFilters(JSON.parse(localCol)); } catch (e) { /* ignore */ }
+                    }
+                }
+
                 if (templateCols.length > 0) {
                     const loadedCols = ALL_COLUMNS_METADATA.map((col, index) => {
                         const tc = templateCols.find((x: any) => x.key === col.key);
@@ -353,6 +381,9 @@ const RateMasterAdminReport: React.FC = () => {
             order: index
         })));
         setGrouping([]);
+        setAggregationMode({});
+        setColumnFilters({});
+        setNumRangeFilter({});
     };
 
     const handleQuickSave = async () => {
@@ -366,31 +397,52 @@ const RateMasterAdminReport: React.FC = () => {
                 groupBy: grouping.includes(col.key) ? grouping.indexOf(col.key) + 1 : 0,
             }));
 
+            const templateDbConfig = {
+                aggregationMode,
+                columnFilters,
+                rangeFilter: numRangeFilter,
+                zeroFilter,
+            };
+
             if (selectedTemplateId) {
                 await SettingsService.updateReport({
                     reportId: selectedTemplateId,
                     typeId: 1,
                     reportName: reportName.trim(),
-                    columns: abstractPayload
+                    columns: abstractPayload,
+                    presetConfig: templateDbConfig,
                 });
                 await SettingsService.updateReport({
                     reportId: selectedTemplateId,
                     typeId: 2,
                     reportName: reportName.trim(),
-                    columns: abstractPayload
+                    columns: abstractPayload,
+                    presetConfig: templateDbConfig,
                 });
+
+                localStorage.setItem(`template_aggMode_${selectedTemplateId}`, JSON.stringify(aggregationMode));
+                localStorage.setItem(`template_colFilters_${selectedTemplateId}`, JSON.stringify(columnFilters));
+                localStorage.setItem(`template_rangeFilter_${selectedTemplateId}`, JSON.stringify(numRangeFilter));
 
                 toast.success("Template Updated Successfully ✅");
             } else {
-                await SettingsService.saveReportSettings({
+                const saveRes: any = await SettingsService.saveReportSettings({
                     reportName: reportName.trim(),
                     parentReport: parentReportName,
                     abstractSP: "Reporting_Online_Rate_Master_List_Admin",
                     expandedSP: "Reporting_Online_Rate_Master_List_Admin",
                     abstractColumns: abstractPayload,
                     expandedColumns: abstractPayload,
-                    createdBy
+                    createdBy,
+                    presetConfig: templateDbConfig,
                 });
+
+                const newReportId = (saveRes as any)?.data?.reportId || (saveRes as any)?.data?.data?.Report_Id;
+                if (newReportId) {
+                    localStorage.setItem(`template_aggMode_${newReportId}`, JSON.stringify(aggregationMode));
+                    localStorage.setItem(`template_colFilters_${newReportId}`, JSON.stringify(columnFilters));
+                    localStorage.setItem(`template_rangeFilter_${newReportId}`, JSON.stringify(numRangeFilter));
+                }
 
                 toast.success("Template Saved Successfully ✅");
             }
@@ -610,10 +662,48 @@ const RateMasterAdminReport: React.FC = () => {
         if (columnKey === "GP_Percentage_COGS" || columnKey === "Margin_Percentage") {
             return Number((sum / sortedRows.length).toFixed(2));
         }
+        const mode = aggregationMode[columnKey] || "sum";
+        if (mode === "avg") {
+            return Number((sum / sortedRows.length).toFixed(2));
+        }
+        return Number(sum.toFixed(2));
+    };
+
+    const getGroupTotal = (columnKey: string, groupRows: any[]) => {
+        if (!groupRows || groupRows.length === 0) return 0;
+        const sum = groupRows.reduce(
+            (s: number, r: any) => s + Number(r[columnKey] || 0),
+            0
+        );
+        if (columnKey === "GP_Percentage_COGS" || columnKey === "Margin_Percentage") {
+            return Number((sum / groupRows.length).toFixed(2));
+        }
+        const mode = aggregationMode[columnKey] || "sum";
+        if (mode === "avg") {
+            return Number((sum / groupRows.length).toFixed(2));
+        }
         return Number(sum.toFixed(2));
     };
 
     /* ================= HANDLERS ================= */
+
+    const handleAggregationModeChange = (key: string, mode: "sum" | "avg") => {
+        setAggregationMode((prev) => {
+            const next = { ...prev };
+            if (mode === "avg") {
+                // If user selects Avg on any column, set all enabled numerical columns to Avg by default
+                enabledColumns.forEach((c) => {
+                    if (c.isNumeric) {
+                        next[c.key] = "avg";
+                    }
+                });
+            } else {
+                // If user changes a specific column back to Sum manually, only change that column
+                next[key] = "sum";
+            }
+            return next;
+        });
+    };
 
     const handleHeaderClick = (e: React.MouseEvent<HTMLElement>, key: string) => {
         const col = columns.find(x => x.key === key);
@@ -897,6 +987,7 @@ const RateMasterAdminReport: React.FC = () => {
                                                     sortConfig={numSortConfig}
                                                     onSort={handleNumSort}
                                                     onOpenFilter={(e) => openNumFilter(e, c.key)}
+                                                    aggregationMode={aggregationMode[c.key]}
                                                 />
                                             ) : (
                                                 <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -993,18 +1084,15 @@ const RateMasterAdminReport: React.FC = () => {
                                                         }
 
                                                         if (c.isNumeric) {
-                                                            const sum = row.__rows.reduce(
-                                                                (s: number, r: any) => s + Number(r[c.key] || 0),
-                                                                0
-                                                            );
+                                                            const val = getGroupTotal(c.key, row.__rows);
 
                                                             return (
                                                                 <TableCell key={c.key} align="right" sx={{ borderRight: "1px solid #cbd5e1" }}>
                                                                     {c.key === "GP_Percentage_COGS" || c.key === "Margin_Percentage"
-                                                                        ? (sum / row.__rows.length).toFixed(2) + "%"
+                                                                        ? `${val}%`
                                                                         : CURRENCY_KEYS.includes(c.key)
-                                                                            ? formatINR(sum)
-                                                                            : sum}
+                                                                            ? formatINR(val)
+                                                                            : val}
                                                                 </TableCell>
                                                             );
                                                         }
@@ -1166,6 +1254,8 @@ const RateMasterAdminReport: React.FC = () => {
                 rangeFilter={numRangeFilter}
                 onRangeChange={(key, range) => setNumRangeFilter(p => ({ ...p, [key]: range }))}
                 onClear={clearRangeFilter}
+                aggregationMode={aggregationMode}
+                onAggregationModeChange={handleAggregationModeChange}
             />
 
             {/* ******* GROUPING DIALOG ******* */}

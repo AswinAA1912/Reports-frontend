@@ -299,11 +299,12 @@ export const buildPurchasePaymentDataset = (
     poRows: PurchaseOrderItem[],
     invRows: OnlinePurchaseReport[],
     tripRows: PurchaseOrderTripItem[] = [],
-    paymentsMap?: Map<string, PurchaseOrderPaymentItem>
+    paymentsMap?: Map<string, PurchaseOrderPaymentItem>,
+    arrivalRows: any[] = []
 ): PurchasePaymentItem[] => {
     // If tripRows are available from PurchaseOrderTripItemService, use rich live dataset
     if (tripRows && tripRows.length > 0) {
-        const itemOrders = buildPurchaseItemPaymentDataset(poRows, invRows, tripRows, paymentsMap);
+        const itemOrders = buildPurchaseItemPaymentDataset(poRows, invRows, tripRows, paymentsMap, arrivalRows);
         if (itemOrders && itemOrders.length > 0) {
             return itemOrders.map((ord, idx) => ({
                 id: ord.id,
@@ -846,7 +847,8 @@ export const buildPurchaseItemPaymentDataset = (
     poRows: PurchaseOrderItem[],
     invRows: OnlinePurchaseReport[],
     tripRows: PurchaseOrderTripItem[] = [],
-    paymentsMap?: Map<string, PurchaseOrderPaymentItem>
+    paymentsMap?: Map<string, PurchaseOrderPaymentItem>,
+    arrivalRows: any[] = []
 ): PurchaseItemOrder[] => {
     // If no data returned from any API, return empty array (NO DUMMY DATA)
     if ((!poRows || poRows.length === 0) && (!invRows || invRows.length === 0) && (!tripRows || tripRows.length === 0)) {
@@ -854,6 +856,18 @@ export const buildPurchaseItemPaymentDataset = (
     }
 
     const { resolve: resolveGroup } = buildStockGroupCatalog(poRows, invRows, tripRows);
+
+    // Build map from arrivalRows (from Masters /api/masters/arrival) by Trip_Id and Product_Id
+    const arrivalMap = new Map<string, any>();
+    (arrivalRows || []).forEach((arr) => {
+        const tId = cleanStr(arr.Trip_Id || arr.TripId);
+        const pId = cleanStr(arr.Product_Id || arr.ProductId);
+        if (tId && pId) {
+            arrivalMap.set(`${tId}_${pId}`, arr);
+        } else if (tId && !arrivalMap.has(tId)) {
+            arrivalMap.set(tId, arr);
+        }
+    });
 
     // PRIMARY PATH: If tripRows from purchaseOrderTripItemDetails are available, map by OrderId === Trans_Id
     if (tripRows && tripRows.length > 0) {
@@ -1022,7 +1036,8 @@ export const buildPurchaseItemPaymentDataset = (
             const arrivedInvoices: ArrivedInvoiceDetail[] = matchedTrips.map((t, invIdx) => {
                 const invNo = cleanStr(t.TR_INV_ID || t.BillNo || t.Challan_No || `TRIP-${t.Trip_Id}`);
                 const invDate = cleanStr(t.Arrival_Date || t.Trip_Date || orderDate);
-                const prodName = cleanStr(t.Product_Name || "Item");
+                const matchedArrival = arrivalMap.get(`${t.Trip_Id}_${t.Product_Id}`) || arrivalMap.get(cleanStr(t.Trip_Id));
+                const prodName = cleanStr(matchedArrival?.Product_Name || t.Product_Name || "Item");
                 const qty = parseNum(t.QTY ?? t.KGS);
                 const unit = cleanStr(t.Units) || "kg";
                 const totalVal = parseNum(t.Total_Value ?? t.Taxable_Value);
@@ -1376,17 +1391,19 @@ export const buildPurchaseDeliveryDataset = (
     poRows: PurchaseOrderItem[],
     invRows: OnlinePurchaseReport[],
     tripRows: PurchaseOrderTripItem[] = [],
-    paymentsMap?: Map<string, PurchaseOrderPaymentItem>
+    paymentsMap?: Map<string, PurchaseOrderPaymentItem>,
+    arrivalRows: any[] = []
 ): PurchaseDeliveryItem[] => {
     const { resolve: resolveGroup } = buildStockGroupCatalog(poRows, invRows, tripRows);
 
-    // If tripRows are available, build unified dataset from trips & POs
-    if (tripRows && tripRows.length > 0) {
-        const itemOrders = buildPurchaseItemPaymentDataset(poRows, invRows, tripRows, paymentsMap);
-        if (itemOrders && itemOrders.length > 0) {
-            const records: PurchaseDeliveryItem[] = [];
-            let sNoCounter = 1;
+    const records: PurchaseDeliveryItem[] = [];
+    let sNoCounter = 1;
+    const coveredTripIds = new Set<string>();
 
+    // 1. If tripRows & PO items are available, build unified dataset from trips & POs
+    if (tripRows && tripRows.length > 0) {
+        const itemOrders = buildPurchaseItemPaymentDataset(poRows, invRows, tripRows, paymentsMap, arrivalRows);
+        if (itemOrders && itemOrders.length > 0) {
             itemOrders.forEach((order) => {
                 const matchingPo = (poRows || []).find((p) =>
                     cleanStr(p.invoice_no).toLowerCase() === cleanStr(order.purOrderNo).toLowerCase() ||
@@ -1657,6 +1674,17 @@ export const buildPurchaseDeliveryDataset = (
                         phone: "-",
                     };
 
+                    // Determine representative date: prioritize actual arrival date of goods
+                    const latestArrivalDate = arrivedInvoices.reduce((latest, inv) => {
+                        const d = inv.invoiceDate;
+                        if (!d) return latest;
+                        if (!latest) return d;
+                        return dayjs(d).isAfter(dayjs(latest)) ? d : latest;
+                    }, "");
+                    const effectiveDisplayDate = latestArrivalDate || order.orderDate || dayjs().format("YYYY-MM-DD");
+
+                    const representativeBillType = arrivedInvoices.find(inv => cleanStr(inv.billType))?.billType || "";
+
                     records.push({
                         id: `pd-combined-${order.id}-${rawName.replace(/\s+/g, "_")}-${sNoCounter}`,
                         sNo: sNoCounter++,
@@ -1672,7 +1700,8 @@ export const buildPurchaseDeliveryDataset = (
                         paymentNo: paymentDisplay,
                         paymentAmt: totalPaidAmt > 0 ? totalPaidAmt : "",
                         status,
-                        orderDate: order.orderDate,
+                        orderDate: effectiveDisplayDate,
+                        billType: representativeBillType,
 
                         transId: order.transId,
                         retailerName,
@@ -1764,21 +1793,165 @@ export const buildPurchaseDeliveryDataset = (
                     r.invoiceDetails = branchInvoiceMap.get(k);
                 }
             });
-
-            return records;
         }
     }
 
-    // Fallback if no tripRows
-    if ((!invRows || invRows.length === 0) && (!poRows || poRows.length === 0)) {
-        return [];
-    }
+    // Build a direct lookup map of tripRows by Trip_Id for exact mapping
+    const tripRowsByTripId = new Map<string, PurchaseOrderTripItem>();
+    (tripRows || []).forEach((t) => {
+        const tid = cleanStr(t.Trip_Id);
+        if (tid && !tripRowsByTripId.has(tid)) {
+            tripRowsByTripId.set(tid, t);
+        }
+    });
 
-    const records: PurchaseDeliveryItem[] = [];
-    let sNoCounter = 1;
+    // 2. Ensure ALL arrival items from tbl_Trip_Arrival (/api/masters/arrival) are shown
+    (arrivalRows || []).forEach((arr, arrIdx) => {
+        const arrTripId = cleanStr(arr.Trip_Id || arr.TripId);
+        const arrId = cleanStr(arr.Arr_Id || arr.id || arrIdx);
 
-    // Group fallback rows by (purOrderNo, cleanProduct)
-    const fallbackGroup = new Map<string, any[]>();
+        // If this arrival's trip was already included in a PO delivery record, we don't duplicate the primary row
+        if (arrTripId && coveredTripIds.has(arrTripId)) {
+            return;
+        }
+
+        // Direct lookup by Trip_Id (e.g. "23599") in purchaseOrderTripItemDetails
+        const matchedTrip = (arrTripId && tripRowsByTripId.get(arrTripId)) || (tripRows || []).find((t) =>
+            (arrTripId && cleanStr(t.Trip_Id) === arrTripId) ||
+            (arr.Product_Id && t.Product_Id && cleanStr(arr.Product_Id) === cleanStr(t.Product_Id) && cleanStr(arr.Batch_No) === cleanStr(t.Batch_No))
+        );
+
+        const arrBillType = cleanStr((arr as any).Bill_Type || (arr as any).BillType || matchedTrip?.BillType || "");
+
+        // Only include if Bill_Type has INW (e.g. "ON_M.INW - ADJ", "MATERIAL INWARD", "INWARD", "INW")
+        const normBillType = arrBillType.toUpperCase();
+        if (normBillType && !normBillType.includes("INW")) {
+            return;
+        }
+
+        const matchedPo = (poRows || []).find((p) => {
+            const transId = cleanStr(p.Trans_Id || (p as any).OrderId || p.Id);
+            return (matchedTrip && matchedTrip.OrderId && cleanStr(matchedTrip.OrderId) === transId);
+        });
+
+        const rawProd = cleanItemName(arr.Product_Name || matchedTrip?.Product_Name || "Item");
+        const stockGroup = resolveGroup(arr, rawProd, arr.Product_Id || matchedTrip?.Product_Id);
+        const qtyKg = parseNum(arr.QTY ?? arr.KGS ?? matchedTrip?.QTY ?? matchedTrip?.KGS);
+        const tonnageStr = qtyKg > 0 ? formatKgQuantity(qtyKg) : "-";
+        const batchNo = cleanStr(arr.Batch_No || matchedTrip?.Batch_No) || "-";
+        const inwardJou = cleanStr(matchedTrip?.TR_INV_ID) || "-";
+        const purOrderNo = cleanStr(matchedPo?.invoice_no || (matchedPo as any)?.order_no || matchedTrip?.OrderId || "-");
+
+        // Check invoices and payments
+        const invCandidate = cleanStr(matchedTrip?.TR_INV_ID || matchedTrip?.BillNo || arr.Batch_No);
+        const invK = invCandidate.toLowerCase();
+        const matchedPay = paymentsMap ? (
+            paymentsMap.get(invK) ||
+            paymentsMap.get(invK.replace(/^mia\//, "ps/")) ||
+            paymentsMap.get(invK.replace(/^[a-z]+\//, "")) ||
+            (purOrderNo !== "-" ? paymentsMap.get(purOrderNo.toLowerCase()) : undefined)
+        ) : undefined;
+
+        const purInv = matchedPay?.invoice_no || (/^ps\//i.test(invCandidate) ? invCandidate : "-");
+        const paidAmt = matchedPay && parseNum(matchedPay.Debit_Amt) > 0 ? parseNum(matchedPay.Debit_Amt) : "";
+        const isPaid = matchedPay ? parseNum(matchedPay.Bal_Amount) <= 0 && parseNum(matchedPay.Debit_Amt) > 0 : false;
+        const status: "COMPLETED" | "NOT COMPLETED" = isPaid ? "COMPLETED" : "NOT COMPLETED";
+
+        const arrivalDate = arr.Arrival_Date ? dayjs(arr.Arrival_Date).format("YYYY-MM-DD") : dayjs().format("YYYY-MM-DD");
+        const retailer = cleanStr(matchedPo?.Retailer_Name || (matchedPo as any)?.Party_Name || arr.FromLocation || "Party As Recorded");
+        const location = cleanStr(arr.ToLocation || matchedTrip?.BatchLocation || "Smt Mill");
+
+        const singleInwardDetail = [{
+            sNo: 1,
+            tripId: arrTripId || arrId,
+            Trip_Id: arrTripId || arrId,
+            location: location,
+            arrivalDate: arrivalDate,
+            itemName: rawProd,
+            concern: "SM AGRO",
+            billNo: inwardJou,
+            billDate: arrivalDate,
+            quantity: Math.round(qtyKg / 50) || qtyKg,
+            unit: "Bags",
+            billedRate: matchedTrip?.Gst_Rate || "As recorded",
+            tonnageKg: qtyKg,
+            tonnage: tonnageStr,
+            batch: batchNo,
+            batchLocation: location,
+            vehicleNo: cleanStr(arr.Vehicle_No || matchedTrip?.Vehicle_No || "-"),
+            status: status,
+        }];
+
+        const singlePoItem = [{
+            sNo: 1,
+            itemName: rawProd,
+            orderedQty: qtyKg,
+            tonnage: tonnageStr,
+            rate: matchedTrip?.Gst_Rate || "As recorded",
+            amount: matchedTrip?.Total_Value || "As recorded",
+            unit: "Bags",
+            discount: "-",
+            qualityCondition: "Standard",
+        }];
+
+        // Use the mapped BillType from matchedTrip
+        const finalBillType = cleanStr(matchedTrip?.BillType || (arr as any).Bill_Type || (arr as any).BillType || "");
+
+        records.push({
+            id: `arr-entry-${arrId}-${sNoCounter}`,
+            sNo: sNoCounter++,
+            stockGroup,
+            inwardItem: rawProd,
+            batch: batchNo,
+            tonnage: tonnageStr,
+            tonnageKg: qtyKg,
+            inwardBatchWithItemName: `${rawProd} (${tonnageStr})`,
+            purOrderNo: purOrderNo,
+            inwardJouNo: inwardJou,
+            purInvNo: purInv,
+            paymentNo: matchedPay?.invoice_no || "-",
+            paymentAmt: paidAmt,
+            status,
+            orderDate: arrivalDate,
+            billType: finalBillType || arrBillType,
+
+            transId: matchedPo ? cleanStr(matchedPo.Trans_Id || matchedPo.Id) : (arrTripId || undefined),
+            retailerName: retailer,
+            partyAddress: cleanStr((matchedPo as any)?.Party_Address || "-"),
+            brokerName: cleanStr((matchedPo as any)?.Broker_Name || "-"),
+            ownerName: cleanStr(arr.createdByGet || "ADMIN"),
+            loadingDate: arrivalDate,
+            tradeConfirmDate: arrivalDate,
+            paymentCondition: "30 Days",
+            remarks: cleanStr(arr.Remarks || matchedTrip?.Narration || "-"),
+
+            inwardCount: 1,
+            invoiceCount: purInv !== "-" ? 1 : 0,
+            paymentCount: isPaid ? 1 : 0,
+            batchCount: batchNo !== "-" ? 1 : 0,
+
+            allBatches: batchNo !== "-" ? [batchNo] : [],
+            allInwardJous: inwardJou !== "-" ? [inwardJou] : [],
+            allPurInvNos: purInv !== "-" ? [purInv] : [],
+            allPaymentNos: matchedPay?.invoice_no ? [matchedPay.invoice_no] : [],
+            tripId: arrTripId,
+            allTripIds: arrTripId ? [arrTripId] : [],
+
+            poItems: singlePoItem,
+            inwardDetails: singleInwardDetail,
+            invoiceDetails: [],
+            paymentDetails: [],
+            transportDetails: {
+                name: "Direct Logistics",
+                vehicleNo: cleanStr(arr.Vehicle_No || matchedTrip?.Vehicle_No || "-"),
+                phone: "-",
+            },
+        });
+    });
+
+    // 3. Fallback if no records found yet and invRows or poRows exist
+    if (records.length === 0 && ((invRows && invRows.length > 0) || (poRows && poRows.length > 0))) {
+        const fallbackGroup = new Map<string, any[]>();
 
     (invRows || []).forEach((inv) => {
         const rawProduct = cleanStr(
@@ -2077,6 +2250,7 @@ export const buildPurchaseDeliveryDataset = (
             }
         }
     });
+    }
 
     return records;
 };

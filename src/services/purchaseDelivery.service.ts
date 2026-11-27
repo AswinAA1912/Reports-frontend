@@ -1,4 +1,48 @@
 import dayjs from "dayjs";
+import axios from "axios";
+import { getBaseURL } from "../config/portalBaseURL";
+
+export interface ArrivalEntryItem {
+  Arr_Id: string | number;
+  Arrival_Date: string;
+  Batch_No: string | null;
+  From_Location?: number | null;
+  To_Location?: number | null;
+  Concern?: string;
+  BillNo?: string;
+  BatchLocation?: string;
+  Product_Id: number;
+  HSN_Code?: string;
+  QTY: number;
+  KGS: number;
+  Unit_Id?: number;
+  Units?: string;
+  GST_Inclusive?: number;
+  IS_IGST?: number;
+  Gst_Rate?: number;
+  Gst_P?: number;
+  Cgst_P?: number;
+  Sgst_P?: number;
+  Igst_P?: number;
+  Taxable_Value?: number;
+  Round_off?: number;
+  Total_Value?: number;
+  Created_By?: number;
+  CreatedAt?: string;
+  Updated_By?: number | null;
+  T_Auto_Id?: string;
+  Product_Name: string;
+  FromLocation: string;
+  ToLocation: string;
+  Arrival_Id?: string | number | null;
+  Trip_Id?: string | number | null;
+  Bill_Type?: string | null;
+  ConvertedAsOrder?: number;
+  ConvertedAsInvoice?: number;
+  createdByGet?: string;
+  isCancelledTrip?: number;
+  alterationHistory?: any[];
+}
 
 export interface FunnelOrderItem {
   itemId: string;
@@ -109,6 +153,7 @@ export interface PurchaseDeliveryItem {
   invoiceDetails?: any[];
   paymentDetails?: any[];
   transportDetails?: any;
+  billType?: string;
 }
 
 export const computeItemStatus = (
@@ -252,13 +297,28 @@ import {
 } from "./OnlinePurchaseReport.service";
 
 export const PurchaseDeliveryService = {
+  getArrivalEntry: (params?: {
+    Fromdate?: string;
+    Todate?: string;
+    FromGodown?: number;
+    ToGodown?: number;
+    ProductId?: number;
+    convertedStatus?: number;
+  }) => {
+    return axios.get<{ success: boolean; data: ArrivalEntryItem[] }>(
+      `${getBaseURL()}api/masters/arrival`,
+      { params }
+    );
+  },
+
   getPurchaseDeliveries: async (params?: {
     Fromdate?: string;
     Todate?: string;
   }): Promise<PurchaseDeliveryItem[]> => {
     try {
       const targetToDate = params?.Todate || dayjs().format("YYYY-MM-DD");
-      const [raw, paymentsRes] = await Promise.all([
+      const targetFromDate = params?.Fromdate || dayjs().startOf("month").format("YYYY-MM-DD");
+      const [raw, paymentsRes, arrivalRes] = await Promise.all([
         fetchRawPurchaseDatasets(params),
         PurchaseOrderPaymentService.getPurchaseOrderPayments({
           Todate: targetToDate,
@@ -267,7 +327,15 @@ export const PurchaseDeliveryService = {
           console.warn("Failed to load payments for delivery:", err);
           return { data: { data: [] } };
         }),
+        PurchaseDeliveryService.getArrivalEntry({
+          Fromdate: targetFromDate,
+          Todate: targetToDate,
+        }).catch((err) => {
+          console.warn("Failed to load arrival entries for delivery:", err);
+          return { data: { data: [] } };
+        }),
       ]);
+      const arrivals = arrivalRes.data?.data || (Array.isArray(arrivalRes.data) ? arrivalRes.data : []);
       const payments = paymentsRes.data?.data || (Array.isArray(paymentsRes.data) ? paymentsRes.data : []);
       const paymentsMap = new Map<string, PurchaseOrderPaymentItem>();
       payments.forEach((p) => {
@@ -287,7 +355,7 @@ export const PurchaseDeliveryService = {
           }
         }
       });
-      return buildPurchaseDeliveryDataset(raw.purchaseOrders, raw.purchaseInvoices, raw.tripItems, paymentsMap);
+      return buildPurchaseDeliveryDataset(raw.purchaseOrders, raw.purchaseInvoices, raw.tripItems, paymentsMap, arrivals);
     } catch (err) {
       console.error("Error loading live purchase delivery data:", err);
       return [];

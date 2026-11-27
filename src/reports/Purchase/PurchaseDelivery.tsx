@@ -284,7 +284,7 @@ const PurchaseDelivery: React.FC = () => {
                     payMap = await loadPayments(toDate);
                 }
 
-                const [res, tripsRes] = await Promise.all([
+                const [res, tripsRes, arrivalRes] = await Promise.all([
                     OnlinePurchaseReportItemByOrderIdService.getReportsitemByOrderId({
                         Po_Id: targetPoId,
                         company_id: 1,
@@ -293,10 +293,22 @@ const PurchaseDelivery: React.FC = () => {
                         Fromdate: fromDate,
                         Todate: toDate,
                     }).catch(() => ({ data: { data: [] } })),
+                    PurchaseDeliveryService.getArrivalEntry({
+                        Fromdate: fromDate,
+                        Todate: toDate,
+                    }).catch(() => ({ data: { data: [] } })),
                 ]);
                 const fetchedItems: OnlinePurchaseReportItemByOrderIdItem[] = res.data?.data || (Array.isArray(res.data) ? res.data : []);
                 const rawTrips: PurchaseOrderTripItem[] = (tripsRes.data as any)?.data || (Array.isArray(tripsRes.data) ? tripsRes.data : []);
                 const orderTrips = rawTrips.filter((t) => String(t.OrderId) === String(targetPoId));
+                const arrivalEntries: any[] = (arrivalRes.data as any)?.data || (Array.isArray(arrivalRes.data) ? arrivalRes.data : []);
+                const arrivalMap = new Map<string, any>();
+                arrivalEntries.forEach((arr) => {
+                    const tId = cleanStr(arr.Trip_Id || arr.TripId);
+                    const pId = cleanStr(arr.Product_Id || arr.ProductId);
+                    if (tId && pId) arrivalMap.set(`${tId}_${pId}`, arr);
+                    else if (tId && !arrivalMap.has(tId)) arrivalMap.set(tId, arr);
+                });
 
                 if (fetchedItems.length > 0) {
                     const totalBatchAmount = fetchedItems.reduce((acc, it) => {
@@ -305,17 +317,19 @@ const PurchaseDelivery: React.FC = () => {
                     }, 0);
 
                     const rawLiveRows: PurchaseDeliveryItem[] = fetchedItems.map((item, idx) => {
-                        const rawProd = cleanItemName(item.Product_Name || item.Stock_Item || item.POS_Item_Name || "Item");
+                        const matchedTrip = orderTrips.find((t) =>
+                            (t.Product_Id && item.Product_Id && String(t.Product_Id) === String(item.Product_Id)) ||
+                            (t.Batch_No && item.Batch && String(t.Batch_No).trim() === String(item.Batch).trim()) ||
+                            (t.Product_Name && item.Product_Name && cleanItemName(t.Product_Name).toLowerCase() === cleanItemName(item.Product_Name).toLowerCase())
+                        ) || orderTrips[idx];
+
+                        const matchedArrival = matchedTrip ? (arrivalMap.get(`${matchedTrip.Trip_Id}_${item.Product_Id}`) || arrivalMap.get(cleanStr(matchedTrip.Trip_Id))) : undefined;
+                        const rawProd = cleanItemName(matchedArrival?.Product_Name || item.Product_Name || item.Stock_Item || item.POS_Item_Name || "Item");
+
                         const qty = typeof item.Bill_Qty === "number" ? item.Bill_Qty : parseFloat(String(item.Bill_Qty || 0).replace(/,/g, "")) || 0;
                         const qtyText = qty > 0 ? ` (${formatKgQuantity(qty)})` : "";
                         const batchText = item.Batch ? ` [Batch: ${item.Batch}]` : "";
                         const invNo = String(item.invoice_no || "").trim();
-
-                        const matchedTrip = orderTrips.find((t) =>
-                            (t.Product_Id && item.Product_Id && String(t.Product_Id) === String(item.Product_Id)) ||
-                            (t.Batch_No && item.Batch && String(t.Batch_No).trim() === String(item.Batch).trim()) ||
-                            (t.Product_Name && item.Product_Name && cleanItemName(t.Product_Name).toLowerCase() === rawProd.toLowerCase())
-                        ) || orderTrips[idx];
 
                         const inwardJou = cleanStr(matchedTrip?.TR_INV_ID || (item as any).TR_INV_ID || item.Ref_Po_Inv_No || item.Trans_Id || "-").replace(/[\r\n]+/g, ", ");
 
@@ -600,15 +614,72 @@ const PurchaseDelivery: React.FC = () => {
                 }
             }
 
-            // 2. Date filter (Order Date) - only apply if NOT explicitly viewing a selected order
+            // 2. Date filter (Order / Arrival Date) - only apply if NOT explicitly viewing a selected order
             if (!selectedOrderOnly && (fromDate || toDate)) {
-                if (item.orderDate) {
-                    const itemDate = dayjs(item.orderDate);
-                    if (itemDate.isValid()) {
-                        if (fromDate && itemDate.isBefore(dayjs(fromDate), "day")) return false;
-                        if (toDate && itemDate.isAfter(dayjs(toDate), "day")) return false;
-                    }
+                // Check all relevant dates associated with this delivery record (orderDate, arrivalDate, inward arrivals, invoices)
+                const candidateDates: string[] = [];
+                if (item.orderDate) candidateDates.push(item.orderDate);
+                if ((item as any).arrivalDate) candidateDates.push((item as any).arrivalDate);
+                if ((item as any).Arrival_Date) candidateDates.push((item as any).Arrival_Date);
+                (item.inwardDetails || []).forEach((inw: any) => {
+                    if (inw.arrivalDate) candidateDates.push(inw.arrivalDate);
+                    if (inw.Arrival_Date) candidateDates.push(inw.Arrival_Date);
+                    if (inw.billDate) candidateDates.push(inw.billDate);
+                });
+                (item.invoiceDetails || []).forEach((inv: any) => {
+                    if (inv.entryDate) candidateDates.push(inv.entryDate);
+                    if (inv.billDate) candidateDates.push(inv.billDate);
+                });
+
+                const targetFrom = fromDate ? dayjs(fromDate).startOf("day") : null;
+                const targetTo = toDate ? dayjs(toDate).endOf("day") : null;
+
+                const matchesDate = candidateDates.some((dStr) => {
+                    const itemDate = dayjs(dStr);
+                    if (!itemDate.isValid()) return false;
+                    if (targetFrom && itemDate.isBefore(targetFrom)) return false;
+                    if (targetTo && itemDate.isAfter(targetTo)) return false;
+                    return true;
+                });
+
+                if (!matchesDate && candidateDates.length > 0) {
+                    return false;
                 }
+            }
+
+            // 3. Inward Bill Type Filter: Show items whose Bill_Type contains 'INW' (e.g. 'ON_M.INW - ADJ', 'MATERIAL INWARD', etc.)
+            const isMaterialInward = (() => {
+                const bType = String(item.billType || "").toUpperCase().trim();
+                if (bType && bType.includes("INW")) return true;
+
+                // Also check if any of the inward details billType has INW
+                const hasInwardDetailMatch = (item.inwardDetails || []).some((inw: any) => {
+                    const t = String(inw.billType || (inw as any).Bill_Type || "").toUpperCase().trim();
+                    return t.includes("INW");
+                });
+                if (hasInwardDetailMatch) return true;
+
+                // Also check voucher_type / voucher_name from invoices if any
+                const hasInvoiceMatch = (item.invoiceDetails || []).some((inv: any) => {
+                    const v = String(inv.voucherType || inv.voucher_name || "").toUpperCase().trim();
+                    return v.includes("INW");
+                });
+                if (hasInvoiceMatch) return true;
+
+                // If not explicitly set to other types (like OTHER GODOWN, SALES RETURN), check if real purchase order
+                if (bType && (bType.includes("OTHER GODOWN") || bType.includes("SALES RETURN") || bType.includes("TRANSFER") || bType.includes("OUTWARD"))) {
+                    return false;
+                }
+
+                if (item.purOrderNo && item.purOrderNo !== "-" && /^po[_-]?\d/i.test(item.purOrderNo)) {
+                    return true;
+                }
+
+                return false;
+            })();
+
+            if (!isMaterialInward) {
+                return false;
             }
 
             return true;

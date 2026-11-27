@@ -270,6 +270,8 @@ const SalesReport: React.FC = () => {
     const [activeHeader, setActiveHeader] = useState<string | null>(null);
 
     /* ===== FILTERS ===== */
+    const [fromDate, setFromDate] = useState(today);
+    const [toDate, setToDate] = useState(today);
     const [filters, setFilters] = useState<FiltersMap>({
         Date: { from: today, to: today },
         columnFilters: {},
@@ -444,6 +446,16 @@ const SalesReport: React.FC = () => {
             const abstractCols = absRes.data.data.columns || [];
             const expandedCols = expRes.data.data.columns || [];
 
+            // Reset existing groupings and columns so old template settings are not carried over
+            setAbstractGrouping([]);
+            setExpandedGrouping([]);
+            setAbstractPendingGrouping([]);
+            setExpandedPendingGrouping([]);
+            setAbstractExpandedKeys([]);
+            setExpandedExpandedKeys([]);
+            setAbstractColumns([]);
+            setExpandedColumns([]);
+
             setTemplateConfig({
                 abstract: abstractCols,
                 expanded: expandedCols
@@ -552,7 +564,11 @@ const SalesReport: React.FC = () => {
                 ? templateConfig.expanded
                 : templateConfig.abstract;
 
-        if (!templateCols?.length) return;
+        if (!templateCols?.length) {
+            setAppliedGroupBy([]);
+            setExpandedKeys([]);
+            return;
+        }
 
         const grouping: string[] = [];
 
@@ -564,10 +580,8 @@ const SalesReport: React.FC = () => {
 
         const finalGrouping = grouping.filter(Boolean);
 
-        if (finalGrouping.length) {
-            setAppliedGroupBy(finalGrouping);
-            setExpandedKeys([]);
-        }
+        setAppliedGroupBy(finalGrouping);
+        setExpandedKeys([]);
 
     }, [templateConfig, toggleMode]);
 
@@ -1262,6 +1276,8 @@ const SalesReport: React.FC = () => {
 
                         setToggleMode("Abstract");
 
+                        setFromDate(todayDate);
+                        setToDate(todayDate);
                         setFilters({
                             Date: { from: todayDate, to: todayDate },
                             columnFilters: {}
@@ -1347,19 +1363,19 @@ const SalesReport: React.FC = () => {
                 open={drawerOpen}
                 onToggle={() => setDrawerOpen(p => !p)}
                 onClose={() => setDrawerOpen(false)}
-                fromDate={filters.Date.from}
-                toDate={filters.Date.to}
-                onFromDateChange={
-                    v =>
-                        setFilters(p => ({ ...p, Date: { ...p.Date, from: v } }))
-                }
-                onToDateChange={
-                    v =>
-                        setFilters(p => ({ ...p, Date: { ...p.Date, to: v } }))
-                }
+                fromDate={fromDate}
+                toDate={toDate}
+                onFromDateChange={setFromDate}
+                onToDateChange={setToDate}
                 stockFilter={stockFilter}
                 onStockFilterChange={setStockFilter}
-                onApply={() => setDrawerOpen(false)}
+                onApply={() => {
+                    setFilters(p => ({
+                        ...p,
+                        Date: { from: fromDate, to: toDate }
+                    }));
+                    setDrawerOpen(false);
+                }}
             />
 
             < AppLayout fullWidth >
